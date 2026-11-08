@@ -145,18 +145,6 @@ class Config:
     partial_tp2_pct: float = 25.0
     move_stop_to_breakeven: bool = True
 
-    # Salida si el precio toca la EMA slow después de una entrada por cross EMA.
-    # `..._pct` es la tolerancia en % alrededor de la EMA (0.10 = 0.10%).
-    # `..._after` decide el sentido de la tolerancia: False (default) la aplica
-    # ANTES del toque (LONG dispara en EMA*(1+tol), SHORT en EMA*(1-tol)); True
-    # la aplica DESPUÉS del toque (LONG en EMA*(1-tol), SHORT en EMA*(1+tol)).
-    # `..._exit_pct` es el % de la posición que se cierra al tocar la EMA
-    # (100 = cierre total; < 100 = salida parcial, una sola vez por posición).
-    close_on_ema_slow_touch: bool = False
-    close_on_ema_slow_touch_pct: float = 0.01  # Tolerancia en % (0.10 = 0.10%)
-    close_on_ema_slow_touch_after: bool = False  # False = antes del toque; True = después
-    close_on_ema_slow_touch_exit_pct: float = 25.0  # % de la posición a cerrar en el toque
-
     # --- Entrada parcial + confirmación (scale-in) --------------------------
     # Abre `entry_partial_pct` % de la posición en la señal y añade el resto
     # cuando se cumpla `entry_confirm_mode`. Activado por defecto (50%/50%);
@@ -170,44 +158,8 @@ class Config:
     entry_confirm_close_in_dir: bool = True  # Exige cierre a favor para barras y patrones
     entry_confirm_retest_tol_pct: float = 0.10  # Tolerancia % para pullback_retest
     entry_confirm_max_move_pct: float = 0.3  # Si > 0, no añade el resto si el precio se ha movido > X% desde la entrada parcial
-    # Si la vela donde ocurre la confirmación para añadir el resto cierra en negativo
-    # respecto al precio de entrada parcial, se cierra el 100% de la posición en lugar de hacer scale-in.
-    entry_confirm_close_on_negative: bool = False
-
-    # --- Salida parcial en contra de la entrada de confirmación -------------
-    # Una vez completada la entrada por confirmación (scale-in), si el precio
-    # se mueve `entry_confirm_move_exit_pct` % en contra del precio de esa
-    # entrada de confirmación, se cierra `entry_confirm_move_exit_portion_pct` %
-    # de la posición restante. Se aplica una sola vez por posición. Es una
-    # señal de salida intrabar (stop-like) independiente del stop principal.
-    entry_confirm_move_exit_enabled: bool = False
-    entry_confirm_move_exit_pct: float = 0.6
-    entry_confirm_move_exit_portion_pct: float = 25.0
-    # Alias con nombres más descriptivos solicitados
-    confirm_entry_adverse_exit_enabled: bool = False
-    confirm_entry_adverse_move_pct: float = 0.6
-    confirm_entry_adverse_exit_pct: float = 25.0
-
-
-    # --- Filtro de régimen -------------------------------------------------
-    # Sólo se admiten entradas alineadas con la tendencia del timeframe
-    # superior `trend_timeframe`:
-    #   "off"   -> sin filtro (comportamiento original).
-    #   "cross" -> dirección del cruce EMA rápida/lenta en ese timeframe.
-    #   "slow"  -> cierre por encima (long) o por debajo (short) de la EMA slow.
-    # El sesgo se recalcula con la última vela superior ya cerrada, así que no
-    # hay lookahead.
-    trend_filter: str = "off"
+    # Sesgo de tendencia de timeframe superior, usado sólo después de una pérdida.
     trend_timeframe: str = "1D"
-
-    # --- Filtro anti-chop --------------------------------------------------
-    # Exige que el ADX (Wilder, `adx_dilen`/`adx_adxlen`) de `chop_timeframe`
-    # esté por encima de `chop_adx_min` para abrir posiciones: en mercados
-    # laterales el cruce EMA genera muchas entradas pequeñas en pérdida.
-    # Igual que el filtro de régimen, se alinea con la última vela ya cerrada.
-    chop_filter: bool = False
-    chop_timeframe: str = "1D"
-    chop_adx_min: float = 25.0
 
     # --- Protección mensual ------------------------------------------------
     # Si la equity cae más de `monthly_loss_limit_pct` % por debajo de la
@@ -215,51 +167,12 @@ class Config:
     # monthly_loss_limit_close, se cierra la abierta) hasta el siguiente mes
     # o, si `monthly_loss_limit_days` > 0, durante ese número de días.
     # Red de seguridad para el peor mes. Con los defaults apenas llega a
-    # dispararse (1 vez en 82 meses), por eso arranca holgado en 5.0 y el
-    # trabajo de recortar meses rojos lo hacen `monthly_trend_gate_pct` y
-    # `adaptive_risk_window`; bajarlo (p. ej. 2) mejora el peor mes pero
-    # recorta el acumulado de meses negativos. 0 = desactivado.
+    # dispararse (1 vez en 82 meses), por eso arranca holgado en 5.0. El tamaño
+    # adaptativo también recorta meses rojos; bajar el límite (p. ej. 2) mejora
+    # el peor mes pero recorta el acumulado de meses negativos. 0 = desactivado.
     monthly_loss_limit_pct: float = 5.0
     monthly_loss_limit_close: bool = True
     monthly_loss_limit_days: int = 0
-
-    # --- Gate y escalado de riesgo por mes ---------------------------------
-    # Palancas para recortar los meses en rojo sin apagar la estrategia:
-    # actúan sobre el drawdown *acumulado del mes calendario* (equity mark-to-
-    # market respecto a la equity del cierre del mes anterior), no sobre la
-    # racha de posiciones.
-    #
-    # `monthly_trend_gate_pct`: cuando el mes acumula una pérdida ≥ X %, las
-    # nuevas entradas sólo se abren a favor del sesgo de tendencia de
-    # `trend_timeframe` (mismo requisito que `streak_trend_only`, pero activado
-    # por el mes en rojo). En los meses en verde no toca nada, así que no
-    # recorta los cruces ganadores. 0 = desactivado.
-    monthly_trend_gate_pct: float = 0.0
-    # `monthly_gate_mode`: "trend" exige sólo alineación con la tendencia y
-    # "all" bloquea cualquier entrada mientras el mes esté en rojo.
-    monthly_gate_mode: str = "trend"
-    # `monthly_risk_scaling`: escala `risk_pct` con el drawdown del mes:
-    # dd = 0 -> 1, dd >= `monthly_loss_limit_pct` -> `monthly_risk_scaling_min`
-    # (y ahí ya corta el guard duro). Reduce el tamaño de las posiciones que se
-    # abren en la segunda mitad de un mes rojo, donde salen las pérdidas que
-    # profundizan el mes. Con el límite mensual a 0 se usa un 2 % de referencia.
-    monthly_risk_scaling: bool = False
-    monthly_risk_scaling_min: float = 0.35
-
-    # --- Pausa tras rachas de pérdidas -------------------------------------
-    # Tras `consecutive_loss_pause` posiciones consecutivas en pérdida no se
-    # abren nuevas durante `consecutive_loss_pause_bars` velas (96 velas de
-    # 30min = 48h). Evita re-entrar en pleno whipsaw. Medido: no baja la racha
-    # máxima y cuesta rendimiento, así que arranca desactivada (0).
-    consecutive_loss_pause: int = 0
-    consecutive_loss_pause_bars: int = 96
-
-    # Además de la pausa temporal, se ignoran las primeras
-    # `consecutive_loss_skip_signals` señales de entrada válidas que aparezcan
-    # tras una posición cerrada en pérdida (una victoria las reinicia). Ataca
-    # directamente la racha máxima de pérdidas: en whipsaw la siguiente señal
-    # suele ser otra trampa. 0 = desactivado.
-    consecutive_loss_skip_signals: int = 0
 
     # Tras una posición cerrada en pérdida, la siguiente entrada sólo se abre
     # si va en la dirección del sesgo de tendencia de `trend_timeframe` (vela
@@ -427,11 +340,6 @@ class Config:
                 raise ValueError("Configuración de take-profit parcial 2 inválida.")
             if self.partial_tp2_r <= self.partial_tp_r:
                 raise ValueError("partial_tp2_r debe ser mayor que partial_tp_r.")
-        if self.close_on_ema_slow_touch:
-            if self.close_on_ema_slow_touch_pct < 0:
-                raise ValueError("close_on_ema_slow_touch_pct debe ser >= 0.")
-            if not 0 < self.close_on_ema_slow_touch_exit_pct <= 100:
-                raise ValueError("close_on_ema_slow_touch_exit_pct debe estar en (0, 100].")
         if self.entry_partial_enabled:
             if not (0 < self.entry_partial_pct < 100):
                 raise ValueError("entry_partial_pct debe estar en (0, 100).")
@@ -443,39 +351,14 @@ class Config:
                 raise ValueError("entry_confirm_retest_tol_pct no puede ser negativo.")
             if self.entry_confirm_max_move_pct < 0:
                 raise ValueError("entry_confirm_max_move_pct no puede ser negativo.")
-        if self.entry_confirm_move_exit_enabled:
-            if self.entry_confirm_move_exit_pct <= 0:
-                raise ValueError("entry_confirm_move_exit_pct debe ser positivo.")
-            if not 0 < self.entry_confirm_move_exit_portion_pct <= 100:
-                raise ValueError("entry_confirm_move_exit_portion_pct debe estar en (0, 100].")
         if not (self.allow_long or self.allow_short):
             raise ValueError("Debe habilitarse LONG, SHORT o ambos.")
-        if self.trend_filter not in ("off", "cross", "slow"):
-            raise ValueError("trend_filter debe ser 'off', 'cross' o 'slow'.")
-        if (self.trend_filter != "off" or self.streak_trend_only) and pd.Timedelta(self.trend_timeframe) <= pd.Timedelta(0):
+        if self.streak_trend_only and pd.Timedelta(self.trend_timeframe) <= pd.Timedelta(0):
             raise ValueError("trend_timeframe debe ser positivo.")
-        if self.chop_filter:
-            if pd.Timedelta(self.chop_timeframe) <= pd.Timedelta(0):
-                raise ValueError("chop_timeframe debe ser positivo.")
-            if self.chop_adx_min < 0:
-                raise ValueError("chop_adx_min no puede ser negativo.")
         if self.monthly_loss_limit_pct < 0:
             raise ValueError("monthly_loss_limit_pct no puede ser negativo.")
         if self.monthly_loss_limit_days < 0:
             raise ValueError("monthly_loss_limit_days no puede ser negativo.")
-        if self.monthly_trend_gate_pct < 0:
-            raise ValueError("monthly_trend_gate_pct no puede ser negativo.")
-        if self.monthly_trend_gate_pct > 0 and self.trend_filter == "off" and not self.streak_trend_only:
-            raise ValueError("monthly_trend_gate_pct requiere trend_filter != 'off' o streak_trend_only "
-                             "(sin sesgo de tendencia no hay nada que exigir a la entrada).")
-        if self.monthly_gate_mode not in ("trend", "all"):
-            raise ValueError("monthly_gate_mode debe ser 'trend' o 'all'.")
-        if not 0.0 <= self.monthly_risk_scaling_min <= 1.0:
-            raise ValueError("monthly_risk_scaling_min debe estar en [0, 1].")
-        if self.consecutive_loss_pause < 0 or self.consecutive_loss_pause_bars < 1:
-            raise ValueError("consecutive_loss_pause debe ser >= 0 y ..._bars >= 1.")
-        if self.consecutive_loss_skip_signals < 0:
-            raise ValueError("consecutive_loss_skip_signals no puede ser negativo.")
         if self.adaptive_risk_window < 0:
             raise ValueError("adaptive_risk_window no puede ser negativo.")
         if self.adaptive_risk_window and not (0 < self.adaptive_risk_min <= self.adaptive_risk_max):

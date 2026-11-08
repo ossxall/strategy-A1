@@ -249,11 +249,6 @@ _CONFIG_ENV = {
     "partial_tp2_r": ("STRATEGY_PARTIAL_TP2_R", env_float),
     "partial_tp2_pct": ("STRATEGY_PARTIAL_TP2_PCT", env_float),
     "move_stop_to_breakeven": ("STRATEGY_MOVE_STOP_TO_BREAKEVEN", env_bool),
-    # Cierre por toque a la EMA slow (misma lógica que el backtest).
-    "close_on_ema_slow_touch": ("STRATEGY_CLOSE_ON_EMA_SLOW_TOUCH", env_bool),
-    "close_on_ema_slow_touch_pct": ("STRATEGY_CLOSE_ON_EMA_SLOW_TOUCH_PCT", env_float),
-    "close_on_ema_slow_touch_after": ("STRATEGY_CLOSE_ON_EMA_SLOW_TOUCH_AFTER", env_bool),
-    "close_on_ema_slow_touch_exit_pct": ("STRATEGY_CLOSE_ON_EMA_SLOW_TOUCH_EXIT_PCT", env_float),
     # Salidas: las usa `prepare_exits`.
     "adx_exit_enabled": ("STRATEGY_ADX_EXIT", env_bool),
     "adx_timeframe": ("STRATEGY_ADX_TIMEFRAME", env_str),
@@ -298,9 +293,6 @@ _CONFIG_ENV = {
     "entry_confirm_close_in_dir": ("STRATEGY_ENTRY_CONFIRM_CLOSE_IN_DIR", env_bool),
     "entry_confirm_retest_tol_pct": ("STRATEGY_ENTRY_CONFIRM_RETEST_TOL_PCT", env_float),
     "entry_confirm_max_move_pct": ("STRATEGY_ENTRY_CONFIRM_MAX_MOVE_PCT", env_float),
-    "entry_confirm_move_exit_enabled": ("STRATEGY_ENTRY_CONFIRM_MOVE_EXIT", env_bool),
-    "entry_confirm_move_exit_pct": ("STRATEGY_ENTRY_CONFIRM_MOVE_EXIT_PCT", env_float),
-    "entry_confirm_move_exit_portion_pct": ("STRATEGY_ENTRY_CONFIRM_MOVE_EXIT_PORTION_PCT", env_float),
 }
 
 

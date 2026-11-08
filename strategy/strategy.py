@@ -7,18 +7,6 @@ Gestión de salida por defecto: take-profit parcial a 1R (50%) y stop a
 breakeven del resto (`partial_tp_enabled`). Sube el win rate y recorta la
 racha de pérdidas en whipsaw; puede desactivarse con `partial_tp_enabled=False`.
 
-Además, tras una entrada por cross EMA, un toque a la EMA slow cierra una parte
-configurable de la posición (`close_on_ema_slow_touch_exit_pct`, 100 = cierre
-total) una sola vez por posición. La tolerancia `close_on_ema_slow_touch_pct`
-desplaza el nivel de disparo; con `close_on_ema_slow_touch_after=False` (default)
-se aplica antes del toque y con `True` después.
-
-Cuando la entrada se completa por confirmación (scale-in), una salida parcial
-adicional cierra `entry_confirm_move_exit_portion_pct` % de la posición si el
-precio se mueve `entry_confirm_move_exit_pct` % en contra del precio de la
-entrada de confirmación (`entry_confirm_move_exit_enabled`; 50 % a 0,3 % por
-defecto, una sola vez por posición).
-
 La salida por debilitamiento de las EMAs (`ema_weakening_exit_enabled`) cierra
 `ema_weakening_exit_pct` % de la posición cuando el cruce de las EMAs del
 timeframe `ema_weakening_timeframe` se estrecha por debajo de
@@ -41,9 +29,7 @@ salidas por ruido (`candle_pattern_exit_*`).
 
 Archivo único con API reutilizable para backtesting y bots.
 
-Protecciones de riesgo (ver `Config`; el filtro de régimen y el escalado de
-riesgo por mes arrancan desactivados, la de racha, la mensual y el tamaño
-adaptativo vienen activos):
+Protecciones de riesgo (ver `Config`):
 
 * `streak_trend_only` (default True): tras una posición cerrada en pérdida,
   la siguiente entrada sólo se abre si la señal coincide con el sesgo de
@@ -52,22 +38,6 @@ adaptativo vienen activos):
 * `monthly_loss_limit_pct` (default 5.0): si la equity cae más de X% por
   debajo de la equity al inicio del mes calendario se cierra la posición (opcional)
   y no se abren nuevas hasta el siguiente mes (o `monthly_loss_limit_days` días).
-* `monthly_trend_gate_pct` (default 0 = off) + `monthly_gate_mode` ("trend" |
-  "all"): con el mes acumulando ≥ X% de pérdida, las nuevas entradas sólo se
-  abren a favor del sesgo de tendencia (o se bloquean todas, en modo "all").
-  Sobre el drawdown del mes, no sobre la racha de posiciones: en meses en
-  verde no toca nada, así que no recorta los cruces ganadores.
-* `monthly_risk_scaling` (default off) + `monthly_risk_scaling_min` (0.35):
-  el tamaño de cada nueva posición baja en proporción al drawdown del mes
-  (dd 0 → 1, dd `monthly_loss_limit_pct` → mínimo), para que las entradas de
-  la segunda mitad de un mes rojo no profundicen el mes.
-* `consecutive_loss_pause` (default 0) + `consecutive_loss_pause_bars` (96):
-  espera de 48h (en 30min) antes de volver a entrar tras cada posición cerrada
-  en pérdida. Con `streak_trend_only` activo no baja la racha y cuesta
-  rendimiento, así que arranca apagada.
-* `trend_filter` ("off" | "cross" | "slow") y `chop_filter`: filtro de régimen
-  permanente; sólo se opera en la dirección de la tendencia de `trend_timeframe`
-  / con el ADX de `chop_timeframe` por encima del mínimo.
 * `adaptive_risk_window` (default 20) + `adaptive_risk_k`: escala `risk_pct`
   con el win rate de las últimas n posiciones: penaliza las rachas frías
   (donde se concentran los meses rojos) y reutiliza el tamaño en las cálidas.
@@ -79,14 +49,10 @@ uso previo (`streak_trend_only`, `monthly_loss_limit_pct=5`, `adaptive_risk_wind
 |--------------------------------------------|---------------|----------|------------------|---------|--------|------|
 | sin tamaño adaptativo                      | 25 (30,5 %)   | -3,15 %  | -28,6 %          | 477,9 % | -8,70% | 2,43 |
 | `adaptive_risk_window=20` (**default**)    | 25 (30,5 %)   | -2,49 %  | -26,1 %          | 439,8 % | -7,96% | 2,49 |
-| `+ monthly_trend_gate_pct=0.3`             | 25 (30,5 %)   | -2,17 %  | -25,5 %          | 495,6 % | -8,23% | 2,52 |
-| `+ monthly_trend_gate_pct=0.4`             | 25 (30,5 %)   | -2,45 %  | -24,0 %          | 447,2 % | -7,46% | 2,58 |
 
 El mismo recorte se repite en train (2020-2023) y test (2024-2026) y con costes
 realistas (comisión 4 bps + slippage 2 bps), donde el tamaño adaptativo también
-mejora el drawdown (-10,1 % -> -8,2 %). El `monthly_trend_gate_pct` es más
-dependiente del régimen: se probó con costes y con `trend_filter="cross"`, donde
-no aporta, por eso arranca desactivado.
+mejora el drawdown (-10,1 % -> -8,2 %).
 
 Uso:
     python -m strategy.strategy dataset/binance/BTCUSDT/merged/BTCUSDT-1m.parquet --output-dir report/backtest_out
@@ -246,42 +212,21 @@ class EMACrossStrategy:
 
         Calcula el sesgo en ``cfg.trend_timeframe`` y lo alinea a cada barra del
         timeframe de la estrategia usando **sólo la vela superior ya cerrada**
-        (ver :func:`align_closed_values`), de modo que no hay lookahead. Con
-        ``cfg.trend_filter == "off"`` devuelve todo ceros (sin filtro).
+        (ver :func:`align_closed_values`), de modo que no hay lookahead. Se usa
+        exclusivamente para exigir alineación tras una posición perdedora.
         """
         cfg = self.cfg
-        if (cfg.trend_filter == "off" and not cfg.streak_trend_only) or not len(bars):
+        if not cfg.streak_trend_only or not len(bars):
             return np.zeros(len(bars), int)
         upper = self._upper_bars(bars, cfg.trend_timeframe)
         if upper is None:
             return np.zeros(len(bars), int)
         bars_upper, upper_tf = upper
-        close = bars_upper.close.to_numpy(float)
-        if cfg.trend_filter == "slow":
-            level = ema(bars_upper.close, cfg.ema_slow).to_numpy(float)
-            direction = np.where(close > level, 1.0, -1.0)
-        else:
-            fast = ema(bars_upper.close, cfg.ema_fast).to_numpy(float)
-            slow = ema(bars_upper.close, cfg.ema_slow).to_numpy(float)
-            direction = np.sign(fast - slow)
+        fast = ema(bars_upper.close, cfg.ema_fast).to_numpy(float)
+        slow = ema(bars_upper.close, cfg.ema_slow).to_numpy(float)
+        direction = np.sign(fast - slow)
         aligned = align_closed_values(bars_upper.index, direction, bars.index, upper_tf, cfg.timeframe)
         return np.where(np.isfinite(aligned), np.sign(aligned), 0.0).astype(int)
-
-    def chop_ok(self, bars: pd.DataFrame) -> np.ndarray:
-        """``True`` donde el ADX de ``cfg.chop_timeframe`` (ya cerrado) supera el mínimo."""
-        cfg = self.cfg
-        if not cfg.chop_filter or not len(bars):
-            return np.ones(len(bars), bool)
-        upper = self._upper_bars(bars, cfg.chop_timeframe)
-        if upper is None:
-            return np.zeros(len(bars), bool)
-        bars_upper, upper_tf = upper
-        needed = cfg.adx_dilen + cfg.adx_adxlen + 2
-        if len(bars_upper) < needed:
-            return np.zeros(len(bars), bool)
-        values = adx(bars_upper, cfg.adx_dilen, cfg.adx_adxlen)["adx"].to_numpy(float)
-        aligned = align_closed_values(bars_upper.index, values, bars.index, upper_tf, cfg.timeframe)
-        return np.nan_to_num(aligned, nan=-np.inf) >= cfg.chop_adx_min
 
     def _candle_confirmations(
         self, bars: pd.DataFrame, raw: Optional[pd.DataFrame] = None
@@ -477,12 +422,7 @@ class EMACrossStrategy:
         if cfg.entry_adx_enabled:
             allowed = np.nan_to_num(entry_adx, nan=0.0) >= cfg.entry_adx_min
             up, down = up & allowed, down & allowed
-        bias = self.trend_bias(bars) if (cfg.trend_filter != "off" or cfg.streak_trend_only) else None
-        if bias is not None and cfg.trend_filter != "off":
-            up, down = up & (bias > 0), down & (bias < 0)
-        chop = self.chop_ok(bars) if cfg.chop_filter else None
-        if chop is not None:
-            up, down = up & chop, down & chop
+        bias = self.trend_bias(bars) if cfg.streak_trend_only else None
         up &= valid
         down &= valid
         (long_candle_confirmation, short_candle_confirmation,
@@ -494,7 +434,6 @@ class EMACrossStrategy:
             "short_candle_confirmation": short_candle_confirmation,
             "neutral_candle_pattern": neutral_candle_pattern,
             "trend_bias": bias if bias is not None else np.zeros(len(bars), int),
-            "chop_ok": chop if chop is not None else np.ones(len(bars), bool),
             "target": np.select([up, down], [1, -1], default=0),
         }
         if cfg.entry_dmi_risk_scaling_enabled and entry_dmi is not None:
@@ -528,16 +467,6 @@ class EMACrossStrategy:
         if not self.cfg.candle_pattern_exit_enabled:
             return None, None, None, None, None
         return self._candle_exit_patterns(bars)
-
-    def prepare_confirm_exit(self, raw: pd.DataFrame, bars: pd.DataFrame) -> Optional[np.ndarray]:
-        cfg = self.cfg
-        enabled = getattr(cfg, "entry_confirm_move_exit_enabled", None)
-        if enabled is None:
-            enabled = getattr(cfg, "confirm_entry_adverse_exit_enabled", True)
-        if not enabled or bars.empty:
-            return np.zeros(len(bars), bool)
-        return np.zeros(len(bars), bool)
-
 
 # ---------------------------------------------------------------------------
 # Motor de ejecución
@@ -625,22 +554,12 @@ class Backtester:
         self.add_skipped: list[dict] = []
         self.trade_id = self.position_id = 0
         self.eq_time, self.eq_cash, self.eq_value, self.eq_side, self.eq_qty = [], [], [], [], []
-        # Protección de riesgo: estado del límite mensual, de la pausa por
-        # racha de pérdidas y del pnl acumulado de la posición abierta.
+        # Estado del límite mensual y pnl acumulado de la posición abierta.
         self.halt_until: Optional[pd.Timestamp] = None
-        self.pause_until = -1
         self._bar_index = -1
-        self.consec_losses = 0
-        self.skip_signals_left = 0
         self.streak_in_loss = False
         self._position_pnl = 0.0
         self._recent_wins: list[bool] = []
-        # Estado mensual compartido por `run`, el gate de entradas y el
-        # escalado de riesgo: equity de referencia del mes y del cierre
-        # anterior (sin lookahead: se usa en la apertura de la vela siguiente).
-        self.month_start_equity = config.initial_capital
-        self._prev_close_equity = config.initial_capital
-        self.month_dd_pct = 0.0
 
     def _price(self, price: float, side: int) -> float:
         slip = self.cfg.slippage_bps / 10_000
@@ -666,7 +585,7 @@ class Backtester:
         risk_unit = self._risk_per_unit(side, price, pct_sl) if pct_sl > 0 else 0.0
         by_risk = (
             self.cash * self.cfg.risk_pct * self._risk_multiplier()
-            * self._monthly_risk_scale() * self._entry_dmi_risk_multiplier(side)
+            * self._entry_dmi_risk_multiplier(side)
             * self._entry_mfi_risk_multiplier(side) * self._entry_er_risk_multiplier()
             / risk_unit
             if risk_unit > 0 else np.inf
@@ -708,14 +627,10 @@ class Backtester:
             breakeven=False,
             partial_done=False,
             partial2_done=False,
-            touch_done=False,
             target_quantity=target_q,
             partial_entry_done=pe_done,
             entry_partial_pct=ep_pct,
             entry_bar_index=self._bar_index,
-            last_add_price=price if qty_init >= qty_total else 0.0,
-            add_count=0,
-            confirm_exit_done=False,
         )
         self.opened.append({
             "position_id": self.position_id, "time": ts, "price": price, "side": side,
@@ -819,185 +734,22 @@ class Backtester:
         factor = cfg.entry_er_risk_base + cfg.entry_er_risk_slope * value
         return float(np.clip(factor, cfg.entry_er_risk_min, cfg.entry_er_risk_max))
 
-    def _monthly_risk_scale(self) -> float:
-        """Escala de tamaño según el drawdown acumulado del mes calendario.
-
-        Con ``monthly_risk_scaling`` desactivado devuelve 1. Si no, devuelve
-        ``1 - clamp(dd/budget, 0, 1) * (1 - monthly_risk_scaling_min)``: al
-        abrir el mes (dd = 0) se arriesga el tamaño habitual y conforme la
-        equity se acerca al límite ``monthly_loss_limit_pct`` el tamaño baja
-        hasta ``monthly_risk_scaling_min``. Corta las pérdidas que profundizan
-        un mes ya en rojo sin cerrar posiciones ni bloquear entradas.
-
-        Usa la equity del **cierre de la vela anterior** (``_prev_close_equity``),
-        la última conocida al ejecutar la apertura de la vela actual, así que
-        no hay lookahead.
-        """
-        cfg = self.cfg
-        if not cfg.monthly_risk_scaling or self.month_start_equity <= 0:
-            return 1.0
-        budget = cfg.monthly_loss_limit_pct / 100 if cfg.monthly_loss_limit_pct > 0 else 0.02
-        dd = max(0.0, 1.0 - self._prev_close_equity / self.month_start_equity)
-        used = min(dd / budget, 1.0)
-        floor = min(max(cfg.monthly_risk_scaling_min, 0.0), 1.0)
-        return float(1.0 - used * (1.0 - floor))
-
     def _close_streak(self) -> None:
-        """Actualiza la racha de pérdidas y arma la pausa de entrada si procede.
-
-        Una posición se considera en pérdida si el pnl neto acumulado de todos
-        sus tramos es negativo. Al alcanzar ``consecutive_loss_pause`` posiciones
-        seguidas en pérdida se bloquean las entradas durante
-        ``consecutive_loss_pause_bars`` velas.
-        """
+        """Actualiza el historial adaptativo de resultados y el filtro de racha."""
         cfg = self.cfg
         won = self._position_pnl >= 0
         if cfg.adaptive_risk_window > 0:
             self._recent_wins.append(won)
             del self._recent_wins[:-cfg.adaptive_risk_window]
-        if not won:
-            self.consec_losses += 1
-            self.skip_signals_left = max(self.skip_signals_left, cfg.consecutive_loss_skip_signals)
-            self.streak_in_loss = True
-        else:
-            self.consec_losses = 0
-            self.skip_signals_left = 0
-            self.streak_in_loss = False
+        self.streak_in_loss = not won
         self._position_pnl = 0.0
-        if cfg.consecutive_loss_pause > 0 and self.consec_losses >= cfg.consecutive_loss_pause:
-            self.pause_until = self._bar_index + cfg.consecutive_loss_pause_bars
-            self.consec_losses = 0
-            if self.verbose:
-                print(f"[PAUSA] {cfg.consecutive_loss_pause} pérdidas seguidas: "
-                      f"sin entradas {cfg.consecutive_loss_pause_bars} velas", flush=True)
 
     def entries_blocked(self) -> bool:
         """``True`` si está prohibido abrir posiciones nuevas en esta vela."""
-        if self.pause_until is not None and self._bar_index <= self.pause_until:
-            return True
         return self.halt_until is not None and self.times[self._bar_index] < self.halt_until
 
     def _risk_unit(self, pos: Position) -> float:
         return pos.risk_amount / pos.initial_quantity if pos.initial_quantity else 0.0
-
-    def _ema_slow_touch_level(self, i: int) -> Optional[float]:
-        """Nivel de cierre por toque a la EMA slow en la vela ``i``.
-
-        Devuelve el precio de disparo con la tolerancia ya aplicada, o ``None``
-        si el cierre por toque no está activo. Con ``close_on_ema_slow_touch_after``
-        en False (default) la tolerancia se aplica ANTES del toque: para LONG el
-        disparo es ``EMA_slow * (1 + tol)`` y para SHORT ``EMA_slow * (1 - tol)``.
-        Con el flag en True se aplica DESPUÉS del toque: LONG ``EMA_slow * (1 - tol)``
-        y SHORT ``EMA_slow * (1 + tol)``. Con tolerancia 0 es la propia EMA slow.
-        """
-        cfg, pos = self.cfg, self.position
-        if pos is None or not cfg.close_on_ema_slow_touch or self.signals is None:
-            return None
-        if "ema_slow" not in self.signals.columns or i >= len(self.signals):
-            return None
-        ema_slow = float(self.signals["ema_slow"].iloc[i])
-        if not np.isfinite(ema_slow) or ema_slow <= 0:
-            return None
-        tol = max(cfg.close_on_ema_slow_touch_pct, 0.0) / 100.0
-        offset = -tol if cfg.close_on_ema_slow_touch_after else tol
-        return ema_slow * (1 + offset) if pos.side == 1 else ema_slow * (1 - offset)
-
-    def _ema_slow_touch(self, i: int) -> bool:
-        """Salida (total o parcial) si el precio toca la EMA slow tras el cross.
-
-        El parámetro `close_on_ema_slow_touch_pct` define la tolerancia en % y
-        `close_on_ema_slow_touch_after` su sentido. Por defecto (False) la
-        tolerancia se aplica ANTES del toque: para LONG se dispara cuando el
-        mínimo llega a EMA_slow * (1 + tol), y para SHORT cuando el máximo llega
-        a EMA_slow * (1 - tol). Con el flag en True se aplica DESPUÉS del toque:
-        LONG cuando el mínimo llega a EMA_slow * (1 - tol) y SHORT cuando el
-        máximo llega a EMA_slow * (1 + tol). Con tolerancia 0 el disparo ocurre
-        justo al tocar la EMA slow.
-
-        Se cierra `close_on_ema_slow_touch_exit_pct` de la posición: con 100 es
-        un cierre total; con un valor menor es una **salida parcial** que sólo
-        se aplica una vez por posición (`pos.touch_done`); el resto sigue
-        gestionándose con las reglas habituales (stop, TP, cross, ADX, …).
-        """
-        cfg, pos = self.cfg, self.position
-        trigger = self._ema_slow_touch_level(i)
-        if pos is None or trigger is None or pos.touch_done:
-            return False
-        if pos.side == 1:
-            if self.l[i] > trigger:
-                return False
-            fill = min(self.o[i], trigger)
-        else:
-            if self.h[i] < trigger:
-                return False
-            fill = max(self.o[i], trigger)
-        prefix = "EMA_SLOW_TOUCH_AFTER" if cfg.close_on_ema_slow_touch_after else "EMA_SLOW_TOUCH"
-        self.close_position(cfg.close_on_ema_slow_touch_exit_pct, fill, self.times[i],
-                            f"{prefix}_{cfg.close_on_ema_slow_touch_pct:g}%")
-        pos = self.position
-        if pos is not None:
-            pos.touch_done = True
-        return True
-
-    def _confirm_move_exit_level(self) -> Optional[float]:
-        """Nivel de salida parcial si el precio va en contra de la confirmación.
-
-        Devuelve el precio de disparo calculado desde el precio de la entrada
-        de confirmación (``pos.last_add_price``), o ``None`` si la regla no
-        está activa, la posición todavía no se confirmó, ya se aplicó una vez
-        o la entrada fue completa (sin add de confirmación).
-        """
-        cfg, pos = self.cfg, self.position
-        if pos is None:
-            return None
-        enabled = getattr(cfg, "entry_confirm_move_exit_enabled", None)
-        if enabled is None:
-            enabled = getattr(cfg, "confirm_entry_adverse_exit_enabled", True)
-        if not enabled or getattr(pos, "confirm_exit_done", False):
-            return None
-        if pos.add_count <= 0 or pos.last_add_price <= 0:
-            return None
-        move_pct = getattr(cfg, "entry_confirm_move_exit_pct", None)
-        if move_pct is None:
-            move_pct = getattr(cfg, "confirm_entry_adverse_move_pct", 0.5)
-        pct = max(float(move_pct), 0.0) / 100.0
-        return pos.last_add_price * (1 - pct) if pos.side == 1 else pos.last_add_price * (1 + pct)
-
-
-    def _confirm_move_exit(self, i: int) -> bool:
-        """Salida parcial cuando el precio se mueve en contra de la confirmación.
-
-        Tras completarse la entrada por confirmación, si el precio recorre
-        ``entry_confirm_move_exit_pct`` % en contra de ``pos.last_add_price``,
-        se cierra ``entry_confirm_move_exit_portion_pct`` % de la posición
-        restante. Sólo se aplica una vez por posición (``pos.confirm_exit_done``)
-        y se resuelve intrabar, como el stop.
-        """
-        cfg, pos = self.cfg, self.position
-        trigger = self._confirm_move_exit_level()
-        if pos is None or trigger is None:
-            return False
-        if pos.side == 1:
-            if self.l[i] > trigger:
-                return False
-            fill = min(self.o[i], trigger)
-        else:
-            if self.h[i] < trigger:
-                return False
-            fill = max(self.o[i], trigger)
-        exit_pct = getattr(cfg, "entry_confirm_move_exit_portion_pct", None)
-        if exit_pct is None:
-            exit_pct = getattr(cfg, "confirm_entry_adverse_exit_pct", 50.0)
-        move_pct = getattr(cfg, "entry_confirm_move_exit_pct", None)
-        if move_pct is None:
-            move_pct = getattr(cfg, "confirm_entry_adverse_move_pct", 0.5)
-        self.close_position(float(exit_pct), fill, self.times[i],
-                            f"CONFIRM_MOVE_AGAINST_{float(move_pct):g}%")
-        pos = self.position
-        if pos is not None:
-            pos.confirm_exit_done = True
-        return True
-
 
     def _rsi_divergence_reason(self, i: int) -> Optional[str]:
         """Motivo de salida total si hay divergencia RSI en contra de la posición.
@@ -1098,26 +850,16 @@ class Backtester:
             return None
         return "EMA55_REPEATED_TOUCH_WEAKNESS_SHORT"
 
-    def _manage(self, i: int) -> bool:
-        """Take-profit parcial y salidas parciales por precio.
-
-        Gestiona, en orden: toque a la EMA slow, movimiento adverso desde la
-        entrada de confirmación y take-profits parciales. Devuelve ``True`` si
-        una salida parcial cerró (parte de) la posición, para que `run` pueda
-        resolver el resto del stop en la misma vela.
-        """
+    def _manage(self, i: int) -> None:
+        """Gestiona take-profits parciales y el stop a breakeven."""
         cfg, pos = self.cfg, self.position
         if pos is None:
-            return False
-        if self._ema_slow_touch(i):
-            return True
-        if self._confirm_move_exit(i):
-            return True
+            return
         if not cfg.partial_tp_enabled:
-            return False
+            return
         risk_unit = self._risk_unit(pos)
         if risk_unit <= 0:
-            return False
+            return
         pos_after = pos
         # TP2 primero si no hecho y trigger alcanzado (mayor distancia)
         if cfg.partial_tp2_r > 0 and not pos.partial2_done:
@@ -1129,7 +871,7 @@ class Backtester:
                 pos_after = self.position
                 if pos_after is not None:
                     pos_after.partial2_done = True
-                return False
+                return
         # TP1
         if not pos.partial_done:
             trigger = pos.entry_price + pos.side * cfg.partial_tp_r * risk_unit
@@ -1142,27 +884,12 @@ class Backtester:
                     pos_after.partial_done = True
                     if cfg.move_stop_to_breakeven:
                         pos_after.breakeven = True
-        return False
-
-    def _stop(self, i: int, touch_level: Optional[float] = None,
-              confirm_level: Optional[float] = None) -> bool:
+    def _stop(self, i: int) -> bool:
         pos = self.position
         if pos is None or pos.stop_pct <= 0: return False
         stop = pos.entry_price if pos.breakeven else self._stop_price(pos.side, pos.entry_price, pos.stop_pct)
         hit = self.l[i] <= stop if pos.side == 1 else self.h[i] >= stop
         if not hit: return False
-        # Si en la misma vela también se toca la EMA slow o el nivel de salida
-        # por confirmación y éste se alcanza antes que el stop (está más cerca
-        # de la entrada), gana la salida parcial: el stop se pospone y
-        # `_manage` cerrará por EMA_SLOW_TOUCH o CONFIRM_MOVE_AGAINST. En salida
-        # parcial el resto se cierra al stop en la misma vela (ver `run`).
-        for level, done in ((touch_level, pos.touch_done), (confirm_level, pos.confirm_exit_done)):
-            if level is None or done:
-                continue
-            level_hit = self.l[i] <= level if pos.side == 1 else self.h[i] >= level
-            level_first = level >= stop if pos.side == 1 else level <= stop
-            if level_hit and level_first:
-                return False
         fill = min(self.o[i], stop) if pos.side == 1 else max(self.o[i], stop)
         reason = "BREAKEVEN" if pos.breakeven else f"STOP_LOSS_{pos.stop_pct*100:.2f}%"
         self.close_position(100, fill, self.times[i], reason)
@@ -1200,8 +927,6 @@ class Backtester:
             pos.entry_price = (pos.entry_price * pos.quantity + price * qty_add) / total_qty_new
         pos.quantity = total_qty_new
         pos.entry_fee += fee_add
-        pos.add_count += 1
-        pos.last_add_price = price
         self.adds.append({
             "position_id": pos.position_id, "time": ts, "price": price,
             "quantity": qty_add, "target_quantity": pos.target_quantity, "side": pos.side,
@@ -1354,14 +1079,12 @@ class Backtester:
         month_start_equity = cfg.initial_capital
         for i in range(n):
             self._bar_index = i
-            # Reinicio del límite mensual en cada mes calendario; la referencia
-            # es la equity mark-to-market del cierre de la vela anterior.
+            # Reinicio del límite mensual en cada mes calendario.
             key = (self.times[i].year, self.times[i].month)
             if key != month_key:
                 month_key = key
                 self.halt_until = None
                 month_start_equity = self._equity_value(self.c[i - 1]) if i else cfg.initial_capital
-                self.month_start_equity = month_start_equity
             # 1) Ejecutar add pendiente (decidido al cierre de vela anterior)
             if self.pending_add is not None:
                 exec_i, pct_rem = self.pending_add
@@ -1380,33 +1103,18 @@ class Backtester:
                 self.pending_exit = None
 
             # 3) Gestión de stops y salidas parciales
-            confirm_level = self._confirm_move_exit_level()
-            stop_hit = self._stop(i, self._ema_slow_touch_level(i), confirm_level)
+            stop_hit = self._stop(i)
             if not stop_hit:
-                # Tras una salida parcial por toque a la EMA slow, si la vela
-                # también recorrió hasta el stop, se cierra el resto al stop.
-                if self._manage(i) and self.position is not None:
-                    stop_hit = self._stop(i)
+                self._manage(i)
 
             # 4) Añadir entrada parcial pendiente (scale-in) — decidido al cierre de i
             if not stop_hit and self.position is not None and self.cfg.entry_partial_enabled:
                 if self._should_add_partial(i):
-                    pos = self.position
-                    # Si la vela donde ocurre la confirmación cierra en negativo respecto a la entrada parcial, cerrar todo
-                    if getattr(self.cfg, "entry_confirm_close_on_negative", True):
-                        if (pos.side == 1 and self.c[i] < pos.entry_price - 1e-12) or (pos.side == -1 and self.c[i] > pos.entry_price + 1e-12):
-                            self.pending_exit = ("CONFIRM_CLOSE_NEG", 100.0)
-                            continue
                     # Ejecutar resto completo en apertura de i+1
                     self.pending_add = (i + 1, 100.0)
 
-            # Equity mark-to-market del cierre de la vela y pérdida acumulada
-            # del mes: base del guard duro, del gate de entradas y de la
-            # referencia de riesgo del mes siguiente.
+            # Equity mark-to-market para el límite de pérdida mensual.
             equity_now = self._equity_value(self.c[i])
-            if month_start_equity > 0:
-                self.month_dd_pct = max(0.0, (1.0 - equity_now / month_start_equity) * 100.0)
-            self._prev_close_equity = equity_now
 
             # Límite de pérdida mensual: si la equity cae por debajo del umbral
             # respecto al inicio del mes, se protege el mes completo (se cierra
@@ -1433,26 +1141,7 @@ class Backtester:
                 current = self.position.side if self.position else 0
                 if target and target != current and not self.entries_blocked():
                     bias_val = int(self.signals["trend_bias"].iloc[i])
-                    # Gate mensual: con el mes en pérdida ≥ umbral se frenan las
-                    # entradas (todas o sólo las contra tendencia) para que un
-                    # mes rojo no se profundice con nuevas trampas de whipsaw.
-                    month_red = (cfg.monthly_trend_gate_pct > 0
-                                 and self.month_dd_pct >= cfg.monthly_trend_gate_pct)
-                    blocked_month = month_red and (cfg.monthly_gate_mode == "all"
-                                                   or bias_val != target)
-                    if self.skip_signals_left > 0:
-                        # Tras una pérdida se ignoran las primeras señales: en
-                        # whipsaw la siguiente señal suele ser otra trampa.
-                        self.skip_signals_left -= 1
-                        if self.verbose:
-                            print(f"[SKIP] {self.times[i]} señal ignorada "
-                                  f"({self.skip_signals_left} restantes)", flush=True)
-                    elif blocked_month:
-                        if self.verbose:
-                            print(f"[GATE] {self.times[i]} mes {self.month_dd_pct:.2f}% en rojo: "
-                                  f"señal {target:+d} bloqueada (modo {cfg.monthly_gate_mode})",
-                                  flush=True)
-                    elif cfg.streak_trend_only and self.streak_in_loss and bias_val != target:
+                    if cfg.streak_trend_only and self.streak_in_loss and bias_val != target:
                         # Tras una pérdida sólo se entra con la tendencia mayor.
                         if self.verbose:
                             print(f"[RACHA] {self.times[i]} señal {target:+d} "
@@ -1639,40 +1328,10 @@ def parse_args():
                    help="Tolerancia %% para pullback_retest (default 0.10%%).")
     p.add_argument("--entry-confirm-max-move-pct", type=float, default=d.entry_confirm_max_move_pct,
                    help="Bloquea añadir el resto si el precio se ha movido en contra más de X%% desde la entrada parcial (0 = desactivado).")
-    p.add_argument("--entry-confirm-move-exit", action=argparse.BooleanOptionalAction,
-                   default=getattr(d, "entry_confirm_move_exit_enabled", getattr(d, "confirm_entry_adverse_exit_enabled", True)),
-                   help="Salida parcial si el precio se mueve en contra de la entrada de confirmación.")
-    p.add_argument("--entry-confirm-move-exit-pct", type=float, default=getattr(d, "entry_confirm_move_exit_pct", getattr(d, "confirm_entry_adverse_move_pct", 0.5)),
-                   help="%% de movimiento adverso desde la entrada de confirmación para disparar la salida (default 0.5).")
-    p.add_argument("--entry-confirm-move-exit-portion-pct", type=float,
-                   default=getattr(d, "entry_confirm_move_exit_portion_pct", getattr(d, "confirm_entry_adverse_exit_pct", 50.0)),
-                   help="%% de la posición restante a cerrar en esa salida (default 50).")
-    p.add_argument("--confirm-adverse-exit", action=argparse.BooleanOptionalAction,
-                   default=getattr(d, "confirm_entry_adverse_exit_enabled", getattr(d, "entry_confirm_move_exit_enabled", True)),
-                   help="Salida parcial después de la entrada por confirmación si el precio va en contra.")
-    p.add_argument("--confirm-adverse-move-pct", type=float, default=getattr(d, "confirm_entry_adverse_move_pct", 0.5),
-                   help="%% adverso desde la entrada de confirmación para disparar la salida (default 0.5).")
-    p.add_argument("--confirm-adverse-exit-pct", type=float, default=getattr(d, "confirm_entry_adverse_exit_pct", 50.0),
-                   help="%% de la posición a cerrar (default 50).")
-    p.add_argument("--close-on-ema-slow-touch", action=argparse.BooleanOptionalAction, default=d.close_on_ema_slow_touch)
-    p.add_argument("--close-on-ema-slow-touch-pct", type=float, default=d.close_on_ema_slow_touch_pct,
-                   help="Tolerancia en %% alrededor de la EMA slow (0.10 = 0.10%%).")
-    p.add_argument("--close-on-ema-slow-touch-after", action=argparse.BooleanOptionalAction,
-                   default=d.close_on_ema_slow_touch_after,
-                   help="Aplica la tolerancia después del toque a la EMA slow (por defecto, antes).")
-    p.add_argument("--close-on-ema-slow-touch-exit-pct", type=float, default=d.close_on_ema_slow_touch_exit_pct,
-                   help="%% de la posición a cerrar al tocar la EMA slow (100 = cierre total, < 100 = parcial).")
     p.add_argument("--no-long", action="store_true")
     p.add_argument("--no-short", action="store_true")
-    p.add_argument("--trend-filter", choices=("off", "cross", "slow"), default=d.trend_filter,
-                   help="Filtro de régimen: entradas sólo en la dirección de la tendencia "
-                        "del timeframe superior ('cross' = cruce EMA, 'slow' = EMA slow).")
     p.add_argument("--trend-timeframe", default=d.trend_timeframe,
-                   help="Timeframe del filtro de régimen (default 1D).")
-    p.add_argument("--chop-filter", action=argparse.BooleanOptionalAction, default=d.chop_filter,
-                   help="Sólo entra si el ADX de --chop-timeframe supera --chop-adx-min.")
-    p.add_argument("--chop-timeframe", default=d.chop_timeframe)
-    p.add_argument("--chop-adx-min", type=float, default=d.chop_adx_min)
+                   help="Timeframe superior para el filtro de tendencia tras pérdidas (default 1D).")
     p.add_argument("--monthly-loss-limit-pct", type=float, default=d.monthly_loss_limit_pct,
                    help="%% máxima de pérdida mensual antes de dejar de operar el resto del mes "
                         "(0 = desactivado).")
@@ -1681,24 +1340,6 @@ def parse_args():
                    help="Cierra la posición abierta al alcanzar el límite mensual.")
     p.add_argument("--monthly-loss-limit-days", type=int, default=d.monthly_loss_limit_days,
                    help="Días sin entradas tras el límite mensual (0 = hasta el próximo mes).")
-    p.add_argument("--monthly-trend-gate-pct", type=float, default=d.monthly_trend_gate_pct,
-                   help="%% de pérdida mensual acumulada a partir de la cual las entradas sólo se abren "
-                        "a favor de la tendencia (0 = desactivado).")
-    p.add_argument("--monthly-gate-mode", choices=("trend", "all"), default=d.monthly_gate_mode,
-                   help="'trend' exige alineación con la tendencia; 'all' bloquea toda entrada "
-                        "mientras el mes está en rojo.")
-    p.add_argument("--monthly-risk-scaling", action=argparse.BooleanOptionalAction,
-                   default=d.monthly_risk_scaling,
-                   help="Escala el tamaño de las posiciones con el drawdown del mes, hasta "
-                        "--monthly-risk-scaling-min al llegar al límite mensual.")
-    p.add_argument("--monthly-risk-scaling-min", type=float, default=d.monthly_risk_scaling_min,
-                   help="Tamaño mínimo (fracción de risk_pct) al fondo del drawdown mensual (default 0.35).")
-    p.add_argument("--consecutive-loss-pause", type=int, default=d.consecutive_loss_pause,
-                   help="Pausa las entradas tras N posiciones consecutivas en pérdida (0 = desactivado).")
-    p.add_argument("--consecutive-loss-pause-bars", type=int, default=d.consecutive_loss_pause_bars,
-                   help="Velas sin entradas tras la racha de pérdidas (default 96 = 48h en 30min).")
-    p.add_argument("--consecutive-loss-skip-signals", type=int, default=d.consecutive_loss_skip_signals,
-                   help="Señales de entrada a ignorar tras cada pérdida (0 = desactivado).")
     p.add_argument("--streak-trend-only", action=argparse.BooleanOptionalAction, default=d.streak_trend_only,
                    help="Tras una pérdida, sólo entrar si la señal coincide con la tendencia mayor.")
     p.add_argument("--adaptive-risk-window", type=int, default=d.adaptive_risk_window,
@@ -1776,25 +1417,10 @@ def config_from_args(a) -> Config:
         entry_confirm_close_in_dir=a.entry_confirm_close_in_dir,
         entry_confirm_retest_tol_pct=a.entry_confirm_retest_tol_pct,
         entry_confirm_max_move_pct=a.entry_confirm_max_move_pct,
-        entry_confirm_move_exit_enabled=getattr(a, "confirm_adverse_exit", getattr(a, "entry_confirm_move_exit", True)),
-        entry_confirm_move_exit_pct=getattr(a, "confirm_adverse_move_pct", getattr(a, "entry_confirm_move_exit_pct", 0.5)),
-        entry_confirm_move_exit_portion_pct=getattr(a, "confirm_adverse_exit_pct", getattr(a, "entry_confirm_move_exit_portion_pct", 50.0)),
-        close_on_ema_slow_touch=a.close_on_ema_slow_touch,
-        close_on_ema_slow_touch_pct=a.close_on_ema_slow_touch_pct,
-        close_on_ema_slow_touch_after=a.close_on_ema_slow_touch_after,
-        close_on_ema_slow_touch_exit_pct=a.close_on_ema_slow_touch_exit_pct,
-        trend_filter=a.trend_filter, trend_timeframe=a.trend_timeframe,
-        chop_filter=a.chop_filter, chop_timeframe=a.chop_timeframe, chop_adx_min=a.chop_adx_min,
+        trend_timeframe=a.trend_timeframe,
         monthly_loss_limit_pct=a.monthly_loss_limit_pct,
         monthly_loss_limit_close=a.monthly_loss_limit_close,
         monthly_loss_limit_days=a.monthly_loss_limit_days,
-        monthly_trend_gate_pct=a.monthly_trend_gate_pct,
-        monthly_gate_mode=a.monthly_gate_mode,
-        monthly_risk_scaling=a.monthly_risk_scaling,
-        monthly_risk_scaling_min=a.monthly_risk_scaling_min,
-        consecutive_loss_pause=a.consecutive_loss_pause,
-        consecutive_loss_pause_bars=a.consecutive_loss_pause_bars,
-        consecutive_loss_skip_signals=a.consecutive_loss_skip_signals,
         streak_trend_only=a.streak_trend_only,
         adaptive_risk_window=a.adaptive_risk_window,
         adaptive_risk_k=a.adaptive_risk_k,
