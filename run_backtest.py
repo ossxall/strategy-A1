@@ -58,7 +58,7 @@ def read_env(path: Path = ENV_FILE) -> dict[str, str]:
 def build_backtest_args(values: dict[str, str]) -> list[str]:
     """Traduce BACKTEST_* a argumentos aceptados por strategy.strategy."""
     dataset = values.get("BACKTEST_DATASET", DEFAULT_DATASET).strip() or DEFAULT_DATASET
-    output_dir = values.get("BACKTEST_OUTPUT_DIR", "backtest_out").strip() or "backtest_out"
+    output_dir = values.get("BACKTEST_OUTPUT_DIR", "report/backtest_out").strip() or "report/backtest_out"
     args = [dataset, "--output-dir", output_dir]
 
     for key, raw_value in values.items():

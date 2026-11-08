@@ -89,7 +89,7 @@ dependiente del régimen: se probó con costes y con `trend_filter="cross"`, don
 no aporta, por eso arranca desactivado.
 
 Uso:
-    python -m strategy.strategy dataset/binance/BTCUSDT/merged/BTCUSDT-1m.parquet --output-dir backtest_out
+    python -m strategy.strategy dataset/binance/BTCUSDT/merged/BTCUSDT-1m.parquet --output-dir report/backtest_out
     python -m strategy.strategy dataset/binance/BTCUSDT/merged/BTCUSDT-1m.parquet --no-entry-adx-filter
     python -m strategy.strategy dataset/binance/BTCUSDT/merged/BTCUSDT-1m.parquet --help
 

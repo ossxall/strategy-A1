@@ -651,9 +651,9 @@
         // Directorio donde viven los artefactos del backtest (metrics.json,
         // report.json, config.json, equity_curve.csv, trades.csv, positions.csv).
         //
-        // Por defecto es el mismo directorio del index.html, pero puede
-        // apuntarse a cualquier carpeta de resultados sin tocar el HTML:
-        //   - Query string : index.html?data=../strategy/backtest_out
+        // Por defecto usa report/backtest_out, relativo a este index.html.
+        // Puede apuntarse a otra carpeta sin tocar el HTML:
+        //   - Query string : index.html?data=backtest_out/
         //   - Variable global previa: window.BACKTEST_DATA_DIR = '...'
         //
         // Requiere servir por HTTP (file:// bloquea fetch por CORS).
@@ -663,11 +663,7 @@
 
         // Carpetas que se prueban automáticamente si no se indica `?data=`.
         const DATA_DIR_CANDIDATES = [
-            './',
-            'backtest_out/',
-            'backtest_out_strategy2/',
-            'strategy/backtest_out/',
-            'strategy/backtest_out_strategy2/'
+            'backtest_out/'
         ];
 
         async function resolveDataDir() {
