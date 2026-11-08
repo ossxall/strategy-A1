@@ -11,4 +11,7 @@
 .dev
 .vite
 __pycache__
-
+.sweep
+.ruff_cache
+.env
+.venv/

@@ -16,10 +16,10 @@ MÉTODO RECOMENDADO: los archivos mensuales (un .zip por mes, ~2 MB para 1m de B
 0 o negativo    -> todo el histórico disponible.
 
 Ejemplos:
-  python3 binance_klines.py --years 5
-  python3 binance_klines.py --iterations 60
-  python3 binance_klines.py --from 2020-01 --to 2021-12 --merge-format parquet
-  python3 binance_klines.py --symbol ETHUSDT --interval 1h --market spot --years 3
+  python3 dataset/binance_klines.py --years 5
+  python3 dataset/binance_klines.py --iterations 60
+  python3 dataset/binance_klines.py --from 2020-01 --to 2021-12 --merge-format parquet
+  python3 dataset/binance_klines.py --symbol ETHUSDT --interval 1h --market spot --years 3
 """
 
 from __future__ import annotations
@@ -463,7 +463,9 @@ def main() -> int:
     sel.add_argument("--to", help="mes final YYYY-MM")
     out = p.add_argument_group("salida")
     out.set_defaults(verify=True, keep_zip=True, keep_csv=True)
-    out.add_argument("-o", "--out", default="data/binance", help="directorio raíz (default: data/binance)")
+    default_out = Path(__file__).parent / "binance"
+    out.add_argument("-o", "--out", default=default_out,
+                     help="directorio raíz (default: dataset/binance)")
     out.add_argument("--workers", type=int, default=4, help="descargas simultáneas (default: 4)")
     out.add_argument("--retries", type=int, default=5, help="reintentos por archivo (default: 5)")
     out.add_argument("--merge-format", choices=["csv", "parquet"], help="además genera un archivo combinado")
@@ -487,7 +489,7 @@ def main() -> int:
         sys.exit("--from necesita --to (o usa --iterations).")
 
     prefix = f"{MARKETS[args.market]}/monthly/klines/{args.symbol}/{args.interval}/"
-    base = Path(args.out) / args.market / args.symbol / args.interval
+    base = Path(args.out) / args.symbol
 
     say(f"Listando {CDN}?prefix={prefix}")
     objects = available_months(prefix, args.symbol, args.interval)

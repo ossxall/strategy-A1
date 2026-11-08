@@ -89,13 +89,13 @@ dependiente del régimen: se probó con costes y con `trend_filter="cross"`, don
 no aporta, por eso arranca desactivado.
 
 Uso:
-    python strategy2_refactored.py data.parquet --output-dir backtest_out
-    python strategy2_refactored.py data.parquet --no-entry-adx-filter
-    python strategy2_refactored.py data.parquet --help
+    python -m strategy.strategy dataset/binance/BTCUSDT/merged/BTCUSDT-1m.parquet --output-dir backtest_out
+    python -m strategy.strategy dataset/binance/BTCUSDT/merged/BTCUSDT-1m.parquet --no-entry-adx-filter
+    python -m strategy.strategy dataset/binance/BTCUSDT/merged/BTCUSDT-1m.parquet --help
 
 API para bots:
     cfg = Config()
-    bars = load_parquet("data.parquet")
+    bars = load_parquet("dataset/binance/BTCUSDT/merged/BTCUSDT-1m.parquet")
     strategy = EMACrossStrategy(cfg)
     signals = strategy.generate_signals(bars)
     # signals contiene señales conocidas al cierre de cada vela.

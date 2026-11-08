@@ -1,7 +1,7 @@
 {
   "experiment": "EMA slow close confirmation for scale-in (existing entry_confirm_mode=pullback_retest behavior)",
   "data": {
-    "source": "data/binance/um/BTCUSDT/1m/merged/BTCUSDT-1m.parquet",
+    "source": "dataset/binance/BTCUSDT/merged/BTCUSDT-1m.parquet",
     "symbol": "BTCUSDT",
     "source_timeframe": "1m",
     "strategy_timeframe": "30min",
