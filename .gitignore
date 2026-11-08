@@ -1,0 +1,14 @@
+*.csv
+*.parquet
+*.zip
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.db
+*.db-wal
+*.db-shm
+.ruff_cache
+.dev
+.vite
+__pycache__
+

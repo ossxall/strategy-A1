@@ -1,0 +1,1306 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reporte Backtest - Trading Profesional</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
+    <script src="https://cdn.jsdelivr.net/npm/date-fns"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #0f172a;
+            --bg-secondary: #1e293b;
+            --bg-tertiary: #334155;
+            --border: #475569;
+            --text-primary: #f1f5f9;
+            --text-secondary: #cbd5e1;
+            --text-muted: #94a3b8;
+            --accent-green: #22c55e;
+            --accent-red: #ef4444;
+            --accent-blue: #3b82f6;
+            --accent-yellow: #f59e0b;
+            --accent-purple: #a855f7;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+                'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+                sans-serif;
+            background: linear-gradient(135deg, var(--bg-primary) 0%, #020617 100%);
+            color: var(--text-primary);
+            line-height: 1.6;
+            padding: 24px;
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 1800px;
+            margin: 0 auto;
+        }
+        
+        header {
+            margin-bottom: 32px;
+            padding-bottom: 24px;
+            border-bottom: 2px solid var(--border);
+        }
+        
+        header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            background: linear-gradient(135deg, var(--accent-blue) 0%, var(--accent-purple) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        header .subtitle {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+        
+        .grid {
+            display: grid;
+            gap: 24px;
+        }
+        
+        .grid-4 {
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        }
+        
+        .grid-3 {
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        }
+        
+        .grid-2 {
+            grid-template-columns: repeat(auto-fit, minmax(450px, 1fr));
+        }
+        
+        .card {
+            background: rgba(30, 41, 59, 0.6);
+            backdrop-filter: blur(10px);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -4px rgba(0, 0, 0, 0.3);
+        }
+        
+        .card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border);
+        }
+        
+        .card-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        
+        .card-subtitle {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+        
+        .kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+        }
+        
+        .kpi {
+            background: var(--bg-secondary);
+            padding: 16px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+        }
+        
+        .kpi-label {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            font-weight: 600;
+        }
+        
+        .kpi-value {
+            font-size: 24px;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+        
+        .kpi-subvalue {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+        
+        .positive {
+            color: var(--accent-green);
+        }
+        
+        .negative {
+            color: var(--accent-red);
+        }
+        
+        .neutral {
+            color: var(--text-primary);
+        }
+        
+        .warning {
+            color: var(--accent-yellow);
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+        
+        thead {
+            background: var(--bg-secondary);
+        }
+        
+        th {
+            padding: 10px 12px;
+            text-align: left;
+            font-weight: 600;
+            color: var(--text-secondary);
+            border-bottom: 2px solid var(--border);
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            white-space: nowrap;
+        }
+        
+        td {
+            padding: 9px 12px;
+            border-bottom: 1px solid var(--border);
+            color: var(--text-primary);
+        }
+        
+        tbody tr:hover {
+            background: rgba(59, 130, 246, 0.05);
+        }
+        
+        tbody tr:last-child td {
+            border-bottom: none;
+        }
+        
+        .table-wrapper {
+            overflow-x: auto;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .table-wrapper::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        
+        .table-wrapper::-webkit-scrollbar-track {
+            background: var(--bg-secondary);
+        }
+        
+        .table-wrapper::-webkit-scrollbar-thumb {
+            background: var(--bg-tertiary);
+            border-radius: 4px;
+        }
+        
+        .table-wrapper::-webkit-scrollbar-thumb:hover {
+            background: var(--border);
+        }
+        
+        .chart-container {
+            position: relative;
+            height: 400px;
+            width: 100%;
+        }
+        
+        .chart-container.large {
+            height: 500px;
+        }
+        
+        .list-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid var(--border);
+        }
+        
+        .list-item:last-child {
+            border-bottom: none;
+        }
+        
+        .list-label {
+            color: var(--text-secondary);
+            font-size: 13px;
+        }
+        
+        .list-value {
+            color: var(--text-primary);
+            font-weight: 500;
+            font-size: 13px;
+        }
+        
+        .tag {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        
+        .tag-long {
+            background: rgba(34, 197, 94, 0.15);
+            color: var(--accent-green);
+        }
+        
+        .tag-short {
+            background: rgba(239, 68, 68, 0.15);
+            color: var(--accent-red);
+        }
+        
+        .badge {
+            padding: 3px 7px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+        
+        .badge-green {
+            background: rgba(34, 197, 94, 0.15);
+            color: var(--accent-green);
+        }
+        
+        .badge-red {
+            background: rgba(239, 68, 68, 0.15);
+            color: var(--accent-red);
+        }
+        
+        .badge-yellow {
+            background: rgba(245, 158, 11, 0.15);
+            color: var(--accent-yellow);
+        }
+        
+        .stats-bar {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .stats-fill {
+            flex: 1;
+            height: 8px;
+            background: var(--bg-tertiary);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        
+        .stats-progress {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent-green) 0%, #16a34a 100%);
+        }
+        
+        .muted {
+            color: var(--text-muted);
+        }
+        
+        footer {
+            margin-top: 32px;
+            padding-top: 16px;
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 12px;
+            border-top: 1px solid var(--border);
+        }
+        
+        @media (max-width: 768px) {
+            body {
+                padding: 12px;
+            }
+            
+            .card {
+                padding: 16px;
+            }
+            
+            .kpi-value {
+                font-size: 20px;
+            }
+            
+            .grid-2 {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Reporte Profesional de Backtest</h1>
+            <div class="subtitle" id="generated-at"></div>
+            <div class="subtitle" id="dataset-info" style="margin-top: 4px;"></div>
+        </header>
+        
+        <!-- Key Metrics -->
+        <section class="grid grid-4" style="margin-bottom: 24px;">
+            <div class="kpi">
+                <div class="kpi-label">Capital Inicial</div>
+                <div class="kpi-value neutral" id="initial-capital"></div>
+            </div>
+            <div class="kpi">
+                <div class="kpi-label">Equity Final</div>
+                <div class="kpi-value neutral" id="final-equity"></div>
+                <div class="kpi-subvalue" id="net-pnl"></div>
+            </div>
+            <div class="kpi">
+                <div class="kpi-label">Retorno Total</div>
+                <div class="kpi-value positive" id="return-pct"></div>
+                <div class="kpi-subvalue" id="return-over-mdd"></div>
+            </div>
+            <div class="kpi">
+                <div class="kpi-label">Max Drawdown</div>
+                <div class="kpi-value negative" id="max-dd"></div>
+                <div class="kpi-subvalue" id="dd-peak-trough"></div>
+                <div class="kpi-subvalue" id="dd-static" style="margin-top:4px;"></div>
+            </div>
+            <div class="kpi">
+                <div class="kpi-label">Min Equity</div>
+                <div class="kpi-value neutral" id="min-equity"></div>
+                <div class="kpi-subvalue" id="min-equity-pct"></div>
+                <div class="kpi-subvalue" id="min-equity-static" style="margin-top:4px;"></div>
+            </div>
+            <div class="kpi">
+                <div class="kpi-label">Sharpe (Daily 365)</div>
+                <div class="kpi-value neutral" id="sharpe"></div>
+            </div>
+            <div class="kpi">
+                <div class="kpi-label">Sortino (Daily 365)</div>
+                <div class="kpi-value neutral" id="sortino"></div>
+            </div>
+            <div class="kpi">
+                <div class="kpi-label">Win Rate</div>
+                <div class="kpi-value neutral" id="win-rate"></div>
+                <div class="kpi-subvalue" id="wins-losses"></div>
+            </div>
+            <div class="kpi">
+                <div class="kpi-label">Profit Factor</div>
+                <div class="kpi-value neutral" id="profit-factor"></div>
+                <div class="kpi-subvalue" id="expectancy"></div>
+            </div>
+        </section>
+        
+        <!-- Equity Curve -->
+        <section class="grid" style="margin-bottom: 24px;">
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <div class="card-title">Curva de Equity</div>
+                        <div class="card-subtitle">Evolución del capital a lo largo del backtest</div>
+                    </div>
+                </div>
+                <div class="chart-container large">
+                    <canvas id="equityChart"></canvas>
+                </div>
+            </div>
+        </section>
+        
+        <div class="grid grid-2" style="margin-bottom: 24px;">
+            <!-- Configuration -->
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <div class="card-title">Configuración de Estrategia</div>
+                        <div class="card-subtitle">Parámetros utilizados en el backtest</div>
+                    </div>
+                </div>
+                <div class="table-wrapper" style="max-height: 420px;">
+                    <table id="config-table">
+                        <thead>
+                            <tr>
+                                <th>Parámetro</th>
+                                <th>Valor</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+            
+            <!-- By Side -->
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <div class="card-title">Desempeño por Dirección</div>
+                        <div class="card-subtitle">Comparativa entre operaciones LONG y SHORT</div>
+                    </div>
+                </div>
+                <div style="margin-bottom: 16px;">
+                    <div class="list-item">
+                        <div class="list-label">
+                            <span class="tag tag-long">LONG</span>
+                        </div>
+                        <div class="list-value" id="long-stats"></div>
+                    </div>
+                    <div class="list-item">
+                        <div class="list-label">
+                            <span class="tag tag-short">SHORT</span>
+                        </div>
+                        <div class="list-value" id="short-stats"></div>
+                    </div>
+                </div>
+                <div class="chart-container" style="height: 280px;">
+                    <canvas id="sideChart"></canvas>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Top Exit Reasons -->
+        <section class="grid" style="margin-bottom: 24px;">
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <div class="card-title">Estadísticas Mensuales (Últimos 24 meses)</div>
+                        <div class="card-subtitle">PNL, drawdown, retorno y tasa de acierto por mes</div>
+                    </div>
+                </div>
+                <div class="table-wrapper" >
+                    <table id="monthly-table">
+                        <thead>
+                            <tr>
+                                <th>Mes</th>
+                                <th>PNL Total ($)</th>
+                                <th>Trades</th>
+                                <th>W/L</th>
+                                <th>Win Rate</th>
+                                <th>Equity Inicio</th>
+                                <th>Equity Fin</th>
+                                <th>Peak</th>
+                                <th>Trough</th>
+                                <th>DD Máx</th>
+                                <th>Retorno</th>
+                            </tr>
+                        </thead>
+                        <tbody id="monthly-table-body"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+        <section class="grid" style="margin-bottom: 24px;">
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <div class="card-title">Razones de Salida (Top 15)</div>
+                        <div class="card-subtitle">Distribución de motivos de cierre de operaciones</div>
+                    </div>
+                </div>
+                <div class="table-wrapper">
+                    <table id="exit-reasons-table">
+                        <thead>
+                            <tr>
+                                <th>Razón de Salida</th>
+                                <th>Legs</th>
+                                <th>Posiciones</th>
+                                <th>PNL Neto Total</th>
+                                <th>PNL Promedio</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+        
+        <!-- Trades Sample -->
+        <section class="grid grid-2" style="margin-bottom: 24px;">
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <div class="card-title">Últimas 30 Operaciones</div>
+                        <div class="card-subtitle">Detalle de las operaciones más recientes</div>
+                    </div>
+                </div>
+                <div class="table-wrapper" style="max-height: 500px;">
+                    <table id="trades-table">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Side</th>
+                                <th>Entry</th>
+                                <th>Exit</th>
+                                <th>Precio E</th>
+                                <th>Precio S</th>
+                                <th>Qty</th>
+                                <th>PNL Neto ($)</th>
+                                <th>Return %</th>
+                                <th>Razón</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+            
+            <!-- Positions Sample -->
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <div class="card-title">Posiciones (Muestra)</div>
+                        <div class="card-subtitle">Primeras 30 posiciones registradas</div>
+                    </div>
+                </div>
+                <div class="table-wrapper" style="max-height: 500px;">
+                    <table id="positions-table">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Side</th>
+                                <th>Apertura</th>
+                                <th>Cierre</th>
+                                <th>Riesgo ($)</th>
+                                <th>Legs</th>
+                                <th>Razón</th>
+                                <th>PNL Neto ($)</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+        
+        <!-- Equity Curve Image -->
+        <section class="grid" style="margin-bottom: 24px;">
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <div class="card-title">Gráfico de Equity (Generado)</div>
+                        <div class="card-subtitle">Archivo PNG exportado durante el backtest</div>
+                    </div>
+                </div>
+                <div id="equity-image-container" style="text-align: center; padding: 16px;">
+                    <img id="equity-image" alt="Equity Curve" style="max-width: 100%; height: auto; border-radius: 8px; border: 1px solid var(--border);">
+                </div>
+            </div>
+        </section>
+        
+        <!-- Monthly Equity Curves -->
+        <section class="grid" style="margin-bottom: 24px;">
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <div class="card-title">Curvas de Equity por Mes</div>
+                        <div class="card-subtitle">Evolución del capital dentro de cada mes del backtest</div>
+                    </div>
+                </div>
+                <div id="monthly-equity-grid" class="grid grid-3"></div>
+            </div>
+        </section>
+        
+<section class="grid" style="margin-bottom: 24px;">
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <div class="card-title">Histórico Mensual Completo</div>
+                        <div class="card-subtitle">Todos los meses disponibles en el backtest</div>
+                    </div>
+                </div>
+                <div class="table-wrapper" style="overflow-x: visible; overflow-y: visible; max-height: none;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Mes</th>
+                                <th>PNL Total ($)</th>
+                                <th>Trades</th>
+                                <th>W/L</th>
+                                <th>Win Rate</th>
+                                <th>Equity Inicio</th>
+                                <th>Equity Fin</th>
+                                <th>Peak</th>
+                                <th>Trough</th>
+                                <th>DD Máx</th>
+                                <th>Retorno</th>
+                            </tr>
+                        </thead>
+                        <tbody id="monthly-history-body"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+                <footer>
+            <div>Dashboard de backtest • Trading Profesional</div>
+        </footer>
+    </div>
+    
+    <script>
+        // Directorio donde viven los artefactos del backtest (metrics.json,
+        // report.json, config.json, equity_curve.csv, trades.csv, positions.csv).
+        //
+        // Por defecto es el mismo directorio del index.html, pero puede
+        // apuntarse a cualquier carpeta de resultados sin tocar el HTML:
+        //   - Query string : index.html?data=../strategy/backtest_out
+        //   - Variable global previa: window.BACKTEST_DATA_DIR = '...'
+        //
+        // Requiere servir por HTTP (file:// bloquea fetch por CORS).
+        function withSlash(dir) {
+            return dir.endsWith('/') ? dir : dir + '/';
+        }
+
+        // Carpetas que se prueban automáticamente si no se indica `?data=`.
+        const DATA_DIR_CANDIDATES = [
+            './',
+            'backtest_out/',
+            'backtest_out_strategy2/',
+            'strategy/backtest_out/',
+            'strategy/backtest_out_strategy2/'
+        ];
+
+        async function resolveDataDir() {
+            const qs = new URLSearchParams(window.location.search).get('data');
+            const explicit = qs || window.BACKTEST_DATA_DIR;
+
+            if (explicit) return withSlash(explicit);
+
+            for (const dir of DATA_DIR_CANDIDATES) {
+                try {
+                    const res = await fetch(dir + 'metrics.json', { cache: 'no-store' });
+                    if (!res.ok) continue;
+
+                    const type = res.headers.get('content-type') || '';
+                    if (type.includes('json')) return dir;
+
+                    // Algunos servidores no etiquetan el JSON correctamente.
+                    try {
+                        await res.clone().json();
+                        return dir;
+                    } catch (e) {
+                        // No era JSON: probar el siguiente candidato.
+                    }
+                } catch (e) {
+                    // Probar el siguiente candidato.
+                }
+            }
+
+            return './';
+        }
+
+        let DATA_DIR = './';
+
+        async function loadData() {
+            try {
+                DATA_DIR = await resolveDataDir();
+
+                // Load metrics and report
+                const [metricsRes, reportRes, configRes, equityRes, tradesRes, positionsRes] = await Promise.all([
+                    fetch(DATA_DIR + 'metrics.json'),
+                    fetch(DATA_DIR + 'report.json'),
+                    fetch(DATA_DIR + 'config.json'),
+                    fetch(DATA_DIR + 'equity_curve.csv'),
+                    fetch(DATA_DIR + 'trades.csv'),
+                    fetch(DATA_DIR + 'positions.csv')
+                ]);
+
+                const required = [
+                    ['metrics.json', metricsRes],
+                    ['report.json', reportRes],
+                    ['config.json', configRes],
+                    ['equity_curve.csv', equityRes],
+                    ['trades.csv', tradesRes],
+                    ['positions.csv', positionsRes]
+                ];
+                const missing = required.filter(([, r]) => !r.ok).map(([n]) => n);
+                if (missing.length) {
+                    throw new Error(
+                        `No se encontraron en "${DATA_DIR}": ${missing.join(', ')}`
+                    );
+                }
+
+                // Imagen de equity_curve.png resuelta contra DATA_DIR.
+                const equityImg = document.getElementById('equity-image');
+                const equityImgContainer = document.getElementById('equity-image-container');
+                if (equityImg && equityImgContainer) {
+                    equityImg.onerror = () => {
+                        equityImgContainer.innerHTML = 
+                            `<div style="color: var(--text-muted); padding: 24px;">No se encontró equity_curve.png en "${DATA_DIR}". Genera el gráfico con plot_equity o quita --no-plot.</div>`;
+                    };
+                    equityImg.src = DATA_DIR + 'equity_curve.png';
+                }
+                
+                const metrics = await metricsRes.json();
+                const report = await reportRes.json();
+                const config = await configRes.json();
+                const equityCsv = await equityRes.text();
+                const tradesCsv = await tradesRes.text();
+                const positionsCsv = await positionsRes.text();
+                
+                // Populate header
+                document.getElementById('generated-at').textContent = 
+                    `Generado: ${new Date(report.generated_at).toLocaleString('es-ES', { 
+                        dateStyle: 'full', 
+                        timeStyle: 'medium' 
+                    })}`;
+                const bars = report.dataset.bars_1m ?? report.dataset.bars ?? 0;
+                const barsLabel = report.dataset.bars_1m !== undefined ? 'barras 1m' : 'barras';
+                document.getElementById('dataset-info').textContent = 
+                    `Dataset: ${report.dataset.source.split('/').pop()} | ${report.dataset.start.split('T')[0]} a ${report.dataset.end.split('T')[0]} | ${bars.toLocaleString('es-ES')} ${barsLabel}`;
+                
+                // Key Metrics
+                document.getElementById('initial-capital').textContent = formatCurrency(metrics.initial_capital);
+                document.getElementById('final-equity').textContent = formatCurrency(metrics.final_equity);
+                document.getElementById('net-pnl').textContent = 
+                    `${formatCurrency(metrics.net_pnl)} (${metrics.net_pnl >= 0 ? '+' : ''}${metrics.net_pnl.toFixed(2)})`;
+                document.getElementById('return-pct').textContent = 
+                    `${metrics.return_pct >= 0 ? '+' : ''}${metrics.return_pct.toFixed(2)}%`;
+                document.getElementById('return-over-mdd').textContent = 
+                    `RoMaD: ${metrics.return_over_maxdd == null ? 'N/A' : metrics.return_over_maxdd.toFixed(2)}`;
+                document.getElementById('max-dd').textContent = `${metrics.max_drawdown_pct.toFixed(2)}%`;
+                document.getElementById('dd-peak-trough').textContent = 
+                    `${formatCurrency(metrics.max_dd_peak_equity)} → ${formatCurrency(metrics.max_dd_trough_equity)}`;
+                if (metrics.drawdown_static_pct !== undefined) {
+                    document.getElementById('dd-static').textContent = `DD estático (vs cap): ${metrics.drawdown_static_pct.toFixed(2)}% (${formatCurrency(metrics.drawdown_static_trough)})`;
+                }
+                document.getElementById('sharpe').textContent = metrics.sharpe_daily_365.toFixed(3);
+                document.getElementById('sortino').textContent = metrics.sortino_daily_365.toFixed(3);
+                document.getElementById('win-rate').textContent = `${metrics.win_rate_pct.toFixed(2)}%`;
+                document.getElementById('wins-losses').textContent = 
+                    `${metrics.wins.toLocaleString()}W / ${metrics.losses.toLocaleString()}L | ${metrics.positions.toLocaleString()} ops`;
+                document.getElementById('profit-factor').textContent = 
+                    metrics.profit_factor == null ? 'N/A' : metrics.profit_factor.toFixed(3);
+                document.getElementById('expectancy').textContent = 
+                    `Expectancy: ${metrics.expectancy_r == null ? 'N/A' : metrics.expectancy_r.toFixed(4)} R | Max Consecutivas: ${metrics.max_consecutive_losses}`;
+                
+                if (metrics.min_equity !== undefined) {
+                    document.getElementById('min-equity').textContent = formatCurrency(metrics.min_equity);
+                }
+                if (metrics.min_equity_vs_capital_pct !== undefined) {
+                    document.getElementById('min-equity-pct').textContent = `${metrics.min_equity_vs_capital_pct.toFixed(2)}% vs cap`;
+                }
+                if (metrics.min_equity_static_pct !== undefined) {
+                    document.getElementById('min-equity-static').textContent = `Min equity (estático): ${metrics.min_equity_static_pct.toFixed(2)}%`;
+                }
+                // Color coding
+                if (metrics.return_pct >= 0) document.getElementById('return-pct').classList.add('positive');
+                else document.getElementById('return-pct').classList.add('negative');
+                
+                if (metrics.max_drawdown_pct < 0) document.getElementById('max-dd').classList.add('negative');
+                
+                // Config table
+                const configTableBody = document.querySelector('#config-table tbody');
+                const configEntries = Object.entries(config).sort((a,b) => a[0].localeCompare(b[0]));
+                configEntries.forEach(([key, value]) => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td style="font-family: 'Courier New', monospace; color: var(--text-secondary);">${key}</td>
+                        <td style="font-family: 'Courier New', monospace; font-weight: 500;">${typeof value === 'boolean' ? (value ? 'true' : 'false') : value}</td>
+                    `;
+                    configTableBody.appendChild(row);
+                });
+                
+                // By Side
+                const long = report.by_side.LONG;
+                const short = report.by_side.SHORT;
+                const fmtPf = (pf) => pf == null ? 'N/A' : pf.toFixed(2);
+                document.getElementById('long-stats').innerHTML = 
+                    `${long.positions} ops | ${long.win_rate_pct.toFixed(1)}% WR | ${formatCurrency(long.net_pnl)} | PF ${fmtPf(long.profit_factor)}`;
+                document.getElementById('short-stats').innerHTML = 
+                    `${short.positions} ops | ${short.win_rate_pct.toFixed(1)}% WR | ${formatCurrency(short.net_pnl)} | PF ${fmtPf(short.profit_factor)}`;
+                
+                // Side chart
+                new Chart(document.getElementById('sideChart'), {
+                    type: 'bar',
+                    data: {
+                        labels: ['LONG', 'SHORT'],
+                        datasets: [
+                            {
+                                label: 'PNL Neto ($)',
+                                data: [long.net_pnl, short.net_pnl],
+                                backgroundColor: [long.net_pnl >= 0 ? 'rgba(34, 197, 94, 0.7)' : 'rgba(239, 68, 68, 0.7)', 
+                                               short.net_pnl >= 0 ? 'rgba(34, 197, 94, 0.7)' : 'rgba(239, 68, 68, 0.7)'],
+                                borderColor: [long.net_pnl >= 0 ? 'rgba(34, 197, 94, 1)' : 'rgba(239, 68, 68, 1)', 
+                                             short.net_pnl >= 0 ? 'rgba(34, 197, 94, 1)' : 'rgba(239, 68, 68, 1)'],
+                                borderWidth: 2,
+                                borderRadius: 6
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false },
+                            title: { display: false }
+                        },
+                        scales: {
+                            y: {
+                                ticks: { color: 'rgb(203, 213, 225)', callback: v => '$' + v.toFixed(0) },
+                                grid: { color: 'rgba(148, 163, 184, 0.15)' }
+                            },
+                            x: {
+                                ticks: { color: 'rgb(203, 213, 225)' },
+                                grid: { display: false }
+                            }
+                        }
+                    }
+                });
+                
+                // Exit reasons
+                const exitTableBody = document.querySelector('#exit-reasons-table tbody');
+                const exitEntries = Object.entries(report.exit_reasons)
+                    .sort((a,b) => Math.abs(b[1].pnl_net) - Math.abs(a[1].pnl_net))
+                    .slice(0, 15);
+                exitEntries.forEach(([reason, data]) => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td style="font-family: 'Courier New', monospace; font-size: 11px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${reason}</td>
+                        <td>${data.legs}</td>
+                        <td>${data.positions}</td>
+                        <td class="${data.pnl_net >= 0 ? 'positive' : 'negative'}">${data.pnl_net >= 0 ? '+' : ''}${data.pnl_net.toFixed(2)}</td>
+                        <td>${(data.pnl_net / data.positions).toFixed(2)}</td>
+                    `;
+                    exitTableBody.appendChild(row);
+                });
+                
+                // Trades table (last 30)
+                const tradesLines = tradesCsv.trim().split('\n');
+                const tradesTableBody = document.querySelector('#trades-table tbody');
+                for (let i = tradesLines.length - 1; i >= Math.max(1, tradesLines.length - 30); i--) {
+                    const cols = parseCsvLine(tradesLines[i]);
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td>${cols[0]}</td>
+                        <td><span class="tag ${cols[2] === 'LONG' ? 'tag-long' : 'tag-short'}">${cols[2]}</span></td>
+                        <td style="font-size: 11px; white-space: nowrap;">${formatDateTime(cols[3])}</td>
+                        <td style="font-size: 11px; white-space: nowrap;">${formatDateTime(cols[4])}</td>
+                        <td>${parseFloat(cols[5]).toFixed(2)}</td>
+                        <td>${parseFloat(cols[6]).toFixed(2)}</td>
+                        <td>${parseFloat(cols[7]).toFixed(4)}</td>
+                        <td class="${parseFloat(cols[10]) >= 0 ? 'positive' : 'negative'}">${parseFloat(cols[10]) >= 0 ? '+' : ''}${parseFloat(cols[10]).toFixed(2)}</td>
+                        <td class="${parseFloat(cols[11]) >= 0 ? 'positive' : 'negative'}">${parseFloat(cols[11]) >= 0 ? '+' : ''}${parseFloat(cols[11]).toFixed(2)}%</td>
+                        <td style="font-size: 11px; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${cols[12]}</td>
+                    `;
+                    tradesTableBody.appendChild(row);
+                }
+                
+                // Positions table (first 30)
+                const positionsLines = positionsCsv.trim().split('\n');
+                const positionsTableBody = document.querySelector('#positions-table tbody');
+                for (let i = 1; i <= Math.min(30, positionsLines.length - 1); i++) {
+                    const cols = parseCsvLine(positionsLines[i]);
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td>${cols[0]}</td>
+                        <td><span class="tag ${cols[1] === 'LONG' ? 'tag-long' : 'tag-short'}">${cols[1]}</span></td>
+                        <td style="font-size: 11px; white-space: nowrap;">${formatDateTime(cols[2])}</td>
+                        <td style="font-size: 11px; white-space: nowrap;">${formatDateTime(cols[3])}</td>
+                        <td>${parseFloat(cols[6]).toFixed(2)}</td>
+                        <td>${parseFloat(cols[7])}</td>
+                        <td>${cols[8]}</td>
+                        <td class="${parseFloat(cols[4]) >= 0 ? 'positive' : 'negative'}">${parseFloat(cols[4]) >= 0 ? '+' : ''}${parseFloat(cols[4]).toFixed(2)}</td>
+                    `;
+                    positionsTableBody.appendChild(row);
+                }
+                
+                // Equity chart from CSV
+                const equityLines = equityCsv.trim().split('\n');
+                const equityData = [];
+                for (let i = 1; i < equityLines.length; i++) {
+                    const cols = parseCsvLine(equityLines[i]);
+                    if (cols.length >= 5) {
+                        equityData.push({
+                            x: new Date(cols[0]),
+                            y: parseFloat(cols[4]),
+                            pnl: parseFloat(cols[2]),
+                            cumPnl: parseFloat(cols[3]),
+                            tradeId: cols[1]
+                        });
+                    }
+                }
+
+                // Curva de mínimos: línea curva suave que pasa por debajo de
+                // cada mínimo local, desde el primer mínimo hasta el último.
+                const minWindow = Math.max(5, Math.round(equityData.length / 30));
+                const localMinima = [];
+                for (let i = 0; i < equityData.length; i++) {
+                    const lo = Math.max(0, i - minWindow);
+                    const hi = Math.min(equityData.length - 1, i + minWindow);
+                    const y = equityData[i].y;
+                    let isMin = true;
+                    for (let j = lo; j <= hi; j++) {
+                        if (equityData[j].y < y) { isMin = false; break; }
+                    }
+                    if (isMin) localMinima.push(equityData[i]);
+                }
+
+                const equityYs = equityData.map((d) => d.y);
+                const minPad = (Math.max(...equityYs) - Math.min(...equityYs)) * 0.01;
+                const equityMinData = localMinima.map((d) => ({ x: d.x, y: d.y - minPad }));
+
+                // Tablas mensuales (últimos 24 meses) e histórico completo.
+                renderMonthlyTables(equityData, metrics.initial_capital);
+
+                // Curva de equity individual para cada mes.
+                renderMonthlyEquityCharts(equityData, metrics.initial_capital);
+                
+                new Chart(document.getElementById('equityChart'), {
+                    type: 'line',
+                    data: {
+                        datasets: [{
+                            label: 'Equity ($)',
+                            data: equityData,
+                            borderColor: 'rgb(59, 130, 246)',
+                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                            borderWidth: 2,
+                            tension: 0.1,
+                            pointRadius: 0,
+                            pointHoverRadius: 6,
+                            fill: true
+                        },
+                        {
+                            label: 'Curva de mínimos',
+                            data: equityMinData,
+                            borderColor: 'rgba(253, 224, 71, 1)',
+                            backgroundColor: 'transparent',
+                            borderWidth: 2,
+                            cubicInterpolationMode: 'monotone',
+                            tension: 0.4,
+                            pointRadius: 2,
+                            pointBackgroundColor: 'rgba(253, 224, 71, 1)',
+                            pointHoverRadius: 6,
+                            fill: false
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        interaction: {
+                            mode: 'index',
+                            intersect: false
+                        },
+                        plugins: {
+                            legend: {
+                                display: true,
+                                labels: { color: 'rgb(203, 213, 225)', usePointStyle: true, boxWidth: 12 }
+                            },
+                            title: { display: false },
+                            tooltip: {
+                                backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                                titleColor: 'var(--text-primary)',
+                                bodyColor: 'var(--text-secondary)',
+                                borderColor: 'var(--border)',
+                                borderWidth: 1,
+                                callbacks: {
+                                    title: (context) => {
+                                        return new Date(context[0].parsed.x).toLocaleString('es-ES');
+                                    },
+                                    label: (context) => {
+                                        if (context.datasetIndex === 1) {
+                                            return `Curva de mínimos: $${context.parsed.y.toFixed(2)}`;
+                                        }
+                                        const data = equityData[context.dataIndex];
+                                        return [
+                                            `Equity: $${context.parsed.y.toFixed(2)}`,
+                                            `PNL Trade: ${data.pnl >= 0 ? '+' : ''}$${data.pnl.toFixed(2)}`,
+                                            `Cumulative: ${data.cumPnl >= 0 ? '+' : ''}$${data.cumPnl.toFixed(2)}`,
+                                            `Trade ID: ${data.tradeId}`
+                                        ];
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                type: 'time',
+                                time: {
+                                    displayFormats: {
+                                        month: 'MMM yyyy',
+                                        day: 'dd/MM',
+                                        hour: 'dd/MM HH:mm'
+                                    }
+                                },
+                                ticks: { color: 'rgb(203, 213, 225)' },
+                                grid: { color: 'rgba(148, 163, 184, 0.15)' }
+                            },
+                            y: {
+                                ticks: { color: 'rgb(203, 213, 225)', callback: v => '$' + v.toFixed(0) },
+                                grid: { color: 'rgba(148, 163, 184, 0.15)' }
+                            }
+                        }
+                    }
+                });
+                
+            } catch (error) {
+                console.error('Error loading data:', error);
+                const hint = window.location.protocol === 'file:'
+                    ? 'Abre el dashboard por HTTP (p. ej. `python -m http.server`) e indica la carpeta de resultados con `?data=RUTA`.'
+                    : `Genera los resultados (strategy1.py/strategy2.py) o indica la carpeta con \`?data=RUTA\`. Se probaron: ${DATA_DIR_CANDIDATES.join(', ')}.`;
+                document.body.innerHTML = `
+                    <div style="color: var(--accent-red); padding: 40px; font-family: Inter, sans-serif;">
+                        <h2>Error cargando datos</h2>
+                        <p>${error.message}</p>
+                        <p style="color: var(--text-secondary); margin-top: 12px;">${hint}</p>
+                    </div>`;
+            }
+        }
+        
+        function monthKey(date) {
+            const y = date.getUTCFullYear();
+            const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+            return `${y}-${m}`;
+        }
+
+        function computeMonthlyStats(equityData, initialCapital) {
+            const byMonth = new Map();
+
+            for (const row of equityData) {
+                if (!(row.x instanceof Date) || isNaN(row.x)) continue;
+                const key = monthKey(row.x);
+                if (!byMonth.has(key)) byMonth.set(key, []);
+                byMonth.get(key).push(row);
+            }
+
+            const months = [];
+            let runningEquity = initialCapital;
+
+            for (const key of [...byMonth.keys()].sort()) {
+                const rows = byMonth.get(key).slice()
+                    .sort((a, b) => a.x - b.x);
+
+                const equityInicio = runningEquity;
+                const equityFin = rows[rows.length - 1].y;
+
+                let pnlTotal = 0;
+                let wins = 0;
+                let losses = 0;
+
+                const series = [equityInicio];
+
+                for (const r of rows) {
+                    pnlTotal += r.pnl;
+                    if (r.pnl > 0) wins++;
+                    else if (r.pnl < 0) losses++;
+                    series.push(r.y);
+                }
+
+                let peak = -Infinity;
+                let maxDd = 0;
+
+                for (const e of series) {
+                    if (e > peak) peak = e;
+                    if (peak > 0) {
+                        const dd = (e / peak - 1) * 100;
+                        if (dd < maxDd) maxDd = dd;
+                    }
+                }
+
+                const trough = Math.min(...series);
+                const trades = rows.length;
+                const winRate = trades ? (wins / trades) * 100 : 0;
+                const retorno = equityInicio
+                    ? (equityFin / equityInicio - 1) * 100
+                    : 0;
+
+                months.push({
+                    key, pnlTotal, trades, wins, losses, winRate,
+                    equityInicio, equityFin, peak, trough, maxDd, retorno
+                });
+
+                runningEquity = equityFin;
+            }
+
+            return months;
+        }
+
+        function monthlyRowHtml(m) {
+            const cls = (v) => v >= 0 ? 'positive' : 'negative';
+            const sign = (v) => v >= 0 ? '+' : '';
+            return `
+                <tr>
+                    <td>${m.key}</td>
+                    <td class="${cls(m.pnlTotal)}">${sign(m.pnlTotal)}${m.pnlTotal.toFixed(2)}</td>
+                    <td>${m.trades}</td>
+                    <td>${m.wins}/${m.losses}</td>
+                    <td>${m.winRate.toFixed(1)}%</td>
+                    <td>${m.equityInicio.toFixed(2)}</td>
+                    <td>${m.equityFin.toFixed(2)}</td>
+                    <td>${m.peak.toFixed(2)}</td>
+                    <td>${m.trough.toFixed(2)}</td>
+                    <td class="negative">${m.maxDd.toFixed(2)}%</td>
+                    <td class="${cls(m.retorno)}">${sign(m.retorno)}${m.retorno.toFixed(2)}%</td>
+                </tr>`;
+        }
+
+        function renderMonthlyTables(equityData, initialCapital) {
+            const months = computeMonthlyStats(equityData, initialCapital);
+
+            const recentBody = document.getElementById('monthly-table-body');
+            if (recentBody) {
+                recentBody.innerHTML = months
+                    .slice(-24)
+                    .map(monthlyRowHtml)
+                    .join('');
+            }
+
+            const historyBody = document.getElementById('monthly-history-body');
+            if (historyBody) {
+                historyBody.innerHTML = months
+                    .map(monthlyRowHtml)
+                    .join('');
+            }
+        }
+
+        function renderMonthlyEquityCharts(equityData, initialCapital) {
+            const container = document.getElementById('monthly-equity-grid');
+            if (!container) return;
+
+            container.innerHTML = '';
+
+            const byMonth = new Map();
+            for (const row of equityData) {
+                if (!(row.x instanceof Date) || isNaN(row.x)) continue;
+                const key = monthKey(row.x);
+                if (!byMonth.has(key)) byMonth.set(key, []);
+                byMonth.get(key).push(row);
+            }
+
+            const months = [...byMonth.keys()].sort();
+            if (!months.length) {
+                container.innerHTML = '<div class="muted" style="padding: 12px;">Sin datos mensuales disponibles.</div>';
+                return;
+            }
+
+            let runningEquity = initialCapital;
+
+            for (const key of months) {
+                const rows = byMonth.get(key).slice().sort((a, b) => a.x - b.x);
+                const startEquity = runningEquity;
+                const endEquity = rows[rows.length - 1].y;
+                const retorno = startEquity ? (endEquity / startEquity - 1) * 100 : 0;
+                const positive = endEquity >= startEquity;
+
+                const series = [{ x: rows[0].x, y: startEquity }].concat(
+                    rows.map(r => ({ x: r.x, y: r.y }))
+                );
+
+                const wrapper = document.createElement('div');
+                wrapper.className = 'card';
+                wrapper.style.padding = '16px';
+                wrapper.innerHTML = `
+                    <div class="card-header" style="margin-bottom: 12px; padding-bottom: 8px;">
+                        <div>
+                            <div class="card-title" style="font-size: 14px;">${key}</div>
+                            <div class="card-subtitle">${rows.length} trades · <span class="${positive ? 'positive' : 'negative'}">${positive ? '+' : ''}${retorno.toFixed(2)}%</span></div>
+                        </div>
+                    </div>
+                    <div class="chart-container" style="height: 220px;">
+                        <canvas></canvas>
+                    </div>`;
+                container.appendChild(wrapper);
+
+                new Chart(wrapper.querySelector('canvas'), {
+                    type: 'line',
+                    data: {
+                        datasets: [{
+                            label: 'Equity ($)',
+                            data: series,
+                            borderColor: positive ? 'rgba(34, 197, 94, 1)' : 'rgba(239, 68, 68, 1)',
+                            backgroundColor: positive ? 'rgba(34, 197, 94, 0.12)' : 'rgba(239, 68, 68, 0.12)',
+                            borderWidth: 2,
+                            tension: 0.1,
+                            pointRadius: 0,
+                            pointHoverRadius: 5,
+                            fill: true
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        interaction: { mode: 'index', intersect: false },
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: {
+                                backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                                titleColor: 'var(--text-primary)',
+                                bodyColor: 'var(--text-secondary)',
+                                borderColor: 'var(--border)',
+                                borderWidth: 1,
+                                callbacks: {
+                                    title: (context) => new Date(context[0].parsed.x).toLocaleString('es-ES'),
+                                    label: (context) => `Equity: $${context.parsed.y.toFixed(2)}`
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                type: 'time',
+                                time: {
+                                    displayFormats: {
+                                        day: 'dd/MM',
+                                        hour: 'dd/MM HH:mm'
+                                    }
+                                },
+                                ticks: { color: 'rgb(203, 213, 225)', maxTicksLimit: 5 },
+                                grid: { color: 'rgba(148, 163, 184, 0.15)' }
+                            },
+                            y: {
+                                ticks: { color: 'rgb(203, 213, 225)', maxTicksLimit: 5, callback: v => '$' + v.toFixed(0) },
+                                grid: { color: 'rgba(148, 163, 184, 0.15)' }
+                            }
+                        }
+                    }
+                });
+
+                runningEquity = endEquity;
+            }
+        }
+
+        function formatCurrency(value) {
+            return new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'USD' }).format(value);
+        }
+        
+        function formatDateTime(dateStr) {
+            try {
+                const date = new Date(dateStr);
+                return date.toLocaleString('es-ES', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+            } catch (e) {
+                return dateStr;
+            }
+        }
+        
+        function parseCsvLine(line) {
+            const result = [];
+            let current = '';
+            let inQuotes = false;
+            for (let i = 0; i < line.length; i++) {
+                const char = line[i];
+                if (char === '"') {
+                    inQuotes = !inQuotes;
+                } else if (char === ',' && !inQuotes) {
+                    result.push(current);
+                    current = '';
+                } else {
+                    current += char;
+                }
+            }
+            result.push(current);
+            return result;
+        }
+        
+        loadData();
+    </script>
+</body>
+</html>

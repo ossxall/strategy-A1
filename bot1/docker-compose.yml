@@ -1,0 +1,80 @@
+# Docker Compose para bot1: colector de datos (feed.py) + bot de señales (bot.py)
+# =============================================================================
+# - Ambos servicios comparten la imagen y un volumen con feed.db y signal.db.
+# - `feed` escribe feed.db (WAL); `bot` solo lee feed.db y escribe signal.db.
+# - Resiliencia: `restart: unless-stopped`, `init: true`, healthchecks reales
+#   y límites de log. El bot solo espera a que el contenedor del feed ARRANQUE
+#   (`service_started`), no a que esté sano: bot.py tolera que feed.db falte o
+#   esté vacío y reintenta cada POLL_SECONDS, así que nunca queda bloqueado si
+#   el feed tarda o queda unhealthy.
+#
+# Uso (desde ./bot1):
+#   docker compose up -d --build
+#   docker compose ps
+#   docker compose logs -f bot
+#   docker compose down            # detiene y mantiene el volumen de datos
+#
+# El archivo .env del directorio define SYMBOL, INTERVAL, STRATEGY_*, etc.
+
+name: blacker-bot1
+
+x-common: &common
+  build:
+    context: .
+    # La estrategia vive un nivel arriba; se inyecta como contexto extra para
+    # no tener que enviar al daemon todo el directorio padre (incluye data/).
+    additional_contexts:
+      strategy: ../strategy
+  image: blacker-bot1:latest
+  working_dir: /app/legacy/bot1
+  env_file:
+    - .env
+  volumes:
+    - bot_data:/data
+  init: true
+  restart: unless-stopped
+  stop_grace_period: 30s
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "5"
+
+services:
+  feed:
+    <<: *common
+    command: ["python", "feed.py"]
+    environment:
+      # Absoluto para que feed.py y bot.py apunten al mismo archivo.
+      DB_PATH: /data/feed.db
+    healthcheck:
+      test: ["CMD", "python", "healthcheck.py", "feed"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+  bot:
+    <<: *common
+    command: ["python", "bot.py"]
+    depends_on:
+      feed:
+        # Solo orden de arranque, no salud: el bot arranca igual y espera datos.
+        condition: service_started
+    environment:
+      DB_PATH: /data/feed.db
+      SIGNAL_DB: /data/signal.db
+      BOT_HEARTBEAT: /data/bot1.heartbeat
+      LIVE_ONLY: "true"
+    healthcheck:
+      test: ["CMD", "python", "healthcheck.py", "bot"]
+      interval: 60s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+volumes:
+  bot_data:
+    name: blacker-bot1-data

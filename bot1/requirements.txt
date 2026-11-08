@@ -1,0 +1,8 @@
+# Dependencias del colector (feed.py) y del bot (bot.py + strategy.py).
+# Mínimos compatibles; los tests se hicieron con pandas 3.0.3 / numpy 2.5.1.
+pandas>=2.2
+numpy>=1.26
+TA-Lib>=0.4.32
+requests>=2.31
+websocket-client>=1.7
+python-dotenv>=1.0
