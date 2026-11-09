@@ -13,6 +13,7 @@ from strategy.strategy import (
     EMACrossStrategy,
     talib,
 )
+from strategy.utils import resample_ohlcv
 
 
 def make_bars(side, periods=3):
@@ -42,13 +43,8 @@ def prepared_engine(
     signed_bull=None,
     signed_bear=None,
     doji=None,
-    loss_pct=0.7,
 ):
     bars = make_bars(side)
-    if loss_pct != 0.7:
-        bars.loc[bars.index[1], "close"] = 100.0 * (
-            1.0 - loss_pct / 100.0 if side == 1 else 1.0 + loss_pct / 100.0
-        )
     zeros = np.zeros(len(bars), dtype=bool)
     cfg = Config(
         timeframe="30min",
@@ -99,11 +95,11 @@ def prepared_engine(
         (-1, "CANDLE_PATTERN_BULL", "bull"),
     ],
 )
-def test_reversal_pattern_requires_doji_break_and_exits_next_open(side, reason, reversal):
+def test_reversal_pattern_exits_on_its_candle_close_and_next_open(side, reason, reversal):
     kwargs = {
-        "reversal_bear": [True, False, False] if reversal == "bear" else None,
-        "reversal_bull": [True, False, False] if reversal == "bull" else None,
-        "doji": [True, False, False],
+        "reversal_bear": [False, True, False] if reversal == "bear" else None,
+        "reversal_bull": [False, True, False] if reversal == "bull" else None,
+        "doji": [False, True, False],
     }
     engine = prepared_engine(side, **kwargs)
 
@@ -124,61 +120,35 @@ def test_doji_alone_never_exits(side):
     assert engine.position is not None
 
 
-def test_reversal_without_doji_confirmation_does_not_exit():
-    engine = prepared_engine(1, reversal_bear=[True, False, False])
+def test_directional_pattern_exits_without_doji_or_open_loss():
+    engine = prepared_engine(1, reversal_bear=[False, True, False])
+    engine.c = engine.c.copy()
+    engine.c[1] = 100.05
 
     trades, _ = engine.run()
 
-    assert trades.empty
-    assert engine.position is not None
+    assert trades.reason.tolist() == ["CANDLE_PATTERN_BEAR"]
+    assert trades.exit_time.iloc[0] == engine.bars.index[2]
 
 
-def test_reversal_must_break_the_pattern_extreme_while_position_is_losing():
+def test_signed_pattern_exits_without_doji_or_loss_threshold():
     engine = prepared_engine(
         1,
-        reversal_bear=[True, False, False],
-        doji=[True, False, False],
-        loss_pct=0.5,
+        signed_bear=[False, True, False],
     )
-
-    trades, _ = engine.run()
-
-    assert trades.empty
-    assert engine.position is not None
-
-
-def test_signed_patterns_use_stricter_loss_threshold():
-    engine = prepared_engine(
-        1,
-        signed_bear=[True, False, False],
-        doji=[True, False, False],
-        loss_pct=0.9,
-    )
+    engine.c = engine.c.copy()
+    engine.c[1] = 100.05
 
     trades, _ = engine.run()
 
     assert trades.reason.tolist() == ["CANDLE_SIGNED_BEAR"]
 
 
-def test_signed_pattern_does_not_exit_before_its_stricter_loss_threshold():
-    engine = prepared_engine(
-        1,
-        signed_bear=[True, False, False],
-        doji=[True, False, False],
-        loss_pct=0.7,
-    )
-
-    trades, _ = engine.run()
-
-    assert trades.empty
-    assert engine.position is not None
-
-
 def test_exit_percentage_scales_out_once_per_position():
     engine = prepared_engine(
         1,
-        reversal_bear=[True, False, False],
-        doji=[True, False, False],
+        reversal_bear=[False, True, False],
+        doji=[False, True, False],
     )
     engine.cfg.candle_pattern_exit_pct = 50.0
 
@@ -188,6 +158,33 @@ def test_exit_percentage_scales_out_once_per_position():
     assert engine.position is not None
     assert engine.position.quantity == pytest.approx(0.5)
     assert engine.position.candle_exit_done
+
+
+def test_pattern_can_exit_on_first_bar_after_initial_entry():
+    engine = prepared_engine(
+        1,
+        reversal_bear=[True, False, False],
+    )
+
+    trades, _ = engine.run()
+
+    assert trades.reason.tolist() == ["CANDLE_PATTERN_BEAR"]
+    assert trades.exit_time.iloc[0] == engine.bars.index[1]
+    assert trades.exit_price.iloc[0] == engine.bars.open.iloc[1]
+
+
+def test_pattern_before_position_entry_does_not_trigger_later():
+    engine = prepared_engine(
+        1,
+        reversal_bear=[True, False, False],
+        doji=[True, False, False],
+    )
+    engine.position.entry_bar_index = 1
+
+    trades, _ = engine.run()
+
+    assert trades.empty
+    assert engine.position is not None
 
 
 def test_prepare_candle_exits_keeps_all_talib_categories_separate(monkeypatch):
@@ -212,7 +209,11 @@ def test_prepare_candle_exits_keeps_all_talib_categories_separate(monkeypatch):
     bars = make_bars(1)
 
     reversal_bull, reversal_bear, signed_bull, signed_bear, doji = (
-        EMACrossStrategy(Config(timeframe="30min", streak_trend_only=False))
+        EMACrossStrategy(Config(
+            timeframe="30min",
+            candle_pattern_exit_timeframe=("30min",),
+            streak_trend_only=False,
+        ))
         .prepare_candle_exits(bars)
     )
 
@@ -221,3 +222,54 @@ def test_prepare_candle_exits_keeps_all_talib_categories_separate(monkeypatch):
     assert signed_bull.tolist() == [False, False, True]
     assert signed_bear.tolist() == [False, True, False]
     assert doji.tolist() == [False, False, True]
+
+
+def test_candle_exit_patterns_align_a_configured_higher_timeframe(monkeypatch):
+    patterns = (
+        LONG_CANDLE_PATTERNS + SHORT_CANDLE_PATTERNS
+        + SIGNED_CANDLE_PATTERNS + NEUTRAL_CANDLE_PATTERNS
+    )
+
+    def zero_pattern(open_, high, low, close):
+        return np.zeros(len(close), dtype=np.int32)
+
+    for name in set(patterns):
+        monkeypatch.setattr(talib, name, zero_pattern)
+
+    def higher_timeframe_pattern(open_, high, low, close):
+        values = np.zeros(len(close), dtype=np.int32)
+        if len(values) == 2:
+            values[-1] = -100
+        return values
+
+    def higher_timeframe_doji(open_, high, low, close):
+        values = np.zeros(len(close), dtype=np.int32)
+        if len(values) == 2:
+            values[-1] = 100
+        return values
+
+    monkeypatch.setattr(talib, "CDLHANGINGMAN", higher_timeframe_pattern)
+    monkeypatch.setattr(talib, "CDLDOJI", higher_timeframe_doji)
+
+    index = pd.date_range("2026-01-01", periods=8 * 60, freq="min", tz="UTC")
+    raw = pd.DataFrame(
+        {"open": 100.0, "high": 101.0, "low": 99.0, "close": 100.0, "volume": 1.0},
+        index=index,
+    )
+    bars = resample_ohlcv(raw, "30min")
+    cfg = Config(
+        timeframe="30min",
+        candle_pattern_exit_timeframe=("4h",),
+        streak_trend_only=False,
+    )
+
+    _, reversal_bear, _, _, doji = EMACrossStrategy(cfg).prepare_candle_exits(bars, raw)
+
+    assert np.flatnonzero(reversal_bear).tolist() == [15]
+    assert np.flatnonzero(doji).tolist() == [15]
+
+
+def test_candle_pattern_exit_timeframe_defaults_to_30m_and_4h():
+    cfg = Config()
+
+    assert cfg.candle_pattern_exit_timeframes == ("15min", "30min", "1h", "4h", "1D")

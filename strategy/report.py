@@ -430,7 +430,7 @@ def build_backtest_figure(
                                 or candle_exit is None or doji_exit is None):
             auto_adx, auto_weak, auto_div = engine.prepare_exits(raw, bars)
             (auto_candle_bull, auto_candle_bear, auto_signed_bull,
-             auto_signed_bear, auto_doji) = engine.prepare_candle_exits(bars)
+             auto_signed_bear, auto_doji) = engine.prepare_candle_exits(bars, raw)
             auto_candle = (
                 (auto_candle_bull | auto_signed_bull).astype(np.int8)
                 - (auto_candle_bear | auto_signed_bear).astype(np.int8)

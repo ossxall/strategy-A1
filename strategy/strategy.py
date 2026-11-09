@@ -345,14 +345,14 @@ class EMACrossStrategy:
 
         return long_confirmation, short_confirmation, neutral_confirmation
 
-    def _candle_exit_patterns(self, bars: pd.DataFrame) -> tuple[
+    def _candle_exit_patterns(self, bars: pd.DataFrame, raw: Optional[pd.DataFrame] = None) -> tuple[
         np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray
     ]:
         """Clasifica TA-Lib en reversión alcista/bajista, signo bidireccional y doji.
 
-        Las salidas se calculan en el timeframe de estrategia (sin patrones de
-        marcos inferiores, que generaban ruido). Los dojis son sólo confluencia:
-        por sí solos nunca indican dirección ni cierran una posición.
+        Las salidas se calculan en los timeframes configurados y se alinean al
+        cierre de la vela de estrategia usando sólo velas ya cerradas. Los dojis
+        son informativos y por sí solos nunca cierran una posición.
         """
         n = len(bars)
         reversal_bull = np.zeros(n, dtype=bool)
@@ -363,20 +363,88 @@ class EMACrossStrategy:
         if not n:
             return reversal_bull, reversal_bear, signed_bull, signed_bear, neutral
 
-        o, h, low, c = (
-            np.ascontiguousarray(bars[column].to_numpy(dtype=np.float64))
-            for column in ("open", "high", "low", "close")
-        )
-        for name in LONG_CANDLE_PATTERNS:
-            reversal_bull |= getattr(talib, name)(o, h, low, c) != 0
-        for name in SHORT_CANDLE_PATTERNS:
-            reversal_bear |= getattr(talib, name)(o, h, low, c) != 0
-        for name in SIGNED_CANDLE_PATTERNS:
-            values = getattr(talib, name)(o, h, low, c)
-            signed_bull |= values > 0
-            signed_bear |= values < 0
-        for name in NEUTRAL_CANDLE_PATTERNS:
-            neutral |= getattr(talib, name)(o, h, low, c) != 0
+        strategy_delta = pd.Timedelta(self.cfg.timeframe)
+        raw_available = raw is not None and not raw.empty
+        raw_delta = pd.Timedelta(minutes=source_minutes(raw)) if raw_available else None
+
+        def align_closed(values: np.ndarray, frame: pd.DataFrame,
+                         frame_delta: pd.Timedelta) -> np.ndarray:
+            """Alinea eventos al primer cierre de estrategia posterior al del marco."""
+            if frame.index.equals(bars.index) and frame_delta == strategy_delta:
+                return values.copy()
+            aligned = np.zeros(n, dtype=bool)
+            source_ends = (frame.index + frame_delta).asi8
+            target_starts = bars.index.asi8
+            target_ends = (bars.index + strategy_delta).asi8
+            target_locs = np.searchsorted(target_ends, source_ends, side="left")
+            in_range = target_locs < n
+            safe_locs = np.minimum(target_locs, n - 1)
+            in_range &= source_ends <= target_ends[-1]
+            # Una señal justo en el inicio de una vela pertenece a la siguiente
+            # vela de estrategia, nunca a la que acaba de cerrar.
+            in_range &= source_ends > target_starts[safe_locs]
+            for source_loc in np.flatnonzero(in_range & values):
+                aligned[target_locs[source_loc]] = True
+            return aligned
+
+        frames: list[tuple[pd.DataFrame, pd.Timedelta]] = []
+        seen: set[tuple[int, int]] = set()
+        for timeframe in self.cfg.candle_pattern_exit_timeframes:
+            frame_delta = pd.Timedelta(timeframe)
+            frame: Optional[pd.DataFrame] = None
+            if frame_delta == strategy_delta:
+                frame = bars
+            elif raw_available:
+                assert raw_delta is not None
+                if frame_delta < raw_delta:
+                    continue
+                try:
+                    frame = raw if frame_delta == raw_delta else resample_ohlcv(raw, timeframe)
+                except ValueError:
+                    continue
+            elif frame_delta > strategy_delta:
+                try:
+                    frame = resample_ohlcv(bars, timeframe)
+                except ValueError:
+                    continue
+            else:
+                # Sin datos de origen no es posible recuperar un marco menor
+                # que las velas de estrategia.
+                continue
+            if frame is None or frame.empty:
+                continue
+            key = (int(frame_delta.value), int(frame.index[0].value))
+            if key in seen:
+                continue
+            seen.add(key)
+            frames.append((frame, frame_delta))
+
+        for frame, frame_delta in frames:
+            o, h, low, c = (
+                np.ascontiguousarray(frame[column].to_numpy(dtype=np.float64))
+                for column in ("open", "high", "low", "close")
+            )
+            frame_reversal_bull = np.zeros(len(frame), dtype=bool)
+            frame_reversal_bear = np.zeros(len(frame), dtype=bool)
+            frame_signed_bull = np.zeros(len(frame), dtype=bool)
+            frame_signed_bear = np.zeros(len(frame), dtype=bool)
+            frame_neutral = np.zeros(len(frame), dtype=bool)
+            for name in LONG_CANDLE_PATTERNS:
+                frame_reversal_bull |= getattr(talib, name)(o, h, low, c) != 0
+            for name in SHORT_CANDLE_PATTERNS:
+                frame_reversal_bear |= getattr(talib, name)(o, h, low, c) != 0
+            for name in SIGNED_CANDLE_PATTERNS:
+                values = getattr(talib, name)(o, h, low, c)
+                frame_signed_bull |= values > 0
+                frame_signed_bear |= values < 0
+            for name in NEUTRAL_CANDLE_PATTERNS:
+                frame_neutral |= getattr(talib, name)(o, h, low, c) != 0
+
+            reversal_bull |= align_closed(frame_reversal_bull, frame, frame_delta)
+            reversal_bear |= align_closed(frame_reversal_bear, frame, frame_delta)
+            signed_bull |= align_closed(frame_signed_bull, frame, frame_delta)
+            signed_bear |= align_closed(frame_signed_bear, frame, frame_delta)
+            neutral |= align_closed(frame_neutral, frame, frame_delta)
         return reversal_bull, reversal_bear, signed_bull, signed_bear, neutral
 
     def _long_candle_confirmation(
@@ -454,19 +522,19 @@ class EMACrossStrategy:
             build_rsi_divergence_exit(raw, bars, self.cfg),
         )
 
-    def prepare_candle_exits(self, bars: pd.DataFrame) -> tuple[
+    def prepare_candle_exits(self, bars: pd.DataFrame, raw: Optional[pd.DataFrame] = None) -> tuple[
         Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray],
         Optional[np.ndarray], Optional[np.ndarray],
     ]:
         """Devuelve señales TA-Lib por categoría, sin mezclar signo ni dojis.
 
         Orden: reversión alcista/bajista (15/14), bidireccional alcista/bajista
-        (27) y doji neutral (5). Todas se calculan sobre velas de estrategia
-        cerradas para evitar el ruido de patrones intratimeframe.
+        (27) y doji neutral (5). Se evalúan sólo los timeframes configurados y
+        se usan velas ya cerradas.
         """
         if not self.cfg.candle_pattern_exit_enabled:
             return None, None, None, None, None
-        return self._candle_exit_patterns(bars)
+        return self._candle_exit_patterns(bars, raw)
 
 # ---------------------------------------------------------------------------
 # Motor de ejecución
@@ -771,37 +839,24 @@ class Backtester:
         return None
 
     def _candle_pattern_exit_reason(self, i: int) -> Optional[str]:
-        """Salida TA-Lib confirmada por doji, ruptura de extremo y pérdida abierta.
+        """Salida TA-Lib ante un patrón contrario en la vela actual.
 
-        Una señal de patrón por sí sola no cierra la posición: durante las
-        siguientes `candle_pattern_exit_confirm_bars` velas el cierre debe
-        atravesar el mínimo/máximo del patrón y la posición debe seguir en
-        pérdida. Los patrones bidireccionales tienen un umbral más estricto.
+        Se evalúa desde la primera vela de la posición, sin buscar patrones
+        anteriores ni esperar una ruptura posterior del extremo. No requiere
+        doji ni un umbral de pérdida; los dojis neutrales solos no son señales.
         """
         pos = self.position
-        if pos is None or pos.candle_exit_done or i <= 0:
+        if pos is None or pos.candle_exit_done or i < pos.entry_bar_index:
             return None
-        pnl_pct = (self.c[i] / pos.entry_price - 1.0) * pos.side * 100.0
-        reversal_loss_pct = self.cfg.candle_pattern_loss_threshold(pos.side)
-        start = max(0, i - self.cfg.candle_pattern_exit_confirm_bars)
-        prior = np.arange(start, i)
         if pos.side == 1:
-            reversal = prior[self.candle_bear_exit[prior] & self.doji_exit[prior]]
-            signed = prior[self.signed_bear_exit[prior] & self.doji_exit[prior]]
-            if len(reversal) and pnl_pct <= -reversal_loss_pct \
-                    and np.any(self.c[i] < self.l[reversal]):
+            if self.candle_bear_exit[i]:
                 return "CANDLE_PATTERN_BEAR"
-            if len(signed) and pnl_pct <= -self.cfg.candle_pattern_exit_signed_loss_pct \
-                    and np.any(self.c[i] < self.l[signed]):
+            if self.signed_bear_exit[i]:
                 return "CANDLE_SIGNED_BEAR"
         else:
-            reversal = prior[self.candle_bull_exit[prior] & self.doji_exit[prior]]
-            signed = prior[self.signed_bull_exit[prior] & self.doji_exit[prior]]
-            if len(reversal) and pnl_pct <= -reversal_loss_pct \
-                    and np.any(self.c[i] > self.h[reversal]):
+            if self.candle_bull_exit[i]:
                 return "CANDLE_PATTERN_BULL"
-            if len(signed) and pnl_pct <= -self.cfg.candle_pattern_exit_signed_loss_pct \
-                    and np.any(self.c[i] > self.h[signed]):
+            if self.signed_bull_exit[i]:
                 return "CANDLE_SIGNED_BULL"
         return None
 
@@ -1266,21 +1321,8 @@ def parse_args():
                    help="Usa patrones TA-Lib contrarios y dojis para salidas tempranas.")
     p.add_argument("--candle-pattern-exit-pct", type=float, default=d.candle_pattern_exit_pct,
                    help="Porcentaje de la posición a cerrar por patrón TA-Lib (default 100).")
-    p.add_argument("--candle-pattern-exit-confirm-bars", type=int,
-                   default=d.candle_pattern_exit_confirm_bars,
-                   help="Velas para confirmar la ruptura del extremo del patrón (default 4).")
-    p.add_argument("--candle-pattern-exit-loss-pct", type=float,
-                   default=d.candle_pattern_exit_loss_pct,
-                   help="Override común de pérdida para LONG/SHORT (por defecto usa umbrales por lado).")
-    p.add_argument("--candle-pattern-exit-long-loss-pct", type=float,
-                   default=d.candle_pattern_exit_long_loss_pct,
-                   help="Pérdida abierta mínima para salida LONG (default 0.65%%).")
-    p.add_argument("--candle-pattern-exit-short-loss-pct", type=float,
-                   default=d.candle_pattern_exit_short_loss_pct,
-                   help="Pérdida abierta mínima para salida SHORT (default 0.6%%).")
-    p.add_argument("--candle-pattern-exit-signed-loss-pct", type=float,
-                   default=d.candle_pattern_exit_signed_loss_pct,
-                   help="Pérdida mínima para patrones bidireccionales (default 0.8%%).")
+    p.add_argument("--candle-pattern-exit-timeframe", default=d.candle_pattern_exit_timeframe,
+                   help="Timeframe(s) de patrones TA-Lib separados por coma (default: 30min,4h).")
     p.add_argument("--ema55-touch-exit", action=argparse.BooleanOptionalAction,
                    default=d.ema55_touch_exit_enabled,
                    help="Salida LONG en 30m por toques repetidos a EMA55 sin ruptura.")
@@ -1394,11 +1436,7 @@ def config_from_args(a) -> Config:
         rsi_divergence_lookback=a.rsi_divergence_lookback,
         candle_pattern_exit_enabled=a.candle_pattern_exit,
         candle_pattern_exit_pct=a.candle_pattern_exit_pct,
-        candle_pattern_exit_confirm_bars=a.candle_pattern_exit_confirm_bars,
-        candle_pattern_exit_loss_pct=a.candle_pattern_exit_loss_pct,
-        candle_pattern_exit_long_loss_pct=a.candle_pattern_exit_long_loss_pct,
-        candle_pattern_exit_short_loss_pct=a.candle_pattern_exit_short_loss_pct,
-        candle_pattern_exit_signed_loss_pct=a.candle_pattern_exit_signed_loss_pct,
+        candle_pattern_exit_timeframe=a.candle_pattern_exit_timeframe,
         ema55_touch_exit_enabled=a.ema55_touch_exit,
         ema55_touch_tolerance_pct=a.ema55_touch_tolerance_pct,
         ema55_touch_lookback_bars=a.ema55_touch_lookback_bars,
@@ -1440,7 +1478,7 @@ def main():
     signals = strategy.generate_signals(bars, raw)
     adx_exit, weak_exit, rsi_div_exit = strategy.prepare_exits(raw, bars)
     (candle_bull_exit, candle_bear_exit, signed_bull_exit,
-     signed_bear_exit, doji_exit) = strategy.prepare_candle_exits(bars)
+     signed_bear_exit, doji_exit) = strategy.prepare_candle_exits(bars, raw)
     candle_exit = None
     if candle_bull_exit is not None:
         candle_exit = (

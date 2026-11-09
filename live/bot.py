@@ -271,11 +271,7 @@ _CONFIG_ENV = {
     "rsi_divergence_lookback": ("STRATEGY_RSI_DIVERGENCE_LOOKBACK", env_int),
     "candle_pattern_exit_enabled": ("STRATEGY_CANDLE_PATTERN_EXIT", env_bool),
     "candle_pattern_exit_pct": ("STRATEGY_CANDLE_PATTERN_EXIT_PCT", env_float),
-    "candle_pattern_exit_confirm_bars": ("STRATEGY_CANDLE_PATTERN_EXIT_CONFIRM_BARS", env_int),
-    "candle_pattern_exit_loss_pct": ("STRATEGY_CANDLE_PATTERN_EXIT_LOSS_PCT", env_float),
-    "candle_pattern_exit_long_loss_pct": ("STRATEGY_CANDLE_PATTERN_EXIT_LONG_LOSS_PCT", env_float),
-    "candle_pattern_exit_short_loss_pct": ("STRATEGY_CANDLE_PATTERN_EXIT_SHORT_LOSS_PCT", env_float),
-    "candle_pattern_exit_signed_loss_pct": ("STRATEGY_CANDLE_PATTERN_EXIT_SIGNED_LOSS_PCT", env_float),
+    "candle_pattern_exit_timeframe": ("STRATEGY_CANDLE_PATTERN_EXIT_TIMEFRAME", env_str),
     "ema55_touch_exit_enabled": ("STRATEGY_EMA55_TOUCH_EXIT", env_bool),
     "ema55_touch_tolerance_pct": ("STRATEGY_EMA55_TOUCH_TOLERANCE_PCT", env_float),
     "ema55_touch_lookback_bars": ("STRATEGY_EMA55_TOUCH_LOOKBACK_BARS", env_int),
@@ -489,7 +485,7 @@ def series_frame(
             signals = strategy.generate_signals(bars, raw)
             exits = (
                 *strategy.prepare_exits(raw, bars),
-                *strategy.prepare_candle_exits(bars),
+                *strategy.prepare_candle_exits(bars, raw),
             )
         else:
             signals, *exits = computed
@@ -845,7 +841,7 @@ class SignalBot:
         signals = self.strategy.generate_signals(bars, raw)
         adx_exit, weak_exit, rsi_div_exit = self.strategy.prepare_exits(raw, bars)
         (candle_bull_exit, candle_bear_exit, signed_bull_exit,
-         signed_bear_exit, doji_exit) = self.strategy.prepare_candle_exits(bars)
+         signed_bear_exit, doji_exit) = self.strategy.prepare_candle_exits(bars, raw)
         events = build_events(
             bars, signals, adx_exit, weak_exit, rsi_div_exit,
             self.cfg, self.symbol, self.interval,
