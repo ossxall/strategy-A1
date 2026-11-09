@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Strategy 2 — EMA Cross + ADX / EMA Weakening
+Strategy 2 — EMA Cross + MACD + ADX / EMA Weakening
 ============================================
 
 Gestión de salida por defecto: take-profit parcial a 1R (50%) y stop a
@@ -201,6 +201,53 @@ class EMACrossStrategy:
             return None
         return upper, upper_tf
 
+    def _macd_line(self, bars: pd.DataFrame, raw: Optional[pd.DataFrame]) -> np.ndarray:
+        """Calcula la línea MACD en su timeframe y la alinea sin lookahead a ``bars``."""
+        cfg = self.cfg
+        macd_timeframe = cfg.macd_timeframe or cfg.timeframe
+        macd_delta = pd.Timedelta(macd_timeframe)
+        strategy_delta = pd.Timedelta(cfg.timeframe)
+
+        if macd_delta < strategy_delta:
+            if raw is None or raw.empty:
+                raise ValueError(
+                    "macd_timeframe inferior a timeframe requiere datos raw de mayor resolución."
+                )
+            raw_delta = pd.Timedelta(minutes=source_minutes(raw))
+            if raw_delta > macd_delta:
+                raise ValueError(
+                    f"Los datos raw ({raw_delta}) no tienen resolución suficiente para "
+                    f"macd_timeframe={macd_timeframe}."
+                )
+            source = raw if raw_delta == macd_delta else resample_ohlcv(raw, macd_timeframe)
+        elif macd_delta == strategy_delta:
+            source = bars
+        else:
+            source = resample_ohlcv(bars, macd_timeframe)
+
+        if len(source):
+            close = np.ascontiguousarray(source.close.to_numpy(dtype=np.float64))
+            macd_line, _, _ = talib.MACD(
+                close,
+                fastperiod=cfg.macd_fast,
+                slowperiod=cfg.macd_slow,
+                signalperiod=cfg.macd_signal,
+            )
+            macd_line = np.asarray(macd_line, dtype=float)
+        else:
+            macd_line = np.empty(0, dtype=float)
+
+        if macd_delta == strategy_delta:
+            return macd_line
+        return align_closed_values(
+            source.index,
+            macd_line,
+            bars.index,
+            macd_timeframe,
+            cfg.timeframe,
+            fill=np.nan,
+        )
+
     def trend_bias(self, bars: pd.DataFrame) -> np.ndarray:
         """Sesgo de tendencia (+1 alcista, -1 bajista, 0 sin información).
 
@@ -351,6 +398,8 @@ class EMACrossStrategy:
         cfg = self.cfg
         fast = ema(bars.close, cfg.ema_fast).to_numpy(float)
         slow = ema(bars.close, cfg.ema_slow).to_numpy(float)
+        # Usar la línea principal MACD, no la línea de señal ni el histograma.
+        macd_line = self._macd_line(bars, raw)
         prev_fast, prev_slow = np.r_[np.nan, fast[:-1]], np.r_[np.nan, slow[:-1]]
         up = (fast > slow) & (prev_fast <= prev_slow)
         down = (fast < slow) & (prev_fast >= prev_slow)
@@ -382,13 +431,15 @@ class EMACrossStrategy:
         if cfg.entry_adx_enabled:
             allowed = np.nan_to_num(entry_adx, nan=0.0) >= cfg.entry_adx_min
             up, down = up & allowed, down & allowed
+        up, down = up & (macd_line > 0), down & (macd_line < 0)
         bias = self.trend_bias(bars) if cfg.streak_trend_only else None
         up &= valid
         down &= valid
         (long_candle_confirmation, short_candle_confirmation,
          neutral_candle_pattern) = self._candle_confirmations(bars, raw)
         output = {
-            "ema_fast": fast, "ema_slow": slow, "adx_entry": entry_adx,
+            "ema_fast": fast, "ema_slow": slow, "macd_line": macd_line,
+            "adx_entry": entry_adx,
             "cross_up": up, "cross_down": down, "valid": valid,
             "long_candle_confirmation": long_candle_confirmation,
             "short_candle_confirmation": short_candle_confirmation,
@@ -1074,6 +1125,14 @@ def parse_args():
     p.add_argument("--capital", type=float, default=d.initial_capital)
     p.add_argument("--ema-fast", type=int, default=d.ema_fast)
     p.add_argument("--ema-slow", type=int, default=d.ema_slow)
+    p.add_argument("--macd-fast", type=int, default=d.macd_fast,
+                   help="Periodo rápido del MACD (default 12).")
+    p.add_argument("--macd-slow", type=int, default=d.macd_slow,
+                   help="Periodo lento del MACD (default 26).")
+    p.add_argument("--macd-signal", type=int, default=d.macd_signal,
+                   help="Periodo de señal del MACD (default 9; sólo se usa para calcular el indicador).")
+    p.add_argument("--macd-timeframe", default=d.macd_timeframe,
+                   help="Timeframe del MACD (default: el de la estrategia).")
     p.add_argument("--timeframe", default=d.timeframe)
     p.add_argument("--commission-bps", type=float, default=d.commission_bps)
     p.add_argument("--slippage-bps", type=float, default=d.slippage_bps)
@@ -1218,7 +1277,10 @@ def parse_args():
 
 
 def config_from_args(a) -> Config:
-    return Config(ema_fast=a.ema_fast, ema_slow=a.ema_slow, timeframe=a.timeframe,
+    return Config(ema_fast=a.ema_fast, ema_slow=a.ema_slow,
+        macd_fast=a.macd_fast, macd_slow=a.macd_slow, macd_signal=a.macd_signal,
+        macd_timeframe=a.macd_timeframe,
+        timeframe=a.timeframe,
         allow_long=not a.no_long, allow_short=not a.no_short, initial_capital=a.capital,
         commission_bps=a.commission_bps, slippage_bps=a.slippage_bps, risk_pct=a.risk_pct,
         max_leverage=a.max_leverage, stop_loss_pct=a.stop_loss_pct, confirm_bars=a.confirm_bars,

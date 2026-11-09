@@ -20,6 +20,12 @@ def timeframe_tuple(raw: str | list[str] | tuple[str, ...]) -> tuple[str, ...]:
 class Config:
     ema_fast: int = 55
     ema_slow: int = 200
+    # Periodos del MACD de entrada: la señal usa la línea principal respecto a cero.
+    macd_fast: int = 12
+    macd_slow: int = 26
+    macd_signal: int = 9
+    # None = usar el timeframe principal de la estrategia.
+    macd_timeframe: str | None = "1h"
     timeframe: str = "30min"
     allow_long: bool = True
     allow_short: bool = True
@@ -217,6 +223,10 @@ class Config:
     def __post_init__(self):
         if min(self.ema_fast, self.ema_slow) <= 0 or self.ema_fast >= self.ema_slow:
             raise ValueError("Se requiere 0 < ema_fast < ema_slow.")
+        if min(self.macd_fast, self.macd_slow, self.macd_signal) <= 0 or self.macd_fast >= self.macd_slow:
+            raise ValueError("Se requiere 0 < macd_fast < macd_slow y macd_signal > 0.")
+        if self.macd_timeframe is not None and pd.Timedelta(self.macd_timeframe) <= pd.Timedelta(0):
+            raise ValueError("macd_timeframe debe ser positivo o None para usar timeframe.")
         if pd.Timedelta(self.timeframe) <= pd.Timedelta(0):
             raise ValueError("timeframe debe ser positivo.")
         for timeframe in self.adx_timeframes:
