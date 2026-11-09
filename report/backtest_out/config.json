@@ -53,11 +53,12 @@
   "rsi_divergence_pivot": 5,
   "rsi_divergence_lookback": 60,
   "candle_pattern_exit_enabled": true,
-  "candle_pattern_exit_pct": 5.0,
-  "candle_pattern_exit_timeframe": [
-    "30min",
-    "5min"
-  ],
+  "candle_pattern_exit_pct": 100.0,
+  "candle_pattern_exit_confirm_bars": 4,
+  "candle_pattern_exit_loss_pct": null,
+  "candle_pattern_exit_long_loss_pct": 0.65,
+  "candle_pattern_exit_short_loss_pct": 0.6,
+  "candle_pattern_exit_signed_loss_pct": 0.8,
   "ema55_touch_exit_enabled": true,
   "ema55_touch_tolerance_pct": 0.1,
   "ema55_touch_lookback_bars": 5,
