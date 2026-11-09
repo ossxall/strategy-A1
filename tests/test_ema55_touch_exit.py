@@ -34,7 +34,6 @@ def make_engine(closes, touches, *, side=1, timeframe="30min", entry_bar=0):
         stop_loss_pct=0,
         monthly_loss_limit_pct=0,
         force_close_at_end=False,
-        candle_pattern_exit_enabled=False,
         ema55_touch_exit_enabled=True,
         ema55_touch_lookback_bars=5,
         ema55_touch_min_touches=3,

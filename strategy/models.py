@@ -22,7 +22,6 @@ class Position:
     partial_entry_done: bool = False    # True si el scale-in está completo
     entry_partial_pct: float = 100.0    # % del objetivo cubierto en 1ª entrada
     entry_bar_index: int = -1           # Índice de barra donde se hizo la 1ª entrada
-    candle_exit_done: bool = False      # Una salida TA-Lib por posición (total o parcial)
 
 
 @dataclass

@@ -379,8 +379,6 @@ def build_backtest_figure(
     opens: list | None = None,
     adds: list | None = None,
     add_skipped: list | None = None,
-    candle_exit: np.ndarray | None = None,
-    doji_exit: np.ndarray | None = None,
 ):
     """Construye una figura Plotly con todo el backtest, optimizada para web.
 
@@ -388,7 +386,7 @@ def build_backtest_figure(
 
     * velas del timeframe de la estrategia y las EMAs rápida/lenta;
     * señales de cruce (`cross_up`/`cross_down`) y salidas (`adx_exit`,
-      `weak_exit`, `rsi_div_exit`, patrones TA-Lib y dojis);
+      `weak_exit`, `rsi_div_exit`);
     * trades: entradas, salidas, unión entrada→salida, stop-loss, breakeven,
       take-profit parcial y salidas por toque a la EMA slow (motivo
       ``EMA_SLOW_TOUCH_*``), estas últimas con un marcador propio;
@@ -420,27 +418,16 @@ def build_backtest_figure(
     except ImportError as exc:  # pragma: no cover
         raise ImportError("Se requiere plotly (`pip install plotly`) para el gráfico del backtest.") from exc
 
-    if (signals is None or adx_exit is None or weak_exit is None or rsi_div_exit is None
-            or candle_exit is None or doji_exit is None):
+    if signals is None or adx_exit is None or weak_exit is None or rsi_div_exit is None:
         from strategy.strategy import EMACrossStrategy
         engine = EMACrossStrategy(cfg)
         if signals is None:
             signals = engine.generate_signals(bars, raw)
-        if raw is not None and (adx_exit is None or weak_exit is None or rsi_div_exit is None
-                                or candle_exit is None or doji_exit is None):
+        if raw is not None and (adx_exit is None or weak_exit is None or rsi_div_exit is None):
             auto_adx, auto_weak, auto_div = engine.prepare_exits(raw, bars)
-            (auto_candle_bull, auto_candle_bear, auto_signed_bull,
-             auto_signed_bear, auto_doji) = engine.prepare_candle_exits(bars)
-            auto_candle = (
-                (auto_candle_bull | auto_signed_bull).astype(np.int8)
-                - (auto_candle_bear | auto_signed_bear).astype(np.int8)
-                if auto_candle_bull is not None else None
-            )
             adx_exit = auto_adx if adx_exit is None else adx_exit
             weak_exit = auto_weak if weak_exit is None else weak_exit
             rsi_div_exit = auto_div if rsi_div_exit is None else rsi_div_exit
-            candle_exit = auto_candle if candle_exit is None else candle_exit
-            doji_exit = auto_doji if doji_exit is None else doji_exit
 
     # Recorte opcional a una ventana temporal (p. ej. un mes). Los indicadores se
     # calculan sobre la serie completa y recién después se recorta para mostrar.
@@ -457,10 +444,6 @@ def build_backtest_figure(
             weak_exit = np.asarray(weak_exit, bool)[keep]
         if rsi_div_exit is not None:
             rsi_div_exit = np.asarray(rsi_div_exit, int)[keep]
-        if candle_exit is not None:
-            candle_exit = np.asarray(candle_exit, int)[keep]
-        if doji_exit is not None:
-            doji_exit = np.asarray(doji_exit, bool)[keep]
         if trades is not None and not trades.empty:
             trades = trades[(trades["entry_time"] < win_end) & (trades["exit_time"] >= win_start)]
         if equity is not None and not equity.empty:
@@ -470,20 +453,13 @@ def build_backtest_figure(
     adx_flags = np.asarray(adx_exit, bool) if adx_exit is not None else np.zeros(n, bool)
     weak_flags = np.asarray(weak_exit, bool) if weak_exit is not None else np.zeros(n, bool)
     div_flags = np.asarray(rsi_div_exit, int) if rsi_div_exit is not None else np.zeros(n, int)
-    candle_flags = np.asarray(candle_exit, int) if candle_exit is not None else np.zeros(n, int)
-    doji_flags = np.asarray(doji_exit, bool) if doji_exit is not None else np.zeros(n, bool)
     if len(adx_flags) != n:
         adx_flags = np.zeros(n, bool)
     if len(weak_flags) != n:
         weak_flags = np.zeros(n, bool)
     if len(div_flags) != n:
         div_flags = np.zeros(n, int)
-    if len(candle_flags) != n:
-        candle_flags = np.zeros(n, int)
-    if len(doji_flags) != n:
-        doji_flags = np.zeros(n, bool)
     div_bull, div_bear = div_flags > 0, div_flags < 0
-    candle_bull, candle_bear = candle_flags > 0, candle_flags < 0
 
     adx_tfs, weak_tfs = _higher_timeframes(raw, cfg)
     if window is not None:
@@ -596,12 +572,6 @@ def build_backtest_figure(
         (weak_flags, bars_high + 3 * pad, "diamond", WEAK_EXIT_COLOR, "salida weakening"),
         (div_bull, bars_low - 2 * pad, "star", RSI_DIV_COLOR, "divergencia RSI alcista"),
         (div_bear, bars_high + 4 * pad, "star", RSI_DIV_COLOR, "divergencia RSI bajista"),
-        (candle_bull, bars_low - 3 * pad, "triangle-up-open", RSI_DIV_COLOR,
-         "patrón TA-Lib alcista (salida SHORT)"),
-        (candle_bear, bars_high + 5 * pad, "triangle-down-open", RSI_DIV_COLOR,
-         "patrón TA-Lib bajista (salida LONG)"),
-        (doji_flags, bars_high + 6 * pad, "circle-open", WEAK_EXIT_COLOR,
-         "doji TA-Lib (confirmación)"),
     ):
         if mask.any():
             fig.add_trace(_marker_trace(bars_x[mask], y[mask], label, symbol, color, 8),
@@ -987,8 +957,6 @@ def build_monthly_backtest_htmls(
     opens: list | None = None,
     adds: list | None = None,
     add_skipped: list | None = None,
-    candle_exit: np.ndarray | None = None,
-    doji_exit: np.ndarray | None = None,
 ) -> list[Path]:
     """Genera **un HTML de Plotly por mes** y un índice que los enlaza.
 
@@ -1014,7 +982,6 @@ def build_monthly_backtest_htmls(
             adx_exit=adx_exit, weak_exit=weak_exit, rsi_div_exit=rsi_div_exit, raw=raw, source=source,
             title=f"{source or 'backtest'} · {label} · {month_positions} posiciones",
             window=(start, end), html_path=target, opens=opens, adds=adds, add_skipped=add_skipped,
-            candle_exit=candle_exit, doji_exit=doji_exit,
         )
         written.append(target)
         links.append((label, target.name, month_positions))
@@ -1034,9 +1001,7 @@ def generate_report(trades: pd.DataFrame, equity: pd.DataFrame, cfg: Config, dat
                     plotly_path: str | Path | None = None,
                     opens: list | None = None,
                     adds: list | None = None,
-                    add_skipped: list | None = None,
-                    candle_exit: np.ndarray | None = None,
-                    doji_exit: np.ndarray | None = None) -> dict:
+                    add_skipped: list | None = None) -> dict:
     """Calcula métricas, imprime el informe, guarda outputs y genera los gráficos.
 
     Punto de entrada único que unifica `calculate_metrics`, `print_report`,
@@ -1059,6 +1024,6 @@ def generate_report(trades: pd.DataFrame, equity: pd.DataFrame, cfg: Config, dat
             data, cfg, signals=signals, trades=trades, equity=equity,
             adx_exit=adx_exit, weak_exit=weak_exit, rsi_div_exit=rsi_div_exit, raw=raw, source=source,
             output_dir=output_dir, index_path=plotly_path, opens=opens, adds=adds,
-            add_skipped=add_skipped, candle_exit=candle_exit, doji_exit=doji_exit,
+            add_skipped=add_skipped,
         )
     return metrics

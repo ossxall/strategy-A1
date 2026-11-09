@@ -97,20 +97,6 @@ class Config:
     rsi_divergence_pivot: int = 5      # Velas a cada lado para confirmar un pivote
     rsi_divergence_lookback: int = 60  # Ventana hacia atrás para el pivote previo
 
-    # --- Salida por patrones de velas TA-Lib -------------------------------
-    # Un patrón bajista cierra/reduce LONG; uno alcista cierra/reduce SHORT.
-    # Los dojis neutrales sólo confirman el patrón contrario, nunca salen solos.
-    candle_pattern_exit_enabled: bool = True
-    candle_pattern_exit_pct: float = 100.0
-    candle_pattern_exit_confirm_bars: int = 4
-    # Los umbrales direccionales permiten compensar la asimetría LONG/SHORT.
-    # El umbral común es un override retrocompatible; None usa los dos valores.
-    candle_pattern_exit_loss_pct: float | None = None
-    candle_pattern_exit_long_loss_pct: float = 0.65
-    candle_pattern_exit_short_loss_pct: float = 0.6
-    # Bidireccionales: umbral más estricto para compensar el mayor ruido.
-    candle_pattern_exit_signed_loss_pct: float = 0.8
-
     # DI direccional modula el tamaño de entrada; no bloquea señales.
     entry_dmi_risk_scaling_enabled: bool = True
     entry_dmi_risk_base: float = 0.9
@@ -228,13 +214,6 @@ class Config:
         """Timeframes de divergencia RSI normalizados; la salida usa OR entre ellos."""
         return timeframe_tuple(self.rsi_divergence_timeframe)
 
-    def candle_pattern_loss_threshold(self, side: int) -> float:
-        """Umbral de pérdida para patrones de reversión; el override común gana."""
-        if self.candle_pattern_exit_loss_pct is not None:
-            return self.candle_pattern_exit_loss_pct
-        return self.candle_pattern_exit_long_loss_pct if side == 1 \
-            else self.candle_pattern_exit_short_loss_pct
-
     def __post_init__(self):
         if min(self.ema_fast, self.ema_slow) <= 0 or self.ema_fast >= self.ema_slow:
             raise ValueError("Se requiere 0 < ema_fast < ema_slow.")
@@ -311,20 +290,6 @@ class Config:
                 raise ValueError("rsi_divergence_pivot debe ser >= 1.")
             if self.rsi_divergence_lookback < 1:
                 raise ValueError("rsi_divergence_lookback debe ser >= 1.")
-        if not 0 < self.candle_pattern_exit_pct <= 100:
-            raise ValueError("candle_pattern_exit_pct debe estar en (0, 100].")
-        if self.candle_pattern_exit_confirm_bars < 1:
-            raise ValueError("candle_pattern_exit_confirm_bars debe ser >= 1.")
-        reversal_loss_thresholds = (
-            self.candle_pattern_exit_long_loss_pct,
-            self.candle_pattern_exit_short_loss_pct,
-            self.candle_pattern_exit_signed_loss_pct,
-        )
-        if min(reversal_loss_thresholds) < 0 or (
-            self.candle_pattern_exit_loss_pct is not None
-            and self.candle_pattern_exit_loss_pct < 0
-        ):
-            raise ValueError("Los umbrales de pérdida de salidas TA-Lib no pueden ser negativos.")
         if (self.ema55_touch_tolerance_pct < 0 or self.ema55_touch_breakout_buffer_pct < 0
                 or self.ema55_touch_exit_loss_pct < 0
                 or self.ema55_touch_short_exit_loss_pct < 0):

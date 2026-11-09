@@ -21,12 +21,6 @@ con máximos más altos, RSI con máximos más bajos) cierra un LONG y la alcist
 pivote de precio se confirma tras `rsi_divergence_pivot` velas y se compara con
 el pivote anterior del mismo tipo en `rsi_divergence_lookback` velas.
 
-Los patrones TA-Lib también pueden cerrar/reducir una posición. Los de
-reversión y los bidireccionales se consideran contra la posición según su signo;
-un doji sólo confirma el patrón. Además, el precio debe romper el extremo de la
-vela y la posición debe superar el umbral de pérdida configurado, para evitar
-salidas por ruido (`candle_pattern_exit_*`).
-
 Archivo único con API reutilizable para backtesting y bots.
 
 Protecciones de riesgo (ver `Config`):
@@ -345,40 +339,6 @@ class EMACrossStrategy:
 
         return long_confirmation, short_confirmation, neutral_confirmation
 
-    def _candle_exit_patterns(self, bars: pd.DataFrame) -> tuple[
-        np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray
-    ]:
-        """Clasifica TA-Lib en reversión alcista/bajista, signo bidireccional y doji.
-
-        Las salidas se calculan en el timeframe de estrategia (sin patrones de
-        marcos inferiores, que generaban ruido). Los dojis son sólo confluencia:
-        por sí solos nunca indican dirección ni cierran una posición.
-        """
-        n = len(bars)
-        reversal_bull = np.zeros(n, dtype=bool)
-        reversal_bear = np.zeros(n, dtype=bool)
-        signed_bull = np.zeros(n, dtype=bool)
-        signed_bear = np.zeros(n, dtype=bool)
-        neutral = np.zeros(n, dtype=bool)
-        if not n:
-            return reversal_bull, reversal_bear, signed_bull, signed_bear, neutral
-
-        o, h, low, c = (
-            np.ascontiguousarray(bars[column].to_numpy(dtype=np.float64))
-            for column in ("open", "high", "low", "close")
-        )
-        for name in LONG_CANDLE_PATTERNS:
-            reversal_bull |= getattr(talib, name)(o, h, low, c) != 0
-        for name in SHORT_CANDLE_PATTERNS:
-            reversal_bear |= getattr(talib, name)(o, h, low, c) != 0
-        for name in SIGNED_CANDLE_PATTERNS:
-            values = getattr(talib, name)(o, h, low, c)
-            signed_bull |= values > 0
-            signed_bear |= values < 0
-        for name in NEUTRAL_CANDLE_PATTERNS:
-            neutral |= getattr(talib, name)(o, h, low, c) != 0
-        return reversal_bull, reversal_bear, signed_bull, signed_bear, neutral
-
     def _long_candle_confirmation(
         self, bars: pd.DataFrame, raw: Optional[pd.DataFrame] = None
     ) -> np.ndarray:
@@ -454,20 +414,6 @@ class EMACrossStrategy:
             build_rsi_divergence_exit(raw, bars, self.cfg),
         )
 
-    def prepare_candle_exits(self, bars: pd.DataFrame) -> tuple[
-        Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray],
-        Optional[np.ndarray], Optional[np.ndarray],
-    ]:
-        """Devuelve señales TA-Lib por categoría, sin mezclar signo ni dojis.
-
-        Orden: reversión alcista/bajista (15/14), bidireccional alcista/bajista
-        (27) y doji neutral (5). Todas se calculan sobre velas de estrategia
-        cerradas para evitar el ruido de patrones intratimeframe.
-        """
-        if not self.cfg.candle_pattern_exit_enabled:
-            return None, None, None, None, None
-        return self._candle_exit_patterns(bars)
-
 # ---------------------------------------------------------------------------
 # Motor de ejecución
 # ---------------------------------------------------------------------------
@@ -477,12 +423,7 @@ class Backtester:
 
     def __init__(self, bars: pd.DataFrame, config: Config, signals: Optional[pd.DataFrame] = None,
                  adx_exit: Optional[np.ndarray] = None, weak_exit: Optional[np.ndarray] = None,
-                 rsi_div_exit: Optional[np.ndarray] = None, verbose: bool = False,
-                 candle_bull_exit: Optional[np.ndarray] = None,
-                 candle_bear_exit: Optional[np.ndarray] = None,
-                 signed_bull_exit: Optional[np.ndarray] = None,
-                 signed_bear_exit: Optional[np.ndarray] = None,
-                 doji_exit: Optional[np.ndarray] = None):
+                 rsi_div_exit: Optional[np.ndarray] = None, verbose: bool = False):
         self.bars, self.cfg, self.verbose = bars, config, verbose
         self.signals = signals if signals is not None else EMACrossStrategy(config).generate_signals(bars)
         self.entry_plus_di = (
@@ -501,26 +442,10 @@ class Backtester:
             self.signals["entry_er"].to_numpy(float)
             if "entry_er" in self.signals else None
         )
-        pattern_arrays = (
-            candle_bull_exit, candle_bear_exit, signed_bull_exit, signed_bear_exit, doji_exit
-        )
-        if config.candle_pattern_exit_enabled and any(array is None for array in pattern_arrays):
-            detected = EMACrossStrategy(config)._candle_exit_patterns(bars)
-            pattern_arrays = tuple(
-                array if array is not None else detected[index]
-                for index, array in enumerate(pattern_arrays)
-            )
-        (candle_bull_exit, candle_bear_exit, signed_bull_exit,
-         signed_bear_exit, doji_exit) = pattern_arrays
         self.adx_exit = np.asarray(adx_exit, bool) if adx_exit is not None else np.zeros(len(bars), bool)
         self.weak_exit = np.asarray(weak_exit, bool) if weak_exit is not None else np.zeros(len(bars), bool)
         # Divergencia RSI: +1 alcista (cierra SHORT), -1 bajista (cierra LONG), 0 sin señal.
         self.rsi_div = np.asarray(rsi_div_exit, int) if rsi_div_exit is not None else np.zeros(len(bars), int)
-        self.candle_bull_exit = np.asarray(candle_bull_exit, bool) if candle_bull_exit is not None else np.zeros(len(bars), bool)
-        self.candle_bear_exit = np.asarray(candle_bear_exit, bool) if candle_bear_exit is not None else np.zeros(len(bars), bool)
-        self.signed_bull_exit = np.asarray(signed_bull_exit, bool) if signed_bull_exit is not None else np.zeros(len(bars), bool)
-        self.signed_bear_exit = np.asarray(signed_bear_exit, bool) if signed_bear_exit is not None else np.zeros(len(bars), bool)
-        self.doji_exit = np.asarray(doji_exit, bool) if doji_exit is not None else np.zeros(len(bars), bool)
         self.ema55_touch_exit_active = (
             config.ema55_touch_exit_enabled
             and pd.Timedelta(config.timeframe) == pd.Timedelta("30min")
@@ -535,11 +460,6 @@ class Backtester:
         if len(self.adx_exit) != len(bars): self.adx_exit = np.zeros(len(bars), bool)
         if len(self.weak_exit) != len(bars): self.weak_exit = np.zeros(len(bars), bool)
         if len(self.rsi_div) != len(bars): self.rsi_div = np.zeros(len(bars), int)
-        if len(self.candle_bull_exit) != len(bars): self.candle_bull_exit = np.zeros(len(bars), bool)
-        if len(self.candle_bear_exit) != len(bars): self.candle_bear_exit = np.zeros(len(bars), bool)
-        if len(self.signed_bull_exit) != len(bars): self.signed_bull_exit = np.zeros(len(bars), bool)
-        if len(self.signed_bear_exit) != len(bars): self.signed_bear_exit = np.zeros(len(bars), bool)
-        if len(self.doji_exit) != len(bars): self.doji_exit = np.zeros(len(bars), bool)
         self.o, self.h, self.l, self.c = (bars[k].to_numpy(float) for k in ("open", "high", "low", "close"))
         self.times = bars.index
         self.cash = config.initial_capital
@@ -768,41 +688,6 @@ class Backtester:
             return RSI_DIVERGENCE_BEAR_REASON
         if flag > 0 and pos.side == -1:
             return RSI_DIVERGENCE_BULL_REASON
-        return None
-
-    def _candle_pattern_exit_reason(self, i: int) -> Optional[str]:
-        """Salida TA-Lib confirmada por doji, ruptura de extremo y pérdida abierta.
-
-        Una señal de patrón por sí sola no cierra la posición: durante las
-        siguientes `candle_pattern_exit_confirm_bars` velas el cierre debe
-        atravesar el mínimo/máximo del patrón y la posición debe seguir en
-        pérdida. Los patrones bidireccionales tienen un umbral más estricto.
-        """
-        pos = self.position
-        if pos is None or pos.candle_exit_done or i <= 0:
-            return None
-        pnl_pct = (self.c[i] / pos.entry_price - 1.0) * pos.side * 100.0
-        reversal_loss_pct = self.cfg.candle_pattern_loss_threshold(pos.side)
-        start = max(0, i - self.cfg.candle_pattern_exit_confirm_bars)
-        prior = np.arange(start, i)
-        if pos.side == 1:
-            reversal = prior[self.candle_bear_exit[prior] & self.doji_exit[prior]]
-            signed = prior[self.signed_bear_exit[prior] & self.doji_exit[prior]]
-            if len(reversal) and pnl_pct <= -reversal_loss_pct \
-                    and np.any(self.c[i] < self.l[reversal]):
-                return "CANDLE_PATTERN_BEAR"
-            if len(signed) and pnl_pct <= -self.cfg.candle_pattern_exit_signed_loss_pct \
-                    and np.any(self.c[i] < self.l[signed]):
-                return "CANDLE_SIGNED_BEAR"
-        else:
-            reversal = prior[self.candle_bull_exit[prior] & self.doji_exit[prior]]
-            signed = prior[self.signed_bull_exit[prior] & self.doji_exit[prior]]
-            if len(reversal) and pnl_pct <= -reversal_loss_pct \
-                    and np.any(self.c[i] > self.h[reversal]):
-                return "CANDLE_PATTERN_BULL"
-            if len(signed) and pnl_pct <= -self.cfg.candle_pattern_exit_signed_loss_pct \
-                    and np.any(self.c[i] > self.h[signed]):
-                return "CANDLE_SIGNED_BULL"
         return None
 
     def _ema55_touch_weakness_exit_reason(self, i: int) -> Optional[str]:
@@ -1154,20 +1039,14 @@ class Backtester:
                 elif self.position is not None and self.adx_exit[i]:
                     self.pending_exit = (adx_reason, cfg.adx_exit_pct)
                 elif self.position is not None:
-                    # Primero se atiende la divergencia RSI confirmada; después,
-                    # patrones TA-Lib contrarios y dojis de indecisión.
+                    # Primero se atiende la divergencia RSI confirmada.
                     div_reason = self._rsi_divergence_reason(i)
                     if div_reason is not None:
                         self.pending_exit = (div_reason, 100.0)
                     else:
-                        candle_reason = self._candle_pattern_exit_reason(i)
-                        if candle_reason is not None:
-                            self.pending_exit = (candle_reason, cfg.candle_pattern_exit_pct)
-                            self.position.candle_exit_done = True
-                        else:
-                            ema55_reason = self._ema55_touch_weakness_exit_reason(i)
-                            if ema55_reason is not None:
-                                self.pending_exit = (ema55_reason, 100.0)
+                        ema55_reason = self._ema55_touch_weakness_exit_reason(i)
+                        if ema55_reason is not None:
+                            self.pending_exit = (ema55_reason, 100.0)
 
             self._mark(self.times[i] + pd.Timedelta(cfg.timeframe), self.c[i])
             if (i + 1) % max(1, n // 10) == 0 or i == n - 1:
@@ -1261,26 +1140,6 @@ def parse_args():
                    help="Velas a cada lado para confirmar un pivote de precio (default 5).")
     p.add_argument("--rsi-divergence-lookback", type=int, default=d.rsi_divergence_lookback,
                    help="Velas hacia atrás para emparejar el pivote con el anterior (default 60).")
-    p.add_argument("--candle-pattern-exit", action=argparse.BooleanOptionalAction,
-                   default=d.candle_pattern_exit_enabled,
-                   help="Usa patrones TA-Lib contrarios y dojis para salidas tempranas.")
-    p.add_argument("--candle-pattern-exit-pct", type=float, default=d.candle_pattern_exit_pct,
-                   help="Porcentaje de la posición a cerrar por patrón TA-Lib (default 100).")
-    p.add_argument("--candle-pattern-exit-confirm-bars", type=int,
-                   default=d.candle_pattern_exit_confirm_bars,
-                   help="Velas para confirmar la ruptura del extremo del patrón (default 4).")
-    p.add_argument("--candle-pattern-exit-loss-pct", type=float,
-                   default=d.candle_pattern_exit_loss_pct,
-                   help="Override común de pérdida para LONG/SHORT (por defecto usa umbrales por lado).")
-    p.add_argument("--candle-pattern-exit-long-loss-pct", type=float,
-                   default=d.candle_pattern_exit_long_loss_pct,
-                   help="Pérdida abierta mínima para salida LONG (default 0.65%%).")
-    p.add_argument("--candle-pattern-exit-short-loss-pct", type=float,
-                   default=d.candle_pattern_exit_short_loss_pct,
-                   help="Pérdida abierta mínima para salida SHORT (default 0.6%%).")
-    p.add_argument("--candle-pattern-exit-signed-loss-pct", type=float,
-                   default=d.candle_pattern_exit_signed_loss_pct,
-                   help="Pérdida mínima para patrones bidireccionales (default 0.8%%).")
     p.add_argument("--ema55-touch-exit", action=argparse.BooleanOptionalAction,
                    default=d.ema55_touch_exit_enabled,
                    help="Salida LONG en 30m por toques repetidos a EMA55 sin ruptura.")
@@ -1392,13 +1251,6 @@ def config_from_args(a) -> Config:
         rsi_divergence_len=a.rsi_divergence_len,
         rsi_divergence_pivot=a.rsi_divergence_pivot,
         rsi_divergence_lookback=a.rsi_divergence_lookback,
-        candle_pattern_exit_enabled=a.candle_pattern_exit,
-        candle_pattern_exit_pct=a.candle_pattern_exit_pct,
-        candle_pattern_exit_confirm_bars=a.candle_pattern_exit_confirm_bars,
-        candle_pattern_exit_loss_pct=a.candle_pattern_exit_loss_pct,
-        candle_pattern_exit_long_loss_pct=a.candle_pattern_exit_long_loss_pct,
-        candle_pattern_exit_short_loss_pct=a.candle_pattern_exit_short_loss_pct,
-        candle_pattern_exit_signed_loss_pct=a.candle_pattern_exit_signed_loss_pct,
         ema55_touch_exit_enabled=a.ema55_touch_exit,
         ema55_touch_tolerance_pct=a.ema55_touch_tolerance_pct,
         ema55_touch_lookback_bars=a.ema55_touch_lookback_bars,
@@ -1439,28 +1291,13 @@ def main():
     strategy = EMACrossStrategy(cfg)
     signals = strategy.generate_signals(bars, raw)
     adx_exit, weak_exit, rsi_div_exit = strategy.prepare_exits(raw, bars)
-    (candle_bull_exit, candle_bear_exit, signed_bull_exit,
-     signed_bear_exit, doji_exit) = strategy.prepare_candle_exits(bars)
-    candle_exit = None
-    if candle_bull_exit is not None:
-        candle_exit = (
-            (candle_bull_exit | signed_bull_exit).astype(np.int8)
-            - (candle_bear_exit | signed_bear_exit).astype(np.int8)
-        )
     if cfg.adx_exit_enabled:
         print(f"[ADX] {'disponible' if adx_exit is not None else 'sin datos suficientes/timeframe incompatible'}", flush=True)
     if cfg.ema_weakening_exit_enabled:
         print(f"[WEAKENING] {'disponible' if weak_exit is not None else 'sin datos suficientes'}", flush=True)
     if cfg.rsi_divergence_exit_enabled:
         print(f"[RSI DIV] {'disponible' if rsi_div_exit is not None else 'sin datos suficientes/timeframe incompatible'}", flush=True)
-    if cfg.candle_pattern_exit_enabled:
-        print(f"[CANDLE PATTERN] {'disponible' if candle_exit is not None else 'sin datos suficientes'}", flush=True)
-    engine = Backtester(
-        bars, cfg, signals, adx_exit, weak_exit, rsi_div_exit, verbose=args.verbose,
-        candle_bull_exit=candle_bull_exit, candle_bear_exit=candle_bear_exit,
-        signed_bull_exit=signed_bull_exit, signed_bear_exit=signed_bear_exit,
-        doji_exit=doji_exit,
-    )
+    engine = Backtester(bars, cfg, signals, adx_exit, weak_exit, rsi_div_exit, verbose=args.verbose)
     trades, equity = engine.run()
     generate_report(
         trades, equity, cfg, bars, args.parquet,
@@ -1475,8 +1312,6 @@ def main():
         adx_exit=adx_exit,
         weak_exit=weak_exit,
         rsi_div_exit=rsi_div_exit,
-        candle_exit=candle_exit,
-        doji_exit=doji_exit,
         opens=engine.opened,
         adds=engine.adds,
         add_skipped=getattr(engine, "add_skipped", None),
