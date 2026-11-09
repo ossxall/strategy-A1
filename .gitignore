@@ -15,4 +15,4 @@ __pycache__
 .ruff_cache
 .env
 .venv/
-/backtest_out/html/*.html
+report/backtest_out/html
