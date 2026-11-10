@@ -83,6 +83,7 @@ from strategy.indicators import (
     ema_band_touch_flags,
     efficiency_ratio,
     adx,
+    atr_volatility_filter,
     confirmed_crosses,
     align_closed_values,
     build_adx_exit,
@@ -417,6 +418,23 @@ class EMACrossStrategy:
             if cfg.entry_adx_enabled and entry_dmi is not None
             else np.full(len(bars), np.nan)
         )
+        if cfg.entry_atr_enabled:
+            atr_filter = atr_volatility_filter(
+                bars,
+                cfg.entry_atr_len,
+                cfg.entry_atr_lookback,
+                cfg.entry_atr_min_ratio,
+                cfg.entry_atr_max_ratio,
+            )
+            entry_atr = atr_filter["atr"].to_numpy(float)
+            entry_atr_mean = atr_filter["atr_mean"].to_numpy(float)
+            entry_atr_ratio = atr_filter["atr_ratio"].to_numpy(float)
+            entry_atr_ready = atr_filter["atr_filter_ready"].to_numpy(bool)
+            atr_allowed = atr_filter["atr_filter_allowed"].to_numpy(bool)
+        else:
+            entry_atr = entry_atr_mean = entry_atr_ratio = np.full(len(bars), np.nan)
+            entry_atr_ready = np.zeros(len(bars), dtype=bool)
+            atr_allowed = np.ones(len(bars), dtype=bool)
         entry_mfi = None
         if cfg.entry_mfi_risk_scaling_enabled and "volume" in bars:
             mfi_inputs = tuple(
@@ -431,6 +449,7 @@ class EMACrossStrategy:
         if cfg.entry_adx_enabled:
             allowed = np.nan_to_num(entry_adx, nan=0.0) >= cfg.entry_adx_min
             up, down = up & allowed, down & allowed
+        up, down = up & atr_allowed, down & atr_allowed
         up, down = up & (macd_line > 0), down & (macd_line < 0)
         bias = self.trend_bias(bars) if cfg.streak_trend_only else None
         up &= valid
@@ -440,6 +459,11 @@ class EMACrossStrategy:
         output = {
             "ema_fast": fast, "ema_slow": slow, "macd_line": macd_line,
             "adx_entry": entry_adx,
+            "atr": entry_atr,
+            "atr_mean": entry_atr_mean,
+            "atr_ratio": entry_atr_ratio,
+            "atr_filter_ready": entry_atr_ready,
+            "atr_filter_allowed": atr_allowed,
             "cross_up": up, "cross_down": down, "valid": valid,
             "long_candle_confirmation": long_candle_confirmation,
             "short_candle_confirmation": short_candle_confirmation,
@@ -477,6 +501,21 @@ class Backtester:
                  rsi_div_exit: Optional[np.ndarray] = None, verbose: bool = False):
         self.bars, self.cfg, self.verbose = bars, config, verbose
         self.signals = signals if signals is not None else EMACrossStrategy(config).generate_signals(bars)
+        if config.entry_atr_enabled:
+            if "atr_filter_allowed" in self.signals:
+                self.entry_atr_allowed = self.signals["atr_filter_allowed"].to_numpy(bool)
+            else:
+                # También imponer el filtro al usar señales personalizadas en
+                # Backtester, que podrían no venir de EMACrossStrategy.
+                self.entry_atr_allowed = atr_volatility_filter(
+                    bars,
+                    config.entry_atr_len,
+                    config.entry_atr_lookback,
+                    config.entry_atr_min_ratio,
+                    config.entry_atr_max_ratio,
+                )["atr_filter_allowed"].to_numpy(bool)
+        else:
+            self.entry_atr_allowed = np.ones(len(bars), dtype=bool)
         self.entry_plus_di = (
             self.signals["entry_plus_di"].to_numpy(float)
             if "entry_plus_di" in self.signals else None
@@ -898,6 +937,8 @@ class Backtester:
             pos.partial_entry_done = True
             return False
         cfg = self.cfg
+        if cfg.entry_atr_enabled and not self.entry_atr_allowed[i]:
+            return False
         if cfg.entry_confirm_max_move_pct > 0 and pos.entry_price > 0:
             move_pct_against = (self.c[i] / pos.entry_price - 1.0) * 100.0 * pos.side
             if move_pct_against <= -cfg.entry_confirm_max_move_pct:
@@ -1072,6 +1113,8 @@ class Backtester:
 
             if not stop_hit and bool(self.signals["valid"].iloc[i]):
                 target = int(self.signals["target"].iloc[i])
+                if cfg.entry_atr_enabled and not self.entry_atr_allowed[i]:
+                    target = 0
                 if target == 1 and not cfg.allow_long: target = 0
                 if target == -1 and not cfg.allow_short: target = 0
                 current = self.position.side if self.position else 0
@@ -1143,6 +1186,17 @@ def parse_args():
     p.add_argument("--entry-adx-filter", action=argparse.BooleanOptionalAction, default=d.entry_adx_enabled)
     p.add_argument("--entry-adx-len", type=int, default=d.entry_adx_len)
     p.add_argument("--entry-adx-min", type=float, default=d.entry_adx_min)
+    p.add_argument("--entry-atr-filter", action=argparse.BooleanOptionalAction,
+                   default=d.entry_atr_enabled,
+                   help="Descarta entradas con ATR comprimido o anormalmente elevado.")
+    p.add_argument("--entry-atr-len", type=int, default=d.entry_atr_len,
+                   help="Periodo Wilder del ATR de entrada (default 14).")
+    p.add_argument("--entry-atr-lookback", type=int, default=d.entry_atr_lookback,
+                   help="Velas previas para la media ATR de referencia (default 50).")
+    p.add_argument("--entry-atr-min-ratio", type=float, default=d.entry_atr_min_ratio,
+                   help="Bloquea ATR por debajo de esta fracción de su media (default 0.5).")
+    p.add_argument("--entry-atr-max-ratio", type=float, default=d.entry_atr_max_ratio,
+                   help="Bloquea ATR por encima de este múltiplo de su media (default 2.5).")
     p.add_argument("--entry-dmi-risk-scaling", action=argparse.BooleanOptionalAction,
                    default=d.entry_dmi_risk_scaling_enabled,
                    help="Modula el tamaño con DI+/DI- sin bloquear entradas.")
@@ -1285,6 +1339,10 @@ def config_from_args(a) -> Config:
         commission_bps=a.commission_bps, slippage_bps=a.slippage_bps, risk_pct=a.risk_pct,
         max_leverage=a.max_leverage, stop_loss_pct=a.stop_loss_pct, confirm_bars=a.confirm_bars,
         entry_adx_enabled=a.entry_adx_filter, entry_adx_len=a.entry_adx_len, entry_adx_min=a.entry_adx_min,
+        entry_atr_enabled=a.entry_atr_filter, entry_atr_len=a.entry_atr_len,
+        entry_atr_lookback=a.entry_atr_lookback,
+        entry_atr_min_ratio=a.entry_atr_min_ratio,
+        entry_atr_max_ratio=a.entry_atr_max_ratio,
         entry_dmi_risk_scaling_enabled=a.entry_dmi_risk_scaling,
         entry_dmi_risk_base=a.entry_dmi_risk_base,
         entry_dmi_risk_spread_scale=a.entry_dmi_risk_spread_scale,

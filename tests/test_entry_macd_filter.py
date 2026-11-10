@@ -47,6 +47,7 @@ def configure_crosses(monkeypatch, macd_line, signal_line, histogram):
 def make_config():
     return Config(
         timeframe="30min",
+        macd_timeframe=None,
         confirm_bars=0,
         entry_adx_enabled=False,
         entry_dmi_risk_scaling_enabled=False,

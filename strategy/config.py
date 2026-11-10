@@ -41,6 +41,13 @@ class Config:
     entry_adx_enabled: bool = True
     entry_adx_len: int = 14
     entry_adx_min: float = 20.0
+    # Bloquea entradas cuando ATR(14) es anormalmente bajo/alto frente a su
+    # media de las velas anteriores. No afecta las salidas de posiciones abiertas.
+    entry_atr_enabled: bool = True
+    entry_atr_len: int = 14
+    entry_atr_lookback: int = 50
+    entry_atr_min_ratio: float = 0.5
+    entry_atr_max_ratio: float = 2.5
     # Escala el riesgo (no bloquea la señal) según DI direccional en la vela
     # confirmada: factor = clamp(base + (DI a favor - DI en contra) / escala).
     entry_dmi_risk_scaling_enabled: bool = True
@@ -254,6 +261,12 @@ class Config:
             raise ValueError("confirm_bars no puede ser negativo.")
         if self.entry_adx_enabled and (self.entry_adx_len <= 0 or self.entry_adx_min < 0):
             raise ValueError("Configuración de ADX de entrada inválida.")
+        if self.entry_atr_enabled and (
+            self.entry_atr_len <= 0 or self.entry_atr_lookback <= 0
+            or self.entry_atr_min_ratio < 0
+            or self.entry_atr_max_ratio <= self.entry_atr_min_ratio
+        ):
+            raise ValueError("Configuración del filtro ATR de entrada inválida.")
         if self.entry_dmi_risk_scaling_enabled and (
             self.entry_adx_len <= 0 or self.entry_dmi_risk_spread_scale <= 0
             or self.entry_dmi_risk_min <= 0

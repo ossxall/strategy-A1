@@ -91,6 +91,46 @@ def atr(bars: pd.DataFrame, length: int = 14) -> pd.Series:
     return pd.Series(tr, index=bars.index).ewm(alpha=1 / length, adjust=False).mean()
 
 
+def atr_volatility_filter(
+    bars: pd.DataFrame,
+    length: int = 14,
+    lookback: int = 50,
+    min_ratio: float = 0.5,
+    max_ratio: float = 2.5,
+) -> pd.DataFrame:
+    """Mide ATR relativo a su media reciente y determina si permite entradas.
+
+    La media usa exclusivamente los ``lookback`` ATR anteriores, evitando que
+    la vela actual diluya una compresión o un pico de volatilidad. Hasta contar
+    con una ventana completa el filtro permite la señal (sin referencia fiable).
+    """
+    if length <= 0 or lookback <= 0:
+        raise ValueError("Las longitudes ATR deben ser positivas.")
+    if min_ratio < 0 or max_ratio <= min_ratio:
+        raise ValueError("Los umbrales relativos ATR deben ser válidos.")
+
+    current = atr(bars, length)
+    baseline = current.shift(1).rolling(lookback, min_periods=lookback).mean()
+    ready = baseline.notna()
+    ratio = current.div(baseline)
+    # Si el mercado previo fue completamente plano, un ATR actual cero es
+    # compresión y uno positivo sigue siendo anómalo frente a esa referencia.
+    zero_baseline = ready & baseline.eq(0)
+    ratio = ratio.mask(zero_baseline & current.eq(0), 0.0)
+    ratio = ratio.mask(zero_baseline & current.gt(0), np.inf)
+    allowed = ~ready | (ratio.ge(min_ratio) & ratio.le(max_ratio))
+    return pd.DataFrame(
+        {
+            "atr": current,
+            "atr_mean": baseline,
+            "atr_ratio": ratio,
+            "atr_filter_ready": ready,
+            "atr_filter_allowed": allowed,
+        },
+        index=bars.index,
+    )
+
+
 def adx(bars: pd.DataFrame, dilen: int = 14, adxlen: int = 14) -> pd.DataFrame:
     """ADX/DI con suavizado Wilder; salida alineada con el índice de entrada."""
     if dilen <= 0 or adxlen <= 0:
