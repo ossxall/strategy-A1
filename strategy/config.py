@@ -157,7 +157,7 @@ class Config:
     # actual no siempre exige un toque real a la EMA.
     entry_partial_enabled: bool = True
     entry_partial_pct: float = 50.0        # % inicial (0 < pct < 100)
-    entry_confirm_mode: str = "pullback_retest"  # "bars" | "close_above_ema" | "pullback_retest"
+    entry_confirm_mode: str = "close_above_ema"  # "bars" | "close_above_ema" | "pullback_retest"
     entry_confirm_bars: int = 2            # Nº de velas tras entrada parcial
     entry_confirm_close_in_dir: bool = True  # Exige cierre a favor para barras y patrones
     entry_confirm_retest_tol_pct: float = 0.10  # Tolerancia % para pullback_retest

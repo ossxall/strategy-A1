@@ -79,7 +79,7 @@
   "move_stop_to_breakeven": true,
   "entry_partial_enabled": true,
   "entry_partial_pct": 50.0,
-  "entry_confirm_mode": "pullback_retest",
+  "entry_confirm_mode": "close_above_ema",
   "entry_confirm_bars": 2,
   "entry_confirm_close_in_dir": true,
   "entry_confirm_retest_tol_pct": 0.1,

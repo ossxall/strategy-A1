@@ -1,27 +1,27 @@
 {
-  "generated_at": "2026-11-10T14:42:20.905734+00:00",
+  "generated_at": "2026-11-10T19:58:22.174654+00:00",
   "previous_available": true,
   "delta": {
     "avg_pnl": {
       "previous": 142.9413798393207,
-      "current": 142.9413798393207,
-      "delta": 0.0,
-      "delta_pct": 0.0,
-      "changed": false
+      "current": 153.09235235926826,
+      "delta": 10.150972519947572,
+      "delta_pct": 7.101493305408275,
+      "changed": true
     },
     "expectancy_r": {
       "previous": 0.5175741434057285,
-      "current": 0.5175741434057285,
-      "delta": 0.0,
-      "delta_pct": 0.0,
-      "changed": false
+      "current": 0.5333955332521466,
+      "delta": 0.01582138984641812,
+      "delta_pct": 3.056835440485996,
+      "changed": true
     },
     "final_equity": {
       "previous": 65318.31399781719,
-      "current": 65318.31399781719,
-      "delta": 0.0,
-      "delta_pct": 0.0,
-      "changed": false
+      "current": 69399.83271539606,
+      "delta": 4081.518717578867,
+      "delta_pct": 6.248659017309087,
+      "changed": true
     },
     "initial_capital": {
       "previous": 10000.0,
@@ -32,17 +32,17 @@
     },
     "legs": {
       "previous": 692,
-      "current": 692,
-      "delta": 0,
-      "delta_pct": 0.0,
-      "changed": false
+      "current": 701,
+      "delta": 9,
+      "delta_pct": 1.300578034682081,
+      "changed": true
     },
     "losses": {
       "previous": 164,
-      "current": 164,
-      "delta": 0,
-      "delta_pct": 0.0,
-      "changed": false
+      "current": 159,
+      "delta": -5,
+      "delta_pct": -3.048780487804878,
+      "changed": true
     },
     "max_consecutive_losses": {
       "previous": 5,
@@ -53,38 +53,38 @@
     },
     "max_dd_peak_equity": {
       "previous": 19710.423640085595,
-      "current": 19710.423640085595,
-      "delta": 0.0,
-      "delta_pct": 0.0,
-      "changed": false
+      "current": 33406.58155016839,
+      "delta": 13696.157910082795,
+      "delta_pct": 69.48687740139977,
+      "changed": true
     },
     "max_dd_peak_vs_capital_pct": {
       "previous": 97.10423640085595,
-      "current": 97.10423640085595,
-      "delta": 0.0,
-      "delta_pct": 0.0,
-      "changed": false
+      "current": 234.0658155016839,
+      "delta": 136.96157910082792,
+      "delta_pct": 141.0459359728003,
+      "changed": true
     },
     "max_dd_trough_equity": {
       "previous": 18095.49803865995,
-      "current": 18095.49803865995,
-      "delta": 0.0,
-      "delta_pct": 0.0,
-      "changed": false
+      "current": 30658.54582247749,
+      "delta": 12563.04778381754,
+      "delta_pct": 69.4263720013527,
+      "changed": true
     },
     "max_dd_trough_vs_capital_pct": {
       "previous": 80.9549803865995,
-      "current": 80.9549803865995,
-      "delta": 0.0,
-      "delta_pct": 0.0,
-      "changed": false
+      "current": 206.5854582247749,
+      "delta": 125.6304778381754,
+      "delta_pct": 155.18560715873022,
+      "changed": true
     },
     "max_drawdown_pct": {
       "previous": -8.19325667938121,
-      "current": -8.19325667938121,
-      "delta": 0.0,
-      "delta_pct": 0.0,
-      "changed": false
+      "current": -8.226030920176719,
+      "delta": -0.032774240795507836,
+      "delta_pct": -0.4000148180147468,
+      "changed": true
     },
     "min_equity": {
       "previous": 9991.31630814838,
@@ -102,66 +102,66 @@
     },
     "net_pnl": {
       "previous": 55318.3139978171,
-      "current": 55318.3139978171,
-      "delta": 0.0,
-      "delta_pct": 0.0,
-      "changed": false
+      "current": 59399.832715396085,
+      "delta": 4081.5187175789833,
+      "delta_pct": 7.378241350125101,
+      "changed": true
     },
     "positions": {
       "previous": 387,
-      "current": 387,
-      "delta": 0,
-      "delta_pct": 0.0,
-      "changed": false
+      "current": 388,
+      "delta": 1,
+      "delta_pct": 0.2583979328165375,
+      "changed": true
     },
     "profit_factor": {
       "previous": 2.4500864310453268,
-      "current": 2.4500864310453268,
-      "delta": 0.0,
-      "delta_pct": 0.0,
-      "changed": false
+      "current": 2.441135565576017,
+      "delta": -0.008950865469309566,
+      "delta_pct": -0.3653285596741454,
+      "changed": true
     },
     "return_over_maxdd": {
       "previous": 67.5168814581738,
-      "current": 67.5168814581738,
-      "delta": 0.0,
-      "delta_pct": 0.0,
-      "changed": false
+      "current": 72.20959086076469,
+      "delta": 4.692709402590893,
+      "delta_pct": 6.950423806967435,
+      "changed": true
     },
     "return_pct": {
       "previous": 553.1831399781719,
-      "current": 553.1831399781719,
-      "delta": 0.0,
-      "delta_pct": 0.0,
-      "changed": false
+      "current": 593.9983271539605,
+      "delta": 40.81518717578865,
+      "delta_pct": 7.378241350124876,
+      "changed": true
     },
     "sharpe_daily_365": {
       "previous": 2.3010330204813796,
-      "current": 2.3010330204813796,
-      "delta": 0.0,
-      "delta_pct": 0.0,
-      "changed": false
+      "current": 2.359105495539966,
+      "delta": 0.05807247505858637,
+      "delta_pct": 2.5237567015199773,
+      "changed": true
     },
     "sortino_daily_365": {
       "previous": 4.945584714653143,
-      "current": 4.945584714653143,
-      "delta": 0.0,
-      "delta_pct": 0.0,
-      "changed": false
+      "current": 5.0100467186367155,
+      "delta": 0.06446200398357238,
+      "delta_pct": 1.3034253319446658,
+      "changed": true
     },
     "win_rate_pct": {
       "previous": 57.622739018087856,
-      "current": 57.622739018087856,
-      "delta": 0.0,
-      "delta_pct": 0.0,
-      "changed": false
+      "current": 59.02061855670103,
+      "delta": 1.397879538613175,
+      "delta_pct": 2.425916508714344,
+      "changed": true
     },
     "wins": {
       "previous": 223,
-      "current": 223,
-      "delta": 0,
-      "delta_pct": 0.0,
-      "changed": false
+      "current": 229,
+      "delta": 6,
+      "delta_pct": 2.690582959641256,
+      "changed": true
     }
   }
 }
