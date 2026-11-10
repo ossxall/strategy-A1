@@ -432,12 +432,18 @@ def rsi_divergence_flags(
 
 
 def _rsi_divergence_flags(
-    raw: pd.DataFrame, bars: pd.DataFrame, cfg: Config, timeframe: str
+    raw: pd.DataFrame | None, bars: pd.DataFrame, cfg: Config, timeframe: str
 ) -> np.ndarray | None:
     """Flags de divergencia RSI para un único timeframe, alineadas a ``bars``."""
-    if pd.Timedelta(timeframe) == pd.Timedelta(cfg.timeframe) or pd.Timedelta(
+    timeframe_delta = pd.Timedelta(timeframe)
+    if raw is None or raw.empty:
+        if timeframe_delta <= pd.Timedelta(cfg.timeframe):
+            source_bars, source_tf = bars, cfg.timeframe
+        else:
+            source_bars, source_tf = resample_ohlcv(bars, timeframe), timeframe
+    elif timeframe_delta <= pd.Timedelta(cfg.timeframe) or pd.Timedelta(
         minutes=source_minutes(raw)
-    ) >= pd.Timedelta(timeframe):
+    ) >= timeframe_delta:
         source_bars, source_tf = bars, cfg.timeframe
     else:
         source_bars, source_tf = resample_ohlcv(raw, timeframe), timeframe
@@ -458,18 +464,11 @@ def _rsi_divergence_flags(
     return np.nan_to_num(aligned, nan=0.0).astype(int)
 
 
-def build_rsi_divergence_exit(
-    raw: pd.DataFrame, bars: pd.DataFrame, cfg: Config
+def build_rsi_divergence_flags(
+    raw: pd.DataFrame | None, bars: pd.DataFrame, cfg: Config
 ) -> np.ndarray | None:
-    """Salida por divergencia RSI combinando con OR todos los timeframes.
-
-    Devuelve ``None`` si no se pudo calcular ninguna (deshabilitado, sin datos
-    suficientes o timeframes incompatibles); si al menos una es válida, devuelve
-    un array entero alineado a ``bars`` con ``+1`` (divergencia alcista),
-    ``-1`` (bajista) y ``0`` (sin señal). Al coincidir ambas direcciones gana
-    la bajista.
-    """
-    if not cfg.rsi_divergence_exit_enabled or bars.empty:
+    """Divergencias RSI combinadas con OR en los timeframes configurados."""
+    if bars.empty:
         return None
     bull = np.zeros(len(bars), bool)
     bear = np.zeros(len(bars), bool)
@@ -484,3 +483,19 @@ def build_rsi_divergence_exit(
     if not built:
         return None
     return bull.astype(int) - bear.astype(int)
+
+
+def build_rsi_divergence_exit(
+    raw: pd.DataFrame, bars: pd.DataFrame, cfg: Config
+) -> np.ndarray | None:
+    """Salida por divergencia RSI combinando con OR todos los timeframes.
+
+    Devuelve ``None`` si no se pudo calcular ninguna (deshabilitado, sin datos
+    suficientes o timeframes incompatibles); si al menos una es válida, devuelve
+    un array entero alineado a ``bars`` con ``+1`` (divergencia alcista),
+    ``-1`` (bajista) y ``0`` (sin señal). Al coincidir ambas direcciones gana
+    la bajista.
+    """
+    if not cfg.rsi_divergence_exit_enabled or bars.empty:
+        return None
+    return build_rsi_divergence_flags(raw, bars, cfg)

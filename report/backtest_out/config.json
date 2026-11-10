@@ -23,6 +23,8 @@
   "entry_atr_lookback": 50,
   "entry_atr_min_ratio": 0.5,
   "entry_atr_max_ratio": 2.5,
+  "entry_rsi_divergence_enabled": true,
+  "entry_rsi_divergence_lookback": 20,
   "entry_dmi_risk_scaling_enabled": true,
   "entry_dmi_risk_base": 0.9,
   "entry_dmi_risk_spread_scale": 100.0,

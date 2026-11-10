@@ -49,6 +49,10 @@ class Config:
     entry_atr_lookback: int = 50
     entry_atr_min_ratio: float = 0.5
     entry_atr_max_ratio: float = 2.5
+    # Bloquea nuevas entradas LONG si se confirmó una divergencia RSI alcista
+    # dentro de las últimas N velas del timeframe de estrategia.
+    entry_rsi_divergence_enabled: bool = True
+    entry_rsi_divergence_lookback: int = 20
     # Escala el riesgo (no bloquea la señal) según DI direccional en la vela
     # confirmada: factor = clamp(base + (DI a favor - DI en contra) / escala).
     entry_dmi_risk_scaling_enabled: bool = True
@@ -247,7 +251,8 @@ class Config:
         for timeframe in self.ema_weakening_timeframes:
             if pd.Timedelta(timeframe) <= pd.Timedelta(0):
                 raise ValueError(f"ema_weakening_timeframe inválido: {timeframe!r}.")
-        if self.rsi_divergence_exit_enabled and not self.rsi_divergence_timeframes:
+        if (self.rsi_divergence_exit_enabled or self.entry_rsi_divergence_enabled) \
+                and not self.rsi_divergence_timeframes:
             raise ValueError("rsi_divergence_timeframe no puede estar vacío.")
         for timeframe in self.rsi_divergence_timeframes:
             if pd.Timedelta(timeframe) <= pd.Timedelta(0):
@@ -268,6 +273,8 @@ class Config:
             or self.entry_atr_max_ratio <= self.entry_atr_min_ratio
         ):
             raise ValueError("Configuración del filtro ATR de entrada inválida.")
+        if self.entry_rsi_divergence_enabled and self.entry_rsi_divergence_lookback < 1:
+            raise ValueError("entry_rsi_divergence_lookback debe ser >= 1.")
         if self.entry_dmi_risk_scaling_enabled and (
             self.entry_adx_len <= 0 or self.entry_dmi_risk_spread_scale <= 0
             or self.entry_dmi_risk_min <= 0
@@ -307,7 +314,7 @@ class Config:
             if self.ema_weakening_slow > 0 and self.ema_weakening_fast > 0 \
                     and self.ema_weakening_fast >= self.ema_weakening_slow:
                 raise ValueError("Se requiere ema_weakening_fast < ema_weakening_slow (o 0 para usar las del cruce).")
-        if self.rsi_divergence_exit_enabled:
+        if self.rsi_divergence_exit_enabled or self.entry_rsi_divergence_enabled:
             if self.rsi_divergence_len <= 0:
                 raise ValueError("rsi_divergence_len debe ser positivo.")
             if self.rsi_divergence_pivot < 1:
