@@ -450,13 +450,19 @@ class EMACrossStrategy:
         )
         if cfg.entry_rsi_divergence_enabled:
             divergence = build_rsi_divergence_flags(raw, bars, cfg)
-            entry_rsi_divergence_blocked = spread_flags(
+            entry_rsi_bull_divergence_blocked = spread_flags(
                 divergence > 0 if divergence is not None else np.zeros(len(bars), bool),
                 cfg.entry_rsi_divergence_lookback,
             )
-            up &= ~entry_rsi_divergence_blocked
+            entry_rsi_bear_divergence_blocked = spread_flags(
+                divergence < 0 if divergence is not None else np.zeros(len(bars), bool),
+                cfg.entry_rsi_divergence_lookback,
+            )
+            up &= ~entry_rsi_bull_divergence_blocked
+            down &= ~entry_rsi_bear_divergence_blocked
         else:
-            entry_rsi_divergence_blocked = np.zeros(len(bars), dtype=bool)
+            entry_rsi_bull_divergence_blocked = np.zeros(len(bars), dtype=bool)
+            entry_rsi_bear_divergence_blocked = np.zeros(len(bars), dtype=bool)
         if cfg.entry_adx_enabled:
             allowed = np.nan_to_num(entry_adx, nan=0.0) > cfg.entry_adx_min
             up, down = up & allowed, down & allowed
@@ -475,7 +481,10 @@ class EMACrossStrategy:
             "atr_ratio": entry_atr_ratio,
             "atr_filter_ready": entry_atr_ready,
             "atr_filter_allowed": atr_allowed,
-            "entry_rsi_divergence_blocked": entry_rsi_divergence_blocked,
+            "entry_rsi_bull_divergence_blocked": entry_rsi_bull_divergence_blocked,
+            "entry_rsi_bear_divergence_blocked": entry_rsi_bear_divergence_blocked,
+            # Alias histórico del filtro LONG.
+            "entry_rsi_divergence_blocked": entry_rsi_bull_divergence_blocked,
             "cross_up": up, "cross_down": down, "valid": valid,
             "long_candle_confirmation": long_candle_confirmation,
             "short_candle_confirmation": short_candle_confirmation,
@@ -529,18 +538,35 @@ class Backtester:
         else:
             self.entry_atr_allowed = np.ones(len(bars), dtype=bool)
         if config.entry_rsi_divergence_enabled:
-            if "entry_rsi_divergence_blocked" in self.signals:
-                self.entry_rsi_divergence_blocked = self.signals[
+            divergence = None
+            if ("entry_rsi_bull_divergence_blocked" not in self.signals
+                    or "entry_rsi_bear_divergence_blocked" not in self.signals):
+                divergence = build_rsi_divergence_flags(None, bars, config)
+            if "entry_rsi_bull_divergence_blocked" in self.signals:
+                self.entry_rsi_bull_divergence_blocked = self.signals[
+                    "entry_rsi_bull_divergence_blocked"
+                ].to_numpy(bool)
+            elif "entry_rsi_divergence_blocked" in self.signals:
+                self.entry_rsi_bull_divergence_blocked = self.signals[
                     "entry_rsi_divergence_blocked"
                 ].to_numpy(bool)
             else:
-                divergence = build_rsi_divergence_flags(None, bars, config)
-                self.entry_rsi_divergence_blocked = spread_flags(
+                self.entry_rsi_bull_divergence_blocked = spread_flags(
                     divergence > 0 if divergence is not None else np.zeros(len(bars), bool),
                     config.entry_rsi_divergence_lookback,
                 )
+            if "entry_rsi_bear_divergence_blocked" in self.signals:
+                self.entry_rsi_bear_divergence_blocked = self.signals[
+                    "entry_rsi_bear_divergence_blocked"
+                ].to_numpy(bool)
+            else:
+                self.entry_rsi_bear_divergence_blocked = spread_flags(
+                    divergence < 0 if divergence is not None else np.zeros(len(bars), bool),
+                    config.entry_rsi_divergence_lookback,
+                )
         else:
-            self.entry_rsi_divergence_blocked = np.zeros(len(bars), dtype=bool)
+            self.entry_rsi_bull_divergence_blocked = np.zeros(len(bars), dtype=bool)
+            self.entry_rsi_bear_divergence_blocked = np.zeros(len(bars), dtype=bool)
         self.entry_plus_di = (
             self.signals["entry_plus_di"].to_numpy(float)
             if "entry_plus_di" in self.signals else None
@@ -964,8 +990,10 @@ class Backtester:
         cfg = self.cfg
         if cfg.entry_atr_enabled and not self.entry_atr_allowed[i]:
             return False
-        if pos.side == 1 and cfg.entry_rsi_divergence_enabled \
-                and self.entry_rsi_divergence_blocked[i]:
+        if cfg.entry_rsi_divergence_enabled and (
+            (pos.side == 1 and self.entry_rsi_bull_divergence_blocked[i])
+            or (pos.side == -1 and self.entry_rsi_bear_divergence_blocked[i])
+        ):
             return False
         if cfg.entry_confirm_max_move_pct > 0 and pos.entry_price > 0:
             move_pct_against = (self.c[i] / pos.entry_price - 1.0) * 100.0 * pos.side
@@ -1144,7 +1172,10 @@ class Backtester:
                 if cfg.entry_atr_enabled and not self.entry_atr_allowed[i]:
                     target = 0
                 if target == 1 and cfg.entry_rsi_divergence_enabled \
-                        and self.entry_rsi_divergence_blocked[i]:
+                        and self.entry_rsi_bull_divergence_blocked[i]:
+                    target = 0
+                if target == -1 and cfg.entry_rsi_divergence_enabled \
+                        and self.entry_rsi_bear_divergence_blocked[i]:
                     target = 0
                 if target == 1 and not cfg.allow_long: target = 0
                 if target == -1 and not cfg.allow_short: target = 0
@@ -1234,10 +1265,10 @@ def parse_args():
                    help="Bloquea ATR por encima de este múltiplo de su media (default 2.5).")
     p.add_argument("--entry-rsi-divergence-filter", action=argparse.BooleanOptionalAction,
                    default=d.entry_rsi_divergence_enabled,
-                   help="Bloquea entradas LONG tras una divergencia RSI alcista (activado por defecto).")
+                   help="Bloquea LONG con divergencia alcista y SHORT con bajista (activado por defecto).")
     p.add_argument("--entry-rsi-divergence-lookback", type=int,
                    default=d.entry_rsi_divergence_lookback,
-                   help="Velas hacia atrás durante las que se bloquea LONG (default 20).")
+                   help="Velas hacia atrás durante las que se bloquean entradas (default 20).")
     p.add_argument("--entry-dmi-risk-scaling", action=argparse.BooleanOptionalAction,
                    default=d.entry_dmi_risk_scaling_enabled,
                    help="Modula el tamaño con DI+/DI- sin bloquear entradas.")

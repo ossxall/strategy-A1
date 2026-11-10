@@ -49,7 +49,7 @@ class Config:
     entry_atr_lookback: int = 50
     entry_atr_min_ratio: float = 0.5
     entry_atr_max_ratio: float = 2.5
-    # Bloquea nuevas entradas LONG si se confirmó una divergencia RSI alcista
+    # Bloquea entradas LONG tras divergencia alcista y SHORT tras bajista,
     # dentro de las últimas N velas del timeframe de estrategia.
     entry_rsi_divergence_enabled: bool = True
     entry_rsi_divergence_lookback: int = 20

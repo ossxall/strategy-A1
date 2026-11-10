@@ -29,7 +29,7 @@ def test_spread_flags_keeps_divergence_active_for_exact_lookback():
     assert blocked.tolist() == [False, True, True, True, False]
 
 
-def test_long_signal_is_filtered_when_bullish_divergence_is_recent(monkeypatch):
+def test_entries_are_filtered_by_recent_divergence_in_the_same_direction(monkeypatch):
     bars = make_bars(4)
     fast = np.array([1.0, 3.0, 3.0, 1.0])
     slow = np.array([2.0, 2.0, 2.0, 2.0])
@@ -47,7 +47,7 @@ def test_long_signal_is_filtered_when_bullish_divergence_is_recent(monkeypatch):
     monkeypatch.setattr(
         strategy_module,
         "build_rsi_divergence_flags",
-        lambda raw, source_bars, cfg: np.array([1, 0, 0, 0]),
+        lambda raw, source_bars, cfg: np.array([1, 0, -1, 0]),
     )
     empty = np.zeros(4, dtype=bool)
     monkeypatch.setattr(
@@ -71,7 +71,8 @@ def test_long_signal_is_filtered_when_bullish_divergence_is_recent(monkeypatch):
     signals = EMACrossStrategy(cfg).generate_signals(bars)
 
     assert signals.entry_rsi_divergence_blocked.tolist() == [True, True, False, False]
-    assert signals.target.tolist() == [0, 0, 0, -1]
+    assert signals.entry_rsi_bear_divergence_blocked.tolist() == [False, False, True, True]
+    assert signals.target.tolist() == [0, 0, 0, 0]
 
 
 def test_backtester_applies_recent_divergence_to_custom_long_signals_only():
@@ -79,9 +80,10 @@ def test_backtester_applies_recent_divergence_to_custom_long_signals_only():
     signals = pd.DataFrame(
         {
             "valid": True,
-            "target": [0, 0, 1, 0, -1, 0, 0],
+            "target": [0, 0, 1, 0, -1, 1, 0],
             "trend_bias": 0,
             "entry_rsi_divergence_blocked": [False, True, True, False, False, False, False],
+            "entry_rsi_bear_divergence_blocked": [False, False, False, True, True, False, False],
         },
         index=bars.index,
     )
@@ -101,7 +103,7 @@ def test_backtester_applies_recent_divergence_to_custom_long_signals_only():
     trades, _ = Backtester(bars, cfg, signals=signals).run()
 
     assert len(trades) == 1
-    assert trades.side.tolist() == ["SHORT"]
+    assert trades.side.tolist() == ["LONG"]
 
 
 def test_rsi_entry_lookback_must_be_positive():
