@@ -447,7 +447,7 @@ class EMACrossStrategy:
             if cfg.entry_er_risk_scaling_enabled else None
         )
         if cfg.entry_adx_enabled:
-            allowed = np.nan_to_num(entry_adx, nan=0.0) >= cfg.entry_adx_min
+            allowed = np.nan_to_num(entry_adx, nan=0.0) > cfg.entry_adx_min
             up, down = up & allowed, down & allowed
         up, down = up & atr_allowed, down & atr_allowed
         up, down = up & (macd_line > 0), down & (macd_line < 0)
@@ -1183,9 +1183,13 @@ def parse_args():
     p.add_argument("--max-leverage", type=float, default=d.max_leverage)
     p.add_argument("--stop-loss-pct", type=float, default=d.stop_loss_pct)
     p.add_argument("--confirm-bars", type=int, default=d.confirm_bars)
-    p.add_argument("--entry-adx-filter", action=argparse.BooleanOptionalAction, default=d.entry_adx_enabled)
-    p.add_argument("--entry-adx-len", type=int, default=d.entry_adx_len)
-    p.add_argument("--entry-adx-min", type=float, default=d.entry_adx_min)
+    p.add_argument("--entry-adx-filter", action=argparse.BooleanOptionalAction,
+                   default=d.entry_adx_enabled,
+                   help="Exige ADX de entrada por encima del mínimo (activo por defecto).")
+    p.add_argument("--entry-adx-len", type=int, default=d.entry_adx_len,
+                   help="Periodo ADX de entrada (default 14).")
+    p.add_argument("--entry-adx-min", type=float, default=d.entry_adx_min,
+                   help="Umbral estricto del ADX: la señal requiere ADX > mínimo (default 20).")
     p.add_argument("--entry-atr-filter", action=argparse.BooleanOptionalAction,
                    default=d.entry_atr_enabled,
                    help="Descarta entradas con ATR comprimido o anormalmente elevado.")

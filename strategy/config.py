@@ -38,6 +38,7 @@ class Config:
     stop_loss_pct: float = 0.01
 
     confirm_bars: int = 4
+    # Bloquea cruces EMA si el ADX de entrada no supera el mínimo.
     entry_adx_enabled: bool = True
     entry_adx_len: int = 14
     entry_adx_min: float = 20.0
