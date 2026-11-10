@@ -18,6 +18,7 @@
   "entry_adx_enabled": true,
   "entry_adx_len": 14,
   "entry_adx_min": 20.0,
+  "entry_adx_timeframe": "30min",
   "entry_atr_enabled": true,
   "entry_atr_len": 14,
   "entry_atr_lookback": 50,

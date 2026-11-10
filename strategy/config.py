@@ -42,6 +42,8 @@ class Config:
     entry_adx_enabled: bool = True
     entry_adx_len: int = 14
     entry_adx_min: float = 20.0
+    # Todos los timeframes deben superar el umbral para permitir una entrada.
+    entry_adx_timeframe: str | list[str] | tuple[str, ...] = ("30min")
     # Bloquea entradas cuando ATR(14) es anormalmente bajo/alto frente a su
     # media de las velas anteriores. No afecta las salidas de posiciones abiertas.
     entry_atr_enabled: bool = True
@@ -212,6 +214,11 @@ class Config:
         return timeframe_tuple(self.adx_timeframe)
 
     @property
+    def entry_adx_timeframes(self) -> tuple[str, ...]:
+        """Timeframes ADX de entrada normalizados; todos deben pasar el umbral."""
+        return timeframe_tuple(self.entry_adx_timeframe)
+
+    @property
     def ema_weakening_timeframes(self) -> tuple[str, ...]:
         """Timeframes de weakening normalizados (uno o varios); la salida usa OR entre ellos."""
         return timeframe_tuple(self.ema_weakening_timeframe)
@@ -246,6 +253,11 @@ class Config:
                 raise ValueError(f"adx_timeframe inválido: {timeframe!r}.")
         if self.adx_exit_enabled and not self.adx_timeframes:
             raise ValueError("adx_timeframe no puede estar vacío.")
+        for timeframe in self.entry_adx_timeframes:
+            if pd.Timedelta(timeframe) <= pd.Timedelta(0):
+                raise ValueError(f"entry_adx_timeframe inválido: {timeframe!r}.")
+        if self.entry_adx_enabled and not self.entry_adx_timeframes:
+            raise ValueError("entry_adx_timeframe no puede estar vacío.")
         if self.ema_weakening_exit_enabled and not self.ema_weakening_timeframes:
             raise ValueError("ema_weakening_timeframe no puede estar vacío.")
         for timeframe in self.ema_weakening_timeframes:

@@ -251,6 +251,43 @@ class EMACrossStrategy:
             fill=np.nan,
         )
 
+    def _entry_adx_line(
+        self, bars: pd.DataFrame, raw: Optional[pd.DataFrame], timeframe: str
+    ) -> np.ndarray:
+        """Calcula ADX de entrada en un timeframe y lo alinea sin lookahead."""
+        cfg = self.cfg
+        target_delta = pd.Timedelta(timeframe)
+        strategy_delta = pd.Timedelta(cfg.timeframe)
+
+        if target_delta == strategy_delta:
+            source = bars
+        elif target_delta > strategy_delta:
+            source = resample_ohlcv(bars, timeframe)
+        else:
+            if raw is None or raw.empty:
+                raise ValueError(
+                    f"entry_adx_timeframe={timeframe} requiere datos raw de mayor resolución."
+                )
+            raw_delta = pd.Timedelta(minutes=source_minutes(raw))
+            if raw_delta > target_delta:
+                raise ValueError(
+                    f"Los datos raw ({raw_delta}) no tienen resolución suficiente para "
+                    f"entry_adx_timeframe={timeframe}."
+                )
+            source = raw if raw_delta == target_delta else resample_ohlcv(raw, timeframe)
+
+        values = adx(source, cfg.entry_adx_len, cfg.entry_adx_len)["adx"].to_numpy(float)
+        if target_delta == strategy_delta:
+            return values
+        return align_closed_values(
+            source.index,
+            values,
+            bars.index,
+            timeframe,
+            cfg.timeframe,
+            fill=np.nan,
+        )
+
     def trend_bias(self, bars: pd.DataFrame) -> np.ndarray:
         """Sesgo de tendencia (+1 alcista, -1 bajista, 0 sin información).
 
@@ -415,10 +452,18 @@ class EMACrossStrategy:
             if cfg.entry_adx_enabled or cfg.entry_dmi_risk_scaling_enabled
             else None
         )
+        entry_adx_by_timeframe: dict[str, np.ndarray] = {}
+        if cfg.entry_adx_enabled:
+            for timeframe in cfg.entry_adx_timeframes:
+                if pd.Timedelta(timeframe) == pd.Timedelta(cfg.timeframe):
+                    values = entry_dmi["adx"].to_numpy(float)
+                else:
+                    values = self._entry_adx_line(bars, raw, timeframe)
+                entry_adx_by_timeframe[timeframe] = values
+        # Alias histórico: conserva el ADX del primer timeframe configurado.
         entry_adx = (
-            entry_dmi["adx"].to_numpy(float)
-            if cfg.entry_adx_enabled and entry_dmi is not None
-            else np.full(len(bars), np.nan)
+            next(iter(entry_adx_by_timeframe.values()))
+            if entry_adx_by_timeframe else np.full(len(bars), np.nan)
         )
         if cfg.entry_atr_enabled:
             atr_filter = atr_volatility_filter(
@@ -464,7 +509,9 @@ class EMACrossStrategy:
             entry_rsi_bull_divergence_blocked = np.zeros(len(bars), dtype=bool)
             entry_rsi_bear_divergence_blocked = np.zeros(len(bars), dtype=bool)
         if cfg.entry_adx_enabled:
-            allowed = np.nan_to_num(entry_adx, nan=0.0) > cfg.entry_adx_min
+            allowed = np.ones(len(bars), dtype=bool)
+            for values in entry_adx_by_timeframe.values():
+                allowed &= np.isfinite(values) & (values > cfg.entry_adx_min)
             up, down = up & allowed, down & allowed
         up, down = up & atr_allowed, down & atr_allowed
         up, down = up & (macd_line > 0), down & (macd_line < 0)
@@ -495,6 +542,8 @@ class EMACrossStrategy:
         if cfg.entry_dmi_risk_scaling_enabled and entry_dmi is not None:
             output["entry_plus_di"] = entry_dmi["plus_di"].to_numpy(float)
             output["entry_minus_di"] = entry_dmi["minus_di"].to_numpy(float)
+        for timeframe, values in entry_adx_by_timeframe.items():
+            output[f"adx_entry_{timeframe}"] = values
         if entry_mfi is not None:
             output["entry_mfi"] = np.asarray(entry_mfi, dtype=float)
         if entry_er is not None:
@@ -1250,6 +1299,9 @@ def parse_args():
                    help="Exige ADX de entrada por encima del mínimo (activo por defecto).")
     p.add_argument("--entry-adx-len", type=int, default=d.entry_adx_len,
                    help="Periodo ADX de entrada (default 14).")
+    p.add_argument("--entry-adx-timeframe", default=d.entry_adx_timeframe,
+                   help="Timeframe(s) ADX de entrada separados por coma; todos deben superar el mínimo "
+                        "(p. ej. 30min,1h).")
     p.add_argument("--entry-adx-min", type=float, default=d.entry_adx_min,
                    help="Umbral estricto del ADX: la señal requiere ADX > mínimo (default 20).")
     p.add_argument("--entry-atr-filter", action=argparse.BooleanOptionalAction,
@@ -1410,7 +1462,8 @@ def config_from_args(a) -> Config:
         allow_long=not a.no_long, allow_short=not a.no_short, initial_capital=a.capital,
         commission_bps=a.commission_bps, slippage_bps=a.slippage_bps, risk_pct=a.risk_pct,
         max_leverage=a.max_leverage, stop_loss_pct=a.stop_loss_pct, confirm_bars=a.confirm_bars,
-        entry_adx_enabled=a.entry_adx_filter, entry_adx_len=a.entry_adx_len, entry_adx_min=a.entry_adx_min,
+        entry_adx_enabled=a.entry_adx_filter, entry_adx_len=a.entry_adx_len,
+        entry_adx_min=a.entry_adx_min, entry_adx_timeframe=a.entry_adx_timeframe,
         entry_atr_enabled=a.entry_atr_filter, entry_atr_len=a.entry_atr_len,
         entry_atr_lookback=a.entry_atr_lookback,
         entry_atr_min_ratio=a.entry_atr_min_ratio,

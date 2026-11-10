@@ -60,7 +60,7 @@ def configure_crosses(monkeypatch, adx_values):
     return bars
 
 
-def make_config(adx_min=20.0):
+def make_config(adx_min=20.0, adx_timeframe="30min"):
     return Config(
         timeframe="30min",
         macd_timeframe=None,
@@ -68,6 +68,7 @@ def make_config(adx_min=20.0):
         entry_adx_enabled=True,
         entry_adx_len=14,
         entry_adx_min=adx_min,
+        entry_adx_timeframe=adx_timeframe,
         entry_atr_enabled=False,
         entry_dmi_risk_scaling_enabled=False,
         entry_mfi_risk_scaling_enabled=False,
@@ -101,3 +102,53 @@ def test_entry_adx_defaults_to_enabled_period_14_and_threshold_20():
     assert cfg.entry_adx_enabled
     assert cfg.entry_adx_len == 14
     assert cfg.entry_adx_min == 20.0
+    assert cfg.entry_adx_timeframes == ("30min", "1h")
+
+
+def test_multiple_entry_adx_timeframes_all_must_be_above_the_threshold(monkeypatch):
+    bars = configure_crosses(monkeypatch, np.array([40.0, 25.01, 40.0, 25.01]))
+    hourly = bars.iloc[[0, 2]].copy()
+    monkeypatch.setattr(
+        strategy_module,
+        "resample_ohlcv",
+        lambda data, timeframe: hourly,
+    )
+
+    def adx_by_timeframe(data, *args):
+        values = (
+            np.array([40.0, 25.01, 40.0, 25.01])
+            if data is bars
+            else np.array([10.0, 40.0])
+        )
+        return pd.DataFrame(
+            {"adx": values, "plus_di": np.zeros(len(data)), "minus_di": np.zeros(len(data))},
+            index=data.index,
+        )
+
+    monkeypatch.setattr(strategy_module, "adx", adx_by_timeframe)
+
+    signals = EMACrossStrategy(
+        make_config(adx_timeframe=("30min", "1h"))
+    ).generate_signals(bars)
+
+    # La vela 1h de las 00:00 cierra a las 01:00: bloquea el cruce de 00:30.
+    # La vela 1h siguiente solo queda disponible al cierre de la barra 01:30.
+    assert np.isnan(signals["adx_entry_1h"].iloc[0])
+    assert signals["adx_entry_1h"].iloc[1:].tolist() == [10.0, 10.0, 40.0]
+    assert signals.target.tolist() == [0, 0, 0, -1]
+
+
+def test_entry_adx_timeframes_accept_comma_separated_cli_values(monkeypatch):
+    import sys
+
+    from strategy.strategy import config_from_args, parse_args
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["strategy", "dataset.parquet", "--entry-adx-timeframe", "30min,1h"],
+    )
+
+    cfg = config_from_args(parse_args())
+
+    assert cfg.entry_adx_timeframes == ("30min", "1h")

@@ -1,6 +1,6 @@
 {
   "strategy": "strategy2_ema_cross",
-  "generated_at": "2026-11-10T19:58:22.132034+00:00",
+  "generated_at": "2026-11-10T23:50:58.183851+00:00",
   "dataset": {
     "source": "dataset/binance/BTCUSDT/merged/BTCUSDT-1m.parquet",
     "bars": 118320,
@@ -32,6 +32,7 @@
     "entry_adx_enabled": true,
     "entry_adx_len": 14,
     "entry_adx_min": 20.0,
+    "entry_adx_timeframe": "30min",
     "entry_atr_enabled": true,
     "entry_atr_len": 14,
     "entry_atr_lookback": 50,

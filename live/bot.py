@@ -219,6 +219,7 @@ _CONFIG_ENV = {
     "entry_adx_enabled": ("STRATEGY_ENTRY_ADX", env_bool),
     "entry_adx_len": ("STRATEGY_ENTRY_ADX_LEN", env_int),
     "entry_adx_min": ("STRATEGY_ENTRY_ADX_MIN", env_float),
+    "entry_adx_timeframe": ("STRATEGY_ENTRY_ADX_TIMEFRAME", env_str),
     "entry_atr_enabled": ("STRATEGY_ENTRY_ATR", env_bool),
     "entry_atr_len": ("STRATEGY_ENTRY_ATR_LEN", env_int),
     "entry_atr_lookback": ("STRATEGY_ENTRY_ATR_LOOKBACK", env_int),

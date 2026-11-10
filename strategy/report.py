@@ -752,8 +752,28 @@ def build_backtest_figure(
     # -- Panel ADX de entrada ----------------------------------------------
     if "adx" in row:
         rr = row["adx"]
-        fig.add_trace(_line_trace(sig_x, signals["adx_entry"].to_numpy(float), "ADX entrada", NEUTRAL_COLOR),
-                      row=rr, col=1)
+        entry_adx_series = [
+            (timeframe, f"adx_entry_{timeframe}")
+            for timeframe in cfg.entry_adx_timeframes
+            if f"adx_entry_{timeframe}" in signals
+        ]
+        if not entry_adx_series:
+            entry_adx_series = [(None, "adx_entry")]
+        adx_colors = (NEUTRAL_COLOR, "#ffca28", "#ab47bc", "#26a69a")
+        for idx, (timeframe, column) in enumerate(entry_adx_series):
+            label = "ADX entrada" if len(entry_adx_series) == 1 else f"ADX entrada {timeframe}"
+            higher_tf = timeframe is not None and pd.Timedelta(timeframe) > pd.Timedelta(cfg.timeframe)
+            fig.add_trace(
+                _line_trace(
+                    sig_x,
+                    signals[column].to_numpy(float),
+                    label,
+                    adx_colors[idx % len(adx_colors)],
+                    shape="hv" if higher_tf else None,
+                ),
+                row=rr,
+                col=1,
+            )
         if cfg.entry_adx_enabled and cfg.entry_adx_min:
             fig.add_hline(y=cfg.entry_adx_min, line=dict(color="#90a4ae", width=0.9, dash="dash"),
                           row=rr, col=1)
