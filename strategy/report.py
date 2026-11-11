@@ -602,10 +602,13 @@ def build_backtest_figure(
         # --- Ayuda visual de entradas parciales (primer tramo → ADD al cierre) --
         # `opens`/`adds` provienen del motor (`Backtester.opened` / `.adds`).
         entry_pct_by_pid: dict[int, float] = {}
+        first_entry_price_by_pid: dict[int, float] = {}
         if opens:
             for o in opens:
                 try:
-                    entry_pct_by_pid[int(o["position_id"])] = float(o.get("entry_pct") or 100.0)
+                    pid = int(o["position_id"])
+                    entry_pct_by_pid[pid] = float(o.get("entry_pct") or 100.0)
+                    first_entry_price_by_pid[pid] = float(o["price"])
                 except (KeyError, TypeError, ValueError):
                     pass
         add_pct_by_pid: dict[int, float] = {}
@@ -625,8 +628,14 @@ def build_backtest_figure(
             if win_start is not None:
                 sub = sub[(sub["entry_time"] >= win_start) & (sub["entry_time"] < win_end)]
             if not sub.empty:
+                entry_prices = sub.apply(
+                    lambda row: first_entry_price_by_pid.get(
+                        int(row["position_id"]), float(row["entry_price"])
+                    ),
+                    axis=1,
+                )
                 texts = []
-                for s, p, t, pr in zip(sub["side"], sub["position_id"], sub["entry_time"], sub["entry_price"]):
+                for s, p, t, pr in zip(sub["side"], sub["position_id"], sub["entry_time"], entry_prices):
                     pid = int(p)
                     epct = entry_pct_by_pid.get(pid, 100.0)
                     if epct < 100.0 - 1e-9:
@@ -637,7 +646,7 @@ def build_backtest_figure(
                     else:
                         tag = ""
                     texts.append(f"ENTRADA {s}{tag}<br>#{pid} · {t:%Y-%m-%d %H:%M}<br>precio {pr:,.4f}")
-                fig.add_trace(_marker_trace(_x_ms(sub["entry_time"]), sub["entry_price"],
+                fig.add_trace(_marker_trace(_x_ms(sub["entry_time"]), entry_prices,
                                             f"entrada {side}", symbol, color, 13, text=texts),
                               row=r, col=1)
 
@@ -727,7 +736,12 @@ def build_backtest_figure(
             _level_trace(f"TP3 {cfg.partial_tp3_r:g}R", TARGET_COLOR, "dot",
                          lambda s, sign: s["entry_price"] * (1 + sign * cfg.partial_tp3_r * cfg.stop_loss_pct))
         if cfg.move_stop_to_breakeven:
-            _level_trace("breakeven", BREAKEVEN_COLOR, "dot", lambda s, sign: s["entry_price"])
+            _level_trace(
+                "breakeven", BREAKEVEN_COLOR, "dot",
+                lambda s, sign: first_entry_price_by_pid.get(
+                    int(s["position_id"]), s["entry_price"]
+                ),
+            )
 
     # -- Panel ADX de entrada ----------------------------------------------
     if "adx" in row:

@@ -610,6 +610,7 @@ class Backtester:
             entry_partial_pct=ep_pct,
             entry_remaining_quantity=entry_remaining_qty,
             entry_bar_index=self._bar_index,
+            first_entry_price=price,
         )
         self.opened.append({
             "position_id": self.position_id, "time": ts, "price": price, "side": side,
@@ -826,7 +827,10 @@ class Backtester:
     def _stop(self, i: int) -> bool:
         pos = self.position
         if pos is None or pos.stop_pct <= 0: return False
-        stop = pos.entry_price if pos.breakeven else self._stop_price(pos.side, pos.entry_price, pos.stop_pct)
+        breakeven_price = (
+            pos.first_entry_price if pos.first_entry_price is not None else pos.entry_price
+        )
+        stop = breakeven_price if pos.breakeven else self._stop_price(pos.side, pos.entry_price, pos.stop_pct)
         hit = self.l[i] <= stop if pos.side == 1 else self.h[i] >= stop
         if not hit: return False
         fill = min(self.o[i], stop) if pos.side == 1 else max(self.o[i], stop)

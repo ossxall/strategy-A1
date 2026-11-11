@@ -643,15 +643,13 @@ def build_events(
         entries.setdefault(
             op_id := op["position_id"],  # noqa: F821
         ) if False else None
-    # El precio/tiempo de entrada real (con precio medio ponderado tras los adds)
-    # y el % del objetivo entrado en la primera fase salen del propio motor.
+    # La primera entrada y el % del objetivo entrado en esa fase salen del motor;
+    # los añadidos se publican aparte como ENTRY_ADD.
     for op in getattr(engine, "opened", []):
         pid = op["position_id"]
         entries[pid] = (
             "LONG" if op["side"] == 1 else "SHORT", op["time"],
-            # Si hubo adds, la entrada media está en los tramos de cierre; si no,
-            # se usa el precio de la primera entrada.
-            entries.get(pid, (None, None, op["price"]))[2] or op["price"],
+            op["price"],
         )
         entry_meta[pid] = float(op["entry_pct"])
 

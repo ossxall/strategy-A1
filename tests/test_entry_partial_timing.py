@@ -1,7 +1,9 @@
 import pandas as pd
+import pytest
 
 from live.bot import build_events, ts_ms
 from strategy.config import Config
+from strategy.models import Position
 from strategy.strategy import Backtester
 
 
@@ -63,6 +65,7 @@ def test_entry_is_split_between_next_open_and_same_candle_close():
     assert engine.position is not None
     assert engine.position.quantity == engine.position.target_quantity
     assert engine.position.entry_price == 102.0
+    assert engine.position.first_entry_price == 100.0
 
 
 def test_live_event_reports_add_at_close_of_entry_candle():
@@ -75,6 +78,7 @@ def test_live_event_reports_add_at_close_of_entry_candle():
     add = next(event for event in events if event["event"] == "ENTRY_ADD")
     assert entry["reason"] == "EMA_PULLBACK"
     assert entry["signal_time"] == ts_ms(index[1])
+    assert entry["price"] == bars.iloc[1]["open"]
     assert entry["payload"]
     assert add["signal_time"] == ts_ms(index[2])
     assert add["bar_time"] == ts_ms(index[1])
@@ -98,3 +102,37 @@ def test_tp1_on_entry_candle_cancels_pending_add_after_moving_stop_to_breakeven(
     assert '"close_pct": 50.0' in exit_event["payload"]
     assert exit_event["signal_time"] == ts_ms(index[1])
     assert not any(event["event"] == "ENTRY_ADD" for event in events)
+
+
+@pytest.mark.parametrize(
+    ("side", "average_entry", "bar1", "bar2"),
+    [
+        (1, 102.0, (101.0, 103.0, 100.5, 102.0), (101.0, 102.0, 99.0, 100.0)),
+        (-1, 98.0, (99.0, 99.5, 97.0, 98.0), (99.0, 101.0, 98.0, 100.0)),
+    ],
+)
+def test_breakeven_stop_uses_first_fill_after_entry_add(side, average_entry, bar1, bar2):
+    index, bars, signals, config = setup_entry()
+    bars.loc[index[1], ["open", "high", "low", "close"]] = bar1
+    bars.loc[index[2], ["open", "high", "low", "close"]] = bar2
+    engine = Backtester(bars, config, signals=signals)
+    engine.position = Position(
+        position_id=1,
+        side=side,
+        quantity=1.0,
+        initial_quantity=1.0,
+        entry_price=average_entry,
+        entry_time=index[0],
+        entry_fee=0.0,
+        stop_pct=0.01,
+        risk_amount=1.0,
+        breakeven=True,
+        partial_entry_done=True,
+        first_entry_price=100.0,
+    )
+
+    assert not engine._stop(1)
+    assert engine.position is not None
+    assert engine._stop(2)
+    assert engine.trades[-1].reason == "BREAKEVEN"
+    assert engine.trades[-1].exit_price == pytest.approx(100.0)
