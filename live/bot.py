@@ -22,7 +22,8 @@ Reglas de diseño
 - Las decisiones se conocen al cierre de la vela y se ejecutan en la apertura
   siguiente (igual que el backtest); por eso se guardan `bar_time` (vela de la
   señal) y `signal_time` (momento de ejecución). La entrada parcial se completa
-  con `ENTRY_ADD` al cierre de la misma vela de entrada. Las salidas por stop/
+  con `ENTRY_ADD` al cierre de la vela de entrada, salvo si ya se activó el
+  breakeven. Las salidas por stop/
   breakeven/partial/toque a la EMA slow/movimiento adverso desde la confirmación se
   disparan dentro de la vela, por lo que `bar_time == signal_time`.
 - `force_close_at_end` se desactiva: en vivo una posición abierta no debe
@@ -37,7 +38,7 @@ ordena por `(signal_time, bar_time, event)` con `EXIT` antes que `ENTRY`:
 - `ENTRY`: `signal_time = bar_time + timeframe` (se ejecuta en la apertura
   siguiente a la vela de la señal).
 - `ENTRY_ADD`: `signal_time = bar_time + timeframe` (se ejecuta al cierre de la
-  vela donde se abrió el primer tramo; por defecto completa el 50/50).
+  vela donde se abrió el primer tramo; se omite si antes se activa breakeven).
 - `EXIT` por EMA_CROSS / ADX / EMA_WEAKENING / RSI_DIVERGENCE: también
   `signal_time = bar_time + timeframe` (se decide al cierre y se ejecuta en la
   apertura siguiente).

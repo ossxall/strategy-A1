@@ -879,14 +879,18 @@ class Backtester:
             if not stop_hit:
                 self._manage(i)
 
-            # Completar la entrada al cierre de la misma vela donde se abrió el
-            # primer tramo. La cantidad pendiente se fija al abrir, así que un
-            # take-profit parcial intrabar no hace que se reabra más exposición.
+            # Completar al cierre la entrada parcial, salvo que ya se haya movido
+            # el stop a breakeven dentro de esta vela. En ese caso se cancela el
+            # tramo pendiente y se conserva únicamente la posición restante.
             if (not stop_hit and self.position is not None and cfg.entry_partial_enabled
                     and self.position.entry_bar_index == i
                     and not self.position.partial_entry_done):
-                close_time = self.times[i] + pd.Timedelta(cfg.timeframe)
-                self.add_position(self.c[i], close_time)
+                if self.position.breakeven:
+                    self.position.entry_remaining_quantity = 0.0
+                    self.position.partial_entry_done = True
+                else:
+                    close_time = self.times[i] + pd.Timedelta(cfg.timeframe)
+                    self.add_position(self.c[i], close_time)
 
             # Equity mark-to-market para el límite de pérdida mensual.
             equity_now = self._equity_value(self.c[i])

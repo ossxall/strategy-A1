@@ -81,7 +81,7 @@ def test_live_event_reports_add_at_close_of_entry_candle():
     assert '"add_pct": 50.0' in add["payload"]
 
 
-def test_intrabar_partial_exit_closes_half_of_the_filled_first_tranche():
+def test_tp1_on_entry_candle_cancels_pending_add_after_moving_stop_to_breakeven():
     index, bars, signals, config = setup_entry()
     bars.loc[index[1], "high"] = 102.0
     config.stop_loss_pct = 0.01
@@ -93,8 +93,7 @@ def test_intrabar_partial_exit_closes_half_of_the_filled_first_tranche():
         bars, signals, None, None, None, config, "BTCUSDT", "30m"
     )
     exit_event = next(event for event in events if event["event"] == "EXIT")
-    add_event = next(event for event in events if event["event"] == "ENTRY_ADD")
 
     assert '"close_pct": 50.0' in exit_event["payload"]
     assert exit_event["signal_time"] == ts_ms(index[1])
-    assert add_event["signal_time"] == ts_ms(index[2])
+    assert not any(event["event"] == "ENTRY_ADD" for event in events)
