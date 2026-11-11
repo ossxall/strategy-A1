@@ -154,8 +154,9 @@ class Config:
 
     # --- Entrada parcial -----------------------------------------------------
     # Abre `entry_partial_pct` % en la apertura posterior a la señal y añade el
-    # resto al cierre solo si rompe la vela de señal (LONG: cierre sobre su
-    # máximo; SHORT: cierre bajo su mínimo). Se cancela si no confirma.
+    # resto al cierre de cualquier vela mientras siga pendiente y rompa la vela
+    # de señal (LONG: cierre sobre su máximo; SHORT: cierre bajo su mínimo).
+    # Permanece pendiente incluso tras mover el stop a breakeven.
     entry_partial_enabled: bool = True
     entry_partial_pct: float = 50.0        # % inicial (0 < pct < 100)
     # Sesgo de tendencia de timeframe superior, usado sólo después de una pérdida.

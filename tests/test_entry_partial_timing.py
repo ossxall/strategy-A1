@@ -90,18 +90,86 @@ def test_entry_add_requires_close_breakout_of_signal_candle(side, close, expecte
     bars.loc[index[1], ["open", "high", "low", "close"]] = [
         100.0, max(100.5, close), min(99.5, close), close
     ]
+    bars.loc[index[2], ["open", "high", "low", "close"]] = [
+        100.0, 100.4, 99.6, 100.0
+    ]
 
     engine = Backtester(bars, config, signals=signals)
     engine.run()
 
     assert bool(engine.adds) is expected_add
     assert engine.position is not None
-    assert engine.position.partial_entry_done
     if expected_add:
+        assert engine.position.partial_entry_done
         assert engine.position.quantity == engine.position.target_quantity
     else:
+        assert not engine.position.partial_entry_done
         assert engine.position.quantity < engine.position.target_quantity
-        assert engine.position.entry_remaining_quantity == 0.0
+        assert engine.position.entry_remaining_quantity > 0.0
+
+
+@pytest.mark.parametrize(
+    ("side", "entry_close", "confirmation_close"),
+    [(1, 100.25, 101.0), (-1, 99.75, 99.0)],
+)
+def test_entry_add_waits_for_breakout_on_a_later_candle(side, entry_close, confirmation_close):
+    index, bars, signals, config = setup_entry()
+    config.rsi_short_exit_enabled = False
+    signals.loc[index[0], "target"] = side
+    bars.loc[index[1], ["open", "high", "low", "close"]] = [
+        100.0, 101.0, 99.0, entry_close
+    ]
+    bars.loc[index[2], ["open", "high", "low", "close"]] = [
+        100.0,
+        max(confirmation_close, 100.5),
+        min(confirmation_close, 99.5),
+        confirmation_close,
+    ]
+
+    engine = Backtester(bars, config, signals=signals)
+    engine.run()
+
+    assert len(engine.adds) == 1
+    assert engine.adds[0]["time"] == index[2] + pd.Timedelta("30min")
+    assert engine.position is not None
+    assert engine.position.partial_entry_done
+    assert engine.position.quantity == engine.position.target_quantity
+
+
+def test_stop_loss_closes_first_tranche_before_pending_add_can_break_out():
+    index, bars, signals, config = setup_entry()
+    signals.loc[index[0], "target"] = 1
+    bars.loc[index[1], ["open", "high", "low", "close"]] = [100.0, 100.4, 99.6, 100.0]
+    bars.loc[index[2], ["open", "high", "low", "close"]] = [100.0, 101.0, 89.0, 101.0]
+
+    engine = Backtester(bars, config, signals=signals)
+    engine.run()
+
+    assert not engine.adds
+    assert engine.position is None
+    assert engine.trades[-1].reason.startswith("STOP_LOSS")
+
+
+def test_pending_add_executes_on_breakout_even_after_tp_moves_stop_to_breakeven():
+    index, bars, signals, config = setup_entry()
+    config.stop_loss_pct = 0.01
+    config.partial_tp_enabled = True
+    config.partial_tp_r = 0.9
+    config.partial_tp_pct = 25.0
+    config.rsi_short_exit_enabled = False
+    signals.loc[index[0], "target"] = -1
+    bars.loc[index[1], ["open", "high", "low", "close"]] = [100.0, 100.5, 98.9, 99.0]
+    bars.loc[index[2], ["open", "high", "low", "close"]] = [99.0, 99.5, 98.5, 99.0]
+
+    engine = Backtester(bars, config, signals=signals)
+    engine.run()
+
+    assert any(trade.reason == "PARTIAL_TP_0.9R" for trade in engine.trades)
+    assert len(engine.adds) == 1
+    assert engine.adds[0]["time"] == index[2]
+    assert engine.position is not None
+    assert engine.position.breakeven
+    assert engine.position.partial_entry_done
 
 
 def test_live_event_reports_add_at_close_of_entry_candle():
@@ -122,7 +190,7 @@ def test_live_event_reports_add_at_close_of_entry_candle():
     assert '"add_pct": 50.0' in add["payload"]
 
 
-def test_tp1_on_entry_candle_cancels_pending_add_after_moving_stop_to_breakeven():
+def test_tp1_on_entry_candle_keeps_pending_add_when_signal_breakout_confirms():
     index, bars, signals, config = setup_entry()
     bars.loc[index[1], "high"] = 102.0
     config.stop_loss_pct = 0.01
@@ -137,7 +205,8 @@ def test_tp1_on_entry_candle_cancels_pending_add_after_moving_stop_to_breakeven(
 
     assert '"close_pct": 50.0' in exit_event["payload"]
     assert exit_event["signal_time"] == ts_ms(index[1])
-    assert not any(event["event"] == "ENTRY_ADD" for event in events)
+    add_event = next(event for event in events if event["event"] == "ENTRY_ADD")
+    assert add_event["signal_time"] == ts_ms(index[2])
 
 
 @pytest.mark.parametrize(

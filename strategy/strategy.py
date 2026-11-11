@@ -963,23 +963,13 @@ class Backtester:
             if not stop_hit:
                 self._manage(i)
 
-            # Completar al cierre la entrada parcial, salvo que ya se haya movido
-            # el stop a breakeven dentro de esta vela. En ese caso se cancela el
-            # tramo pendiente y se conserva únicamente la posición restante.
+            # El segundo tramo puede quedar pendiente en varias velas hasta que
+            # el cierre confirme la ruptura de la vela de señal.
             if (not stop_hit and self.position is not None and cfg.entry_partial_enabled
-                    and self.position.entry_bar_index == i
                     and not self.position.partial_entry_done):
-                if self.position.breakeven:
-                    self.position.entry_remaining_quantity = 0.0
-                    self.position.partial_entry_done = True
-                elif self._entry_add_confirmed(self.position, self.c[i]):
+                if self._entry_add_confirmed(self.position, self.c[i]):
                     close_time = self.times[i] + pd.Timedelta(cfg.timeframe)
                     self.add_position(self.c[i], close_time)
-                else:
-                    # El segundo tramo solo puede añadirse en la vela de entrada.
-                    # Si el cierre no rompe la vela de señal, se cancela.
-                    self.position.entry_remaining_quantity = 0.0
-                    self.position.partial_entry_done = True
 
             # Equity mark-to-market para el límite de pérdida mensual.
             equity_now = self._equity_value(self.c[i])
@@ -1214,9 +1204,9 @@ def parse_args():
     p.add_argument("--partial-tp3-r", type=float, default=d.partial_tp3_r)
     p.add_argument("--partial-tp3-pct", type=float, default=d.partial_tp3_pct)
     p.add_argument("--breakeven-stop", action=argparse.BooleanOptionalAction, default=d.move_stop_to_breakeven)
-    # Entrada parcial: el segundo tramo se añade al cierre de la vela de entrada.
+    # Entrada parcial: el segundo tramo queda pendiente hasta confirmar ruptura.
     p.add_argument("--entry-partial", action=argparse.BooleanOptionalAction, default=d.entry_partial_enabled,
-                   help="Activa/desactiva entrada parcial (por defecto: 50%% al abrir y resto al cierre de esa vela).")
+                   help="Activa entrada parcial: 50%% al abrir; el resto al confirmar ruptura de señal.")
     p.add_argument("--entry-partial-pct", type=float, default=d.entry_partial_pct,
                    help="%% de la posición a entrar en la primera fase (default 50).")
     p.add_argument("--no-long", action="store_true")

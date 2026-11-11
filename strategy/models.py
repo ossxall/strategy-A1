@@ -20,7 +20,7 @@ class Position:
     # --- Entrada parcial -----------------------------------------------------
     # target_quantity = 0 -> modo clásico (entrada completa)
     target_quantity: float = 0.0        # Cantidad total objetivo planeada
-    partial_entry_done: bool = False    # True si el añadido está completo
+    partial_entry_done: bool = False    # True si el añadido se ejecutó o se canceló
     entry_partial_pct: float = 100.0    # % del objetivo cubierto en 1ª entrada
     entry_remaining_quantity: float = 0.0  # tramo aún pendiente, independiente de cierres parciales
     entry_bar_index: int = -1           # Índice de barra donde se hizo la 1ª entrada
