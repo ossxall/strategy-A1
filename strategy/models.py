@@ -16,6 +16,7 @@ class Position:
     breakeven: bool = False
     partial_done: bool = False
     partial2_done: bool = False
+    partial3_done: bool = False
     # --- Entrada parcial -----------------------------------------------------
     # target_quantity = 0 -> modo clásico (entrada completa)
     target_quantity: float = 0.0        # Cantidad total objetivo planeada

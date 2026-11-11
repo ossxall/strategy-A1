@@ -255,6 +255,8 @@ _CONFIG_ENV = {
     "partial_tp_pct": ("STRATEGY_PARTIAL_TP_PCT", env_float),
     "partial_tp2_r": ("STRATEGY_PARTIAL_TP2_R", env_float),
     "partial_tp2_pct": ("STRATEGY_PARTIAL_TP2_PCT", env_float),
+    "partial_tp3_r": ("STRATEGY_PARTIAL_TP3_R", env_float),
+    "partial_tp3_pct": ("STRATEGY_PARTIAL_TP3_PCT", env_float),
     "move_stop_to_breakeven": ("STRATEGY_MOVE_STOP_TO_BREAKEVEN", env_bool),
     # Salidas: las usa `prepare_exits`.
     "adx_exit_enabled": ("STRATEGY_ADX_EXIT", env_bool),

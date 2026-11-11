@@ -146,6 +146,10 @@ class Config:
     # the position. Partial 2 is intended to be at larger distance than TP1.
     partial_tp2_r: float = 1.75
     partial_tp2_pct: float = 10.0
+    # Third partial take-profit, measured from the original risk unit. Closes
+    # this percentage of the remaining position when its trigger is reached.
+    partial_tp3_r: float = 2.5
+    partial_tp3_pct: float = 10.0
     move_stop_to_breakeven: bool = True
 
     # --- Entrada parcial -----------------------------------------------------
@@ -327,6 +331,14 @@ class Config:
                 raise ValueError("Configuración de take-profit parcial 2 inválida.")
             if self.partial_tp2_r <= self.partial_tp_r:
                 raise ValueError("partial_tp2_r debe ser mayor que partial_tp_r.")
+        if self.partial_tp3_r > 0 or self.partial_tp3_pct > 0:
+            if self.partial_tp3_r <= 0 or not 0 < self.partial_tp3_pct <= 100:
+                raise ValueError("Configuración de take-profit parcial 3 inválida.")
+            previous_tp_r = (
+                self.partial_tp2_r if self.partial_tp2_r > 0 else self.partial_tp_r
+            )
+            if self.partial_tp3_r <= previous_tp_r:
+                raise ValueError("partial_tp3_r debe ser mayor que TP2 (o TP1 si TP2 está desactivado).")
         if self.entry_partial_enabled:
             if not (0 < self.entry_partial_pct < 100):
                 raise ValueError("entry_partial_pct debe estar en (0, 100).")
