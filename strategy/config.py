@@ -152,15 +152,14 @@ class Config:
     partial_tp2_pct: float = 25.0
     move_stop_to_breakeven: bool = True
 
-    # --- Entrada parcial + confirmación (scale-in) --------------------------
-    # Abre `entry_partial_pct` % de la posición en la señal y añade el resto
-    # cuando se cumpla `entry_confirm_mode`. Activado por defecto (50%/50%);
-    # `pullback_retest` confirma con una vela direccional que cierra más allá
-    # de EMA slow; patrones TA-Lib también pueden confirmar. En la implementación
-    # actual no siempre exige un toque real a la EMA.
+    # --- Entrada parcial -----------------------------------------------------
+    # Abre `entry_partial_pct` % en la apertura de la vela posterior a la señal
+    # y añade el resto al cierre de esa misma vela. Activado por defecto (50/50).
     entry_partial_enabled: bool = True
     entry_partial_pct: float = 50.0        # % inicial (0 < pct < 100)
-    entry_confirm_mode: str = "close_above_ema"  # "bars" | "close_above_ema" | "pullback_retest"
+    # Opciones legacy: se conservan por compatibilidad, pero ya no condicionan
+    # el añadido, que siempre se ejecuta al cierre de la vela de entrada.
+    entry_confirm_mode: str = "pullback_retest"  # legacy
     entry_confirm_bars: int = 2            # Nº de velas tras entrada parcial
     entry_confirm_close_in_dir: bool = True  # Exige cierre a favor para barras y patrones
     entry_confirm_retest_tol_pct: float = 0.10  # Tolerancia % para pullback_retest

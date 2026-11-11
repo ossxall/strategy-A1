@@ -888,15 +888,13 @@ def build_backtest_figure(
         template="plotly_dark", height=max(_MIN_HEIGHT, _PANEL_HEIGHT * len(panels)),
         margin=dict(l=60, r=20, t=80, b=40), hovermode="closest",
         legend=dict(orientation="h", y=1.02,
-                    title=dict(text="● entrada · ▶ ADD confirmación · ■ salida")), bargap=0.15,
+                    title=dict(text="● entrada · ▶ ADD al cierre de la vela · ■ salida")), bargap=0.15,
     )
     if partial_opens:
         epct = float(getattr(cfg, "entry_partial_pct", 50.0) or 50.0)
-        mode = getattr(cfg, "entry_confirm_mode", "bars")
-        detail = f"/{getattr(cfg, 'entry_confirm_bars', 2)} velas" if mode == "bars" else ""
         fig.add_annotation(
-            text=(f"Entrada parcial: primera entrada al {epct:g}% y ▶ ADD del resto al "
-                  f"confirmarse ({mode}{detail})"),
+            text=(f"Entrada parcial: {epct:g}% en apertura y ▶ ADD del resto "
+                  "al cierre de esa misma vela"),
             xref="paper", yref="paper", x=0, y=1.045, xanchor="left", yanchor="bottom",
             showarrow=False, font=dict(size=11, color="#9e9e9e"),
         )

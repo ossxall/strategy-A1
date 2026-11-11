@@ -1,15 +1,12 @@
 import numpy as np
 import pandas as pd
-import pytest
 
 from strategy.config import Config
-from strategy.models import Position
 from strategy.strategy import (
     LONG_CANDLE_PATTERNS,
     NEUTRAL_CANDLE_PATTERNS,
     SHORT_CANDLE_PATTERNS,
     SIGNED_CANDLE_PATTERNS,
-    Backtester,
     EMACrossStrategy,
     talib,
 )
@@ -117,73 +114,3 @@ def test_doji_is_neutral_and_never_directional(monkeypatch):
     assert not long_signal.any()
     assert not short_signal.any()
     assert neutral.tolist() == [True, False]
-
-
-@pytest.mark.parametrize(
-    ("side", "column", "entry_price"),
-    [(1, "long_candle_confirmation", 100.0),
-     (-1, "short_candle_confirmation", 102.0)],
-)
-def test_matching_candle_pattern_confirms_scale_in_for_both_sides(
-    side, column, entry_price
-):
-    index = pd.date_range("2026-01-01", periods=2, freq="30min", tz="UTC")
-    bars = make_bars(index)
-    signals = pd.DataFrame(
-        {"long_candle_confirmation": [False, column.startswith("long")],
-         "short_candle_confirmation": [False, column.startswith("short")]},
-        index=index,
-    )
-    config = Config(
-        timeframe="30min",
-        streak_trend_only=False,
-        entry_confirm_max_move_pct=0.0,
-    )
-    backtester = Backtester(bars, config, signals=signals)
-    backtester.position = Position(
-        position_id=1,
-        side=side,
-        quantity=0.5,
-        initial_quantity=0.5,
-        entry_price=entry_price,
-        entry_time=index[0],
-        entry_fee=0.0,
-        stop_pct=config.stop_loss_pct,
-        risk_amount=1.0,
-        target_quantity=1.0,
-        entry_bar_index=0,
-    )
-
-    assert backtester._should_add_partial(1)
-
-
-def test_pattern_does_not_confirm_when_close_is_against_entry():
-    index = pd.date_range("2026-01-01", periods=2, freq="30min", tz="UTC")
-    bars = make_bars(index)
-    bars.loc[index[1], "close"] = 99.0
-    signals = pd.DataFrame(
-        {"long_candle_confirmation": [False, True],
-         "short_candle_confirmation": [False, False]},
-        index=index,
-    )
-    config = Config(
-        timeframe="30min",
-        streak_trend_only=False,
-        entry_confirm_max_move_pct=0.0,
-    )
-    backtester = Backtester(bars, config, signals=signals)
-    backtester.position = Position(
-        position_id=1,
-        side=1,
-        quantity=0.5,
-        initial_quantity=0.5,
-        entry_price=100.0,
-        entry_time=index[0],
-        entry_fee=0.0,
-        stop_pct=config.stop_loss_pct,
-        risk_amount=1.0,
-        target_quantity=1.0,
-        entry_bar_index=0,
-    )
-
-    assert not backtester._should_add_partial(1)

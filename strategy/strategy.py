@@ -656,7 +656,6 @@ class Backtester:
         self.position: Optional[Position] = None
         self.pending_target: Optional[int] = None
         self.pending_exit: Optional[tuple[str, float]] = None
-        self.pending_add: Optional[tuple[int, float]] = None  # (bar_index_a_ejecutar, % de lo que falta)
         self.trades: list[Trade] = []
         # Aperturas y añadidos de entrada parcial (scale-in) para reportar/públicar.
         self.opened: list[dict] = []
@@ -709,17 +708,20 @@ class Backtester:
             target_q = 0.0
             pe_done = True
             ep_pct = 100.0
+            entry_remaining_qty = 0.0
         else:
             if not (0 < partial_pct < 100):
                 qty_init = qty_total
                 target_q = 0.0
                 pe_done = True
                 ep_pct = 100.0
+                entry_remaining_qty = 0.0
             else:
                 qty_init = qty_total * partial_pct / 100.0
                 target_q = qty_total
                 pe_done = False
                 ep_pct = partial_pct
+                entry_remaining_qty = qty_total - qty_init
         fee = self._fee(price * qty_init)
         self.cash -= fee
         self.position_id += 1
@@ -740,6 +742,7 @@ class Backtester:
             target_quantity=target_q,
             partial_entry_done=pe_done,
             entry_partial_pct=ep_pct,
+            entry_remaining_quantity=entry_remaining_qty,
             entry_bar_index=self._bar_index,
         )
         self.opened.append({
@@ -982,10 +985,15 @@ class Backtester:
         if pos.target_quantity <= 0:
             pos.partial_entry_done = True
             return
-        remaining_target = pos.target_quantity - pos.quantity
+        remaining_target = pos.entry_remaining_quantity
         if remaining_target <= 1e-12:
-            pos.quantity = max(pos.quantity, pos.target_quantity)
-            pos.target_quantity = pos.quantity
+            # Compatibilidad con posiciones construidas manualmente (p. ej. tests
+            # antiguos) que no llevan el nuevo contador del tramo pendiente.
+            remaining_target = max(
+                0.0,
+                pos.target_quantity * (1.0 - pos.entry_partial_pct / 100.0),
+            )
+        if remaining_target <= 1e-12:
             pos.partial_entry_done = True
             return
         qty_add = remaining_target * percent_of_remaining / 100.0
@@ -1006,113 +1014,10 @@ class Backtester:
             "position_id": pos.position_id, "time": ts, "price": price,
             "quantity": qty_add, "target_quantity": pos.target_quantity, "side": pos.side,
         })
-        if pos.quantity >= pos.target_quantity - 1e-12:
-            pos.quantity = pos.target_quantity
+        pos.entry_remaining_quantity = max(0.0, pos.entry_remaining_quantity - qty_add)
+        if pos.entry_remaining_quantity <= 1e-12:
+            pos.entry_remaining_quantity = 0.0
             pos.partial_entry_done = True
-
-    def _entry_confirmed_by_bars(self, i: int) -> bool:
-        """Confirma el scale-in tras N cierres y, opcionalmente, a favor de la entrada.
-
-        La vela de la primera entrada tiene antigüedad cero. Por tanto, con la
-        configuración recomendada (``entry_confirm_bars=2``) la confirmación se
-        evalúa en el segundo cierre posterior y `run` ejecuta el resto en la
-        apertura de la vela siguiente. La dirección se mide desde el precio de
-        entrada inicial, no desde el cierre anterior ni el color de la vela.
-        """
-        cfg, pos = self.cfg, self.position
-        if pos is None or i - pos.entry_bar_index < cfg.entry_confirm_bars:
-            return False
-        if not cfg.entry_confirm_close_in_dir:
-            return True
-        return (self.c[i] - pos.entry_price) * pos.side >= -1e-12
-
-    def _should_add_partial(self, i: int) -> bool:
-        """Indica si al cierre de ``i`` debe programarse el resto de la entrada."""
-        pos = self.position
-        if pos is None or pos.target_quantity <= 0:
-            return False
-        if pos.partial_entry_done:
-            return False
-        if pos.quantity >= pos.target_quantity - 1e-12:
-            pos.partial_entry_done = True
-            return False
-        cfg = self.cfg
-        if cfg.entry_atr_enabled and not self.entry_atr_allowed[i]:
-            return False
-        if cfg.entry_rsi_divergence_enabled and (
-            (pos.side == 1 and self.entry_rsi_bull_divergence_blocked[i])
-            or (pos.side == -1 and self.entry_rsi_bear_divergence_blocked[i])
-        ):
-            return False
-        if cfg.entry_confirm_max_move_pct > 0 and pos.entry_price > 0:
-            move_pct_against = (self.c[i] / pos.entry_price - 1.0) * 100.0 * pos.side
-            if move_pct_against <= -cfg.entry_confirm_max_move_pct:
-                if self.verbose:
-                    print(f"[SKIP_ADD] {self.times[i]} precio se ha movido {abs(move_pct_against):.2f}% en contra de la entrada, no se añade el resto", flush=True)
-                try:
-                    self.add_skipped.append({
-                        "position_id": pos.position_id,
-                        "time": self.times[i],
-                        "price": float(self.c[i]),
-                        "entry_price": float(pos.entry_price),
-                        "side": pos.side,
-                        "move_pct_against": float(abs(move_pct_against)),
-                        "threshold": float(cfg.entry_confirm_max_move_pct),
-                        "entry_pct": float(pos.entry_partial_pct or 50.0),
-                    })
-                except Exception:
-                    pass
-                return False
-        # Un patrón direccional puede anticipar el scale-in, pero no debe
-        # añadir riesgo si el cierre ya va contra la entrada parcial cuando la
-        # configuración exige confirmación de precio en dirección.
-        pattern_column = "long_candle_confirmation" if pos.side == 1 else "short_candle_confirmation"
-        if self.signals is not None and pattern_column in self.signals.columns \
-                and bool(self.signals[pattern_column].iloc[i]):
-            move_in_direction = (self.c[i] - pos.entry_price) * pos.side
-            if not cfg.entry_confirm_close_in_dir or move_in_direction >= -1e-12:
-                return True
-        if cfg.entry_confirm_mode == "bars":
-            return self._entry_confirmed_by_bars(i)
-        elif cfg.entry_confirm_mode == "close_above_ema":
-            if self.signals is None:
-                return False
-            if "ema_fast" not in self.signals.columns or "ema_slow" not in self.signals.columns:
-                return False
-            ef = float(self.signals["ema_fast"].iloc[i])
-            es = float(self.signals["ema_slow"].iloc[i])
-            if not (np.isfinite(ef) and np.isfinite(es)):
-                return False
-            if pos.side == 1:
-                if self.c[i] > ef and self.c[i] > es:
-                    return True
-            else:
-                if self.c[i] < ef and self.c[i] < es:
-                    return True
-            return False
-        elif cfg.entry_confirm_mode == "pullback_retest":
-            if self.signals is None:
-                return False
-            if "ema_slow" not in self.signals.columns:
-                return False
-            es = float(self.signals["ema_slow"].iloc[i])
-            if not np.isfinite(es) or es <= 0:
-                return False
-            tol = max(cfg.entry_confirm_retest_tol_pct, 0.0) / 100.0
-            if pos.side == 1:
-                if self.c[i] > es and self.c[i] >= self.o[i]:
-                    if self.l[i] <= es * (1 + tol * 0.25):
-                        return True
-                    if i - pos.entry_bar_index >= 1:
-                        return self.c[i] > es
-            else:
-                if self.c[i] < es and self.c[i] <= self.o[i]:
-                    if self.h[i] >= es * (1 - tol * 0.25):
-                        return True
-                    if i - pos.entry_bar_index >= 1:
-                        return self.c[i] < es
-            return False
-        return False
 
     def _execute_target(self, i: int, target: int):
         if self.position is not None and self.position.side != target:
@@ -1167,14 +1072,7 @@ class Backtester:
                 month_key = key
                 self.halt_until = None
                 month_start_equity = self._equity_value(self.c[i - 1]) if i else cfg.initial_capital
-            # 1) Ejecutar add pendiente (decidido al cierre de vela anterior)
-            if self.pending_add is not None:
-                exec_i, pct_rem = self.pending_add
-                if exec_i == i:
-                    self.add_position(pct_rem, self.o[i], self.times[i])
-                    self.pending_add = None
-
-            # 2) Ejecutar target/exit pendientes (decididos al cierre anterior)
+            # 1) Ejecutar target/exit pendientes (decididos al cierre anterior)
             if self.pending_target is not None:
                 self._execute_target(i, self.pending_target)
                 self.pending_target = None
@@ -1184,16 +1082,19 @@ class Backtester:
                 self.close_position(pct, self.o[i], self.times[i], reason)
                 self.pending_exit = None
 
-            # 3) Gestión de stops y salidas parciales
+            # 2) Gestión de stops y salidas parciales
             stop_hit = self._stop(i)
             if not stop_hit:
                 self._manage(i)
 
-            # 4) Añadir entrada parcial pendiente (scale-in) — decidido al cierre de i
-            if not stop_hit and self.position is not None and self.cfg.entry_partial_enabled:
-                if self._should_add_partial(i):
-                    # Ejecutar resto completo en apertura de i+1
-                    self.pending_add = (i + 1, 100.0)
+            # Completar la entrada al cierre de la misma vela donde se abrió el
+            # primer tramo. La cantidad pendiente se fija al abrir, así que un
+            # take-profit parcial intrabar no hace que se reabra más exposición.
+            if (not stop_hit and self.position is not None and cfg.entry_partial_enabled
+                    and self.position.entry_bar_index == i
+                    and not self.position.partial_entry_done):
+                close_time = self.times[i] + pd.Timedelta(cfg.timeframe)
+                self.add_position(100.0, self.c[i], close_time)
 
             # Equity mark-to-market para el límite de pérdida mensual.
             equity_now = self._equity_value(self.c[i])
@@ -1412,23 +1313,23 @@ def parse_args():
     p.add_argument("--partial-tp2-r", type=float, default=d.partial_tp2_r)
     p.add_argument("--partial-tp2-pct", type=float, default=d.partial_tp2_pct)
     p.add_argument("--breakeven-stop", action=argparse.BooleanOptionalAction, default=d.move_stop_to_breakeven)
-    # Entrada parcial + confirmación
+    # Entrada parcial y opciones legacy de confirmación
     p.add_argument("--entry-partial", action=argparse.BooleanOptionalAction, default=d.entry_partial_enabled,
-                   help="Activa/desactiva entrada parcial 50%%/50%% (scale-in) con lógica de confirmación (por defecto activado).")
+                   help="Activa/desactiva entrada parcial (por defecto: 50%% al abrir y resto al cierre de esa vela).")
     p.add_argument("--entry-partial-pct", type=float, default=d.entry_partial_pct,
                    help="%% de la posición a entrar en la primera fase (default 50).")
     p.add_argument("--entry-confirm-mode", choices=("bars", "close_above_ema", "pullback_retest"),
-                   default=d.entry_confirm_mode,
-                   help="Modo de confirmación para añadir el resto (default 'pullback_retest').")
+                    default=d.entry_confirm_mode,
+                    help="Legacy; ya no condiciona el añadido, que se hace al cierre de la vela de entrada.")
     p.add_argument("--entry-confirm-bars", type=int, default=d.entry_confirm_bars,
-                   help="Velas tras entrada parcial antes de confirmar (modo 'bars', default 2).")
+                   help="Legacy; ya no cambia el momento del añadido.")
     p.add_argument("--entry-confirm-close-in-dir", action=argparse.BooleanOptionalAction,
                    default=d.entry_confirm_close_in_dir,
-                   help="Exige cierre en dirección para confirmar (modo 'bars').")
+                   help="Legacy; ya no cambia el momento del añadido.")
     p.add_argument("--entry-confirm-retest-tol-pct", type=float, default=d.entry_confirm_retest_tol_pct,
-                   help="Tolerancia %% para pullback_retest (default 0.10%%).")
+                   help="Legacy; ya no cambia el momento del añadido.")
     p.add_argument("--entry-confirm-max-move-pct", type=float, default=d.entry_confirm_max_move_pct,
-                   help="Bloquea añadir el resto si el precio se ha movido en contra más de X%% desde la entrada parcial (0 = desactivado).")
+                   help="Legacy; ya no bloquea el añadido al cierre de la vela.")
     p.add_argument("--no-long", action="store_true")
     p.add_argument("--no-short", action="store_true")
     p.add_argument("--trend-timeframe", default=d.trend_timeframe,

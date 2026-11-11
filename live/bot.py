@@ -21,8 +21,9 @@ Reglas de diseño
   (symbol, interval, timeframe, event, signal, reason, bar_time).
 - Las decisiones se conocen al cierre de la vela y se ejecutan en la apertura
   siguiente (igual que el backtest); por eso se guardan `bar_time` (vela de la
-  señal) y `signal_time` (momento de ejecución). Las salidas por stop/breakeven/
-  partial/toque a la EMA slow/movimiento adverso desde la confirmación se
+  señal) y `signal_time` (momento de ejecución). La entrada parcial se completa
+  con `ENTRY_ADD` al cierre de la misma vela de entrada. Las salidas por stop/
+  breakeven/partial/toque a la EMA slow/movimiento adverso desde la confirmación se
   disparan dentro de la vela, por lo que `bar_time == signal_time`.
 - `force_close_at_end` se desactiva: en vivo una posición abierta no debe
   cerrarse artificialmente al final de los datos disponibles.
@@ -35,6 +36,8 @@ ordena por `(signal_time, bar_time, event)` con `EXIT` antes que `ENTRY`:
 
 - `ENTRY`: `signal_time = bar_time + timeframe` (se ejecuta en la apertura
   siguiente a la vela de la señal).
+- `ENTRY_ADD`: `signal_time = bar_time + timeframe` (se ejecuta al cierre de la
+  vela donde se abrió el primer tramo; por defecto completa el 50/50).
 - `EXIT` por EMA_CROSS / ADX / EMA_WEAKENING / RSI_DIVERGENCE: también
   `signal_time = bar_time + timeframe` (se decide al cierre y se ejecuta en la
   apertura siguiente).
@@ -651,7 +654,7 @@ def build_events(
             # se usa el precio de la primera entrada.
             entries.get(pid, (None, None, op["price"]))[2] or op["price"],
         )
-        entry_pct = {pid: op["entry_pct"]}
+        entry_meta[pid] = float(op["entry_pct"])
 
     events: list[dict] = []
 
@@ -666,7 +669,7 @@ def build_events(
                 {
                     "action": "OPEN",
                     "position_id": pid,
-                    "entry_pct": float(entry_pct.get(pid, 100.0)),
+                    "entry_pct": float(entry_meta.get(pid, 100.0)),
                 },
             )
         )
@@ -693,23 +696,30 @@ def build_events(
 
     # --- Cierres: un evento por cada tramo ejecutado por el backtest ---
     for position_id in sorted(legs):
-        # Cantidad realmente llenada: suma de tramos cerrados + lo que sigue
-        # abierto (con `target_quantity` puede haber un add aún no ejecutado).
-        if open_pos is not None and open_pos.position_id == position_id:
-            filled = sum(leg.quantity for leg in legs[position_id]) + open_pos.quantity
-            remaining_total = open_pos.target_quantity or open_pos.initial_quantity
-            if remaining_total <= 0:
-                remaining_total = filled
-        else:
-            filled = sum(leg.quantity for leg in legs[position_id])
-            remaining_total = filled
-
-        for leg in legs[position_id]:
+        position_adds = [
+            add for add in getattr(engine, "adds", [])
+            if add["position_id"] == position_id
+        ]
+        entry_op = next(
+            (op for op in getattr(engine, "opened", []) if op["position_id"] == position_id),
+            None,
+        )
+        initial_quantity = entry_op["quantity"] if entry_op else 0.0
+        prior_closed_quantity = 0.0
+        for leg in sorted(legs[position_id], key=lambda item: item.trade_id):
             signal_time = ts_ms(leg.exit_time)
             bar_time = signal_time if _reason_is_intrabar(leg.reason) else signal_time - tf_ms
-            # El backtest cierra un porcentaje de la posición *restante*; es el
-            # que debe aplicar el consumidor sobre su posición.
-            close_pct = 100.0 * leg.quantity / remaining_total if remaining_total else 100.0
+            # El consumidor cierra un porcentaje de la cantidad que tiene en ese
+            # momento. Un TP dentro de la vela de entrada solo ve el primer tramo;
+            # los adds al cierre se cuentan desde ese instante en adelante.
+            quantity_before_close = initial_quantity + sum(
+                add["quantity"] for add in position_adds
+                if ts_ms(add["time"]) <= signal_time
+            ) - prior_closed_quantity
+            close_pct = (
+                100.0 * leg.quantity / quantity_before_close
+                if quantity_before_close > 0 else 100.0
+            )
             r_multiple = leg.pnl_net / leg.position_risk if leg.position_risk else None
             events.append(
                 make_event(
@@ -724,7 +734,7 @@ def build_events(
                     },
                 )
             )
-            remaining_total -= leg.quantity
+            prior_closed_quantity += leg.quantity
 
     return events
 
