@@ -391,8 +391,8 @@ def build_backtest_figure(
       ``EMA_SLOW_TOUCH_*``), estas últimas con un marcador propio;
     * **entradas parciales**: si se recibe ``opens``/``adds`` (listas del motor
       `Backtester`), las entradas parciales se etiquetan en el hover y el
-      segundo tramo añadido al cierre se dibuja con un triángulo verde apuntando
-      a la derecha;
+      segundo tramo añadido en la apertura siguiente se dibuja con un triángulo
+      verde apuntando a la derecha;
     * paneles de ADX de entrada, `target` (señal), volumen y curva de equity;
     * series e indicadores de los timeframes de salida (ADX y EMA weakening)
       cuando se dispone del dataset original `raw`.
@@ -594,7 +594,7 @@ def build_backtest_figure(
                                          line=dict(color=color, width=1, dash="dot"),
                                          hoverinfo="skip"), row=r, col=1)
 
-        # --- Ayuda visual de entradas parciales (primer tramo → ADD al cierre) --
+        # --- Ayuda visual de entradas parciales (primer tramo → ADD siguiente apertura) --
         # `opens`/`adds` provienen del motor (`Backtester.opened` / `.adds`).
         entry_pct_by_pid: dict[int, float] = {}
         if opens:
@@ -636,7 +636,7 @@ def build_backtest_figure(
                                             f"entrada {side}", symbol, color, 13, text=texts),
                               row=r, col=1)
 
-        # Marcadores de ADD: segundo tramo que completa la entrada al cierre.
+        # Marcadores de ADD: segundo tramo que completa la entrada en la apertura siguiente.
         if adds:
             add_df = pd.DataFrame(adds)
             add_df["time"] = pd.to_datetime(add_df["time"], utc=True)
@@ -651,12 +651,12 @@ def build_backtest_figure(
                     tgt = float(a.target_quantity or 0.0)
                     pct = (float(a.quantity) / tgt * 100.0) if tgt > 0 else 0.0
                     texts.append(
-                        f"ADD AL CIERRE (entrada parcial {epct:g}% → 100%)<br>"
+                        f"ADD EN APERTURA (entrada parcial {epct:g}% → 100%)<br>"
                         f"pos #{pid} {side_lbl}<br>{a.time:%Y-%m-%d %H:%M}<br>"
                         f"+{float(a.quantity):,.4f} (+{pct:g}%) @ {float(a.price):,.4f}"
                     )
                 fig.add_trace(_marker_trace(_x_ms(add_df["time"]), add_df["price"].to_numpy(float),
-                                            "ADD al cierre (entrada parcial)", "triangle-right",
+                                            "ADD en apertura (entrada parcial)", "triangle-right",
                                             "#81c784", 11, text=texts),
                               row=r, col=1)
 
@@ -860,13 +860,13 @@ def build_backtest_figure(
         template="plotly_dark", height=max(_MIN_HEIGHT, _PANEL_HEIGHT * len(panels)),
         margin=dict(l=60, r=20, t=80, b=40), hovermode="closest",
         legend=dict(orientation="h", y=1.02,
-                    title=dict(text="● entrada · ▶ ADD al cierre de la vela · ■ salida")), bargap=0.15,
+                    title=dict(text="● entrada · ▶ ADD en la apertura siguiente · ■ salida")), bargap=0.15,
     )
     if partial_opens:
         epct = float(getattr(cfg, "entry_partial_pct", 50.0) or 50.0)
         fig.add_annotation(
             text=(f"Entrada parcial: {epct:g}% en apertura y ▶ ADD del resto "
-                  "al cierre de esa misma vela"),
+                  "en la apertura siguiente; se revierte si esa vela cierra en contra"),
             xref="paper", yref="paper", x=0, y=1.045, xanchor="left", yanchor="bottom",
             showarrow=False, font=dict(size=11, color="#9e9e9e"),
         )

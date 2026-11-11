@@ -545,7 +545,10 @@ class Backtester:
             "quantity": qty_init, "entry_pct": ep_pct, "target_quantity": target_q or qty_total,
         })
 
-    def close_position(self, percent: float, raw_price: float, ts: pd.Timestamp, reason: str):
+    def close_position(
+        self, percent: float, raw_price: float, ts: pd.Timestamp, reason: str,
+        *, close_entry_add: bool = False,
+    ):
         pos = self.position
         if pos is None:
             return
@@ -567,6 +570,10 @@ class Backtester:
             pos.entry_time, ts, pos.entry_price, price, qty, gross, fees, net,
             net / (pos.entry_price * qty) * 100 if pos.entry_price * qty else 0.0,
             reason, pos.risk_amount))
+        if close_entry_add:
+            pos.entry_added_quantity = max(0.0, pos.entry_added_quantity - qty)
+        else:
+            pos.entry_added_quantity *= max(0.0, 1.0 - qty / pos.quantity)
         remaining = pos.quantity - qty
         if percent >= 100 or remaining <= max(1e-12, pos.initial_quantity * 1e-12):
             self.position = None
@@ -770,7 +777,7 @@ class Backtester:
         return True
 
     def add_position(self, raw_price: float, ts: pd.Timestamp):
-        """Completa al cierre de la vela la cantidad pendiente de la entrada."""
+        """Añade en la apertura siguiente la cantidad pendiente de la entrada."""
         pos = self.position
         if pos is None:
             return
@@ -802,6 +809,7 @@ class Backtester:
             pos.entry_price = (pos.entry_price * pos.quantity + price * qty_add) / total_qty_new
         pos.quantity = total_qty_new
         pos.entry_fee += fee_add
+        pos.entry_added_quantity += qty_add
         self.adds.append({
             "position_id": pos.position_id, "time": ts, "price": price,
             "quantity": qty_add, "target_quantity": pos.target_quantity, "side": pos.side,
@@ -810,6 +818,29 @@ class Backtester:
         if pos.entry_remaining_quantity <= 1e-12:
             pos.entry_remaining_quantity = 0.0
             pos.partial_entry_done = True
+
+    def _revert_adverse_entry_add(self, i: int) -> None:
+        """Cierra el añadido si su vela de ejecución termina contra la posición."""
+        pos = self.position
+        if (pos is None or pos.entry_bar_index + 1 != i
+                or pos.entry_added_quantity <= 1e-12):
+            return
+        adverse_close = (
+            (pos.side == 1 and self.c[i] < self.o[i])
+            or (pos.side == -1 and self.c[i] > self.o[i])
+        )
+        if not adverse_close:
+            return
+        qty = min(pos.entry_added_quantity, pos.quantity)
+        if qty <= 1e-12:
+            return
+        reason = "ENTRY_ADD_REVERT_RED_CANDLE" if pos.side == 1 \
+            else "ENTRY_ADD_REVERT_GREEN_CANDLE"
+        close_time = self.times[i] + pd.Timedelta(self.cfg.timeframe)
+        self.close_position(
+            100.0 * qty / pos.quantity, self.c[i], close_time, reason,
+            close_entry_add=True,
+        )
 
     def _execute_target(self, i: int, target: int):
         if self.position is not None and self.position.side != target:
@@ -874,23 +905,31 @@ class Backtester:
                 self.close_position(pct, self.o[i], self.times[i], reason)
                 self.pending_exit = None
 
+            # El segundo tramo se ejecuta en la apertura posterior a la vela
+            # donde se abrió el primero, antes de gestionar el rango de esta vela.
+            if (self.position is not None and cfg.entry_partial_enabled
+                    and self.position.entry_bar_index == i - 1
+                    and not self.position.partial_entry_done
+                    and not self.position.breakeven):
+                self.add_position(self.o[i], self.times[i])
+
             # 2) Gestión de stops y salidas parciales
             stop_hit = self._stop(i)
             if not stop_hit:
                 self._manage(i)
 
-            # Completar al cierre la entrada parcial, salvo que ya se haya movido
-            # el stop a breakeven dentro de esta vela. En ese caso se cancela el
-            # tramo pendiente y se conserva únicamente la posición restante.
+            # Si el primer tramo alcanzó breakeven en su vela inicial, cancelar
+            # el añadido que, de otro modo, se ejecutaría en la apertura siguiente.
             if (not stop_hit and self.position is not None and cfg.entry_partial_enabled
                     and self.position.entry_bar_index == i
                     and not self.position.partial_entry_done):
                 if self.position.breakeven:
                     self.position.entry_remaining_quantity = 0.0
                     self.position.partial_entry_done = True
-                else:
-                    close_time = self.times[i] + pd.Timedelta(cfg.timeframe)
-                    self.add_position(self.c[i], close_time)
+
+            # Si la vela de ejecución del segundo tramo cierra contra la
+            # dirección, revertir solo ese tramo al cierre de la vela.
+            self._revert_adverse_entry_add(i)
 
             # Equity mark-to-market para el límite de pérdida mensual.
             equity_now = self._equity_value(self.c[i])
@@ -1109,9 +1148,9 @@ def parse_args():
     p.add_argument("--partial-tp2-r", type=float, default=d.partial_tp2_r)
     p.add_argument("--partial-tp2-pct", type=float, default=d.partial_tp2_pct)
     p.add_argument("--breakeven-stop", action=argparse.BooleanOptionalAction, default=d.move_stop_to_breakeven)
-    # Entrada parcial: el segundo tramo se añade al cierre de la vela de entrada.
+    # Entrada parcial: el segundo tramo se añade en la apertura de la vela siguiente.
     p.add_argument("--entry-partial", action=argparse.BooleanOptionalAction, default=d.entry_partial_enabled,
-                   help="Activa/desactiva entrada parcial (por defecto: 50%% al abrir y resto al cierre de esa vela).")
+                   help="Activa/desactiva entrada parcial (por defecto: 50%% en cada una de dos aperturas consecutivas).")
     p.add_argument("--entry-partial-pct", type=float, default=d.entry_partial_pct,
                    help="%% de la posición a entrar en la primera fase (default 50).")
     p.add_argument("--no-long", action="store_true")
