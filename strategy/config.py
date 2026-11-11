@@ -144,12 +144,12 @@ class Config:
     # stop-loss consecutivos) a cambio de recortar parte del retorno.
     partial_tp_enabled: bool = True
     partial_tp_r: float = 1.0
-    partial_tp_pct: float = 50.0
+    partial_tp_pct: float = 40.0
     # Second partial take-profit (optional). If enabled (>0), it triggers at
     # partial_tp2_r (R-multiple of initial risk) closing partial_tp2_pct of
     # the position. Partial 2 is intended to be at larger distance than TP1.
     partial_tp2_r: float = 1.75
-    partial_tp2_pct: float = 25.0
+    partial_tp2_pct: float = 10.0
     move_stop_to_breakeven: bool = True
 
     # --- Entrada parcial -----------------------------------------------------
