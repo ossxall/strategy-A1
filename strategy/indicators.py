@@ -499,3 +499,40 @@ def build_rsi_divergence_exit(
     if not cfg.rsi_divergence_exit_enabled or bars.empty:
         return None
     return build_rsi_divergence_flags(raw, bars, cfg)
+
+
+def build_rsi_short_exit(
+    raw: pd.DataFrame | None, bars: pd.DataFrame, cfg: Config
+) -> np.ndarray | None:
+    """Flags RSI <= threshold para cerrar SHORT, calculados en su timeframe.
+
+    Los flags se alinean sólo con velas fuente ya cerradas. ``None`` indica que
+    la salida está desactivada o no hay resolución suficiente para calcularla.
+    """
+    if not cfg.rsi_short_exit_enabled or bars.empty:
+        return None
+
+    timeframe = cfg.rsi_short_exit_timeframe
+    timeframe_delta = pd.Timedelta(timeframe)
+    strategy_delta = pd.Timedelta(cfg.timeframe)
+    source = None
+    source_tf = timeframe
+
+    if raw is not None and not raw.empty:
+        raw_delta = pd.Timedelta(minutes=source_minutes(raw))
+        if raw_delta <= timeframe_delta:
+            source = raw if raw_delta == timeframe_delta else resample_ohlcv(raw, timeframe)
+        elif timeframe_delta >= strategy_delta:
+            source = bars if timeframe_delta == strategy_delta else resample_ohlcv(bars, timeframe)
+            source_tf = cfg.timeframe if source is bars else timeframe
+    elif timeframe_delta >= strategy_delta:
+        source = bars if timeframe_delta == strategy_delta else resample_ohlcv(bars, timeframe)
+        source_tf = cfg.timeframe if source is bars else timeframe
+
+    if source is None or source.empty:
+        return None
+    values = rsi(source.close, cfg.rsi_short_exit_len).to_numpy(float)
+    flags = np.isfinite(values) & (values <= cfg.rsi_short_exit_threshold)
+    if source.index.equals(bars.index):
+        return flags
+    return align_closed_flags(source.index, flags, bars.index, source_tf, cfg.timeframe)

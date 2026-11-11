@@ -9,7 +9,8 @@ Lee la data OHLCV almacenada por `feed.py` en `data/feed.db` (1m por defecto) y
 - Remuestrea a `STRATEGY_TIMEFRAME`, calcula señales y salidas con
   `EMACrossStrategy` y ejecuta el `Backtester` sobre las velas cerradas.
 - Por cada acción que tomaría el backtest (apertura, reversal, cierre por
-  EMA_CROSS, ADX_REVERSAL, EMA_WEAKENING, RSI_DIVERGENCE, STOP_LOSS, BREAKEVEN,
+  EMA_CROSS, ADX_REVERSAL, EMA_WEAKENING, RSI_DIVERGENCE, RSI_SHORT_EXIT,
+  STOP_LOSS, BREAKEVEN,
   PARTIAL_TP, EMA_SLOW_TOUCH, CONFIRM_MOVE_AGAINST)
   guarda un evento en `signal.db`.
 
@@ -39,7 +40,7 @@ ordena por `(signal_time, bar_time, event)` con `EXIT` antes que `ENTRY`:
   siguiente a la vela de señal de pullback a EMA55).
 - `ENTRY_ADD`: `signal_time = bar_time + timeframe` (se ejecuta al cierre de la
   vela donde se abrió el primer tramo; se omite si antes se activa breakeven).
-- `EXIT` por EMA_CROSS / ADX / EMA_WEAKENING / RSI_DIVERGENCE: también
+- `EXIT` por EMA_CROSS / ADX / EMA_WEAKENING / RSI_DIVERGENCE / RSI_SHORT_EXIT: también
   `signal_time = bar_time + timeframe` (se decide al cierre y se ejecuta en la
   apertura siguiente).
 - `EXIT` por STOP_LOSS / BREAKEVEN / PARTIAL_TP / EMA_SLOW_TOUCH /
@@ -276,6 +277,10 @@ _CONFIG_ENV = {
     "rsi_divergence_len": ("STRATEGY_RSI_DIVERGENCE_LEN", env_int),
     "rsi_divergence_pivot": ("STRATEGY_RSI_DIVERGENCE_PIVOT", env_int),
     "rsi_divergence_lookback": ("STRATEGY_RSI_DIVERGENCE_LOOKBACK", env_int),
+    "rsi_short_exit_enabled": ("STRATEGY_RSI_SHORT_EXIT", env_bool),
+    "rsi_short_exit_len": ("STRATEGY_RSI_SHORT_EXIT_LEN", env_int),
+    "rsi_short_exit_threshold": ("STRATEGY_RSI_SHORT_EXIT_THRESHOLD", env_float),
+    "rsi_short_exit_timeframe": ("STRATEGY_RSI_SHORT_EXIT_TIMEFRAME", env_str),
     "ema55_touch_exit_enabled": ("STRATEGY_EMA55_TOUCH_EXIT", env_bool),
     "ema55_touch_tolerance_pct": ("STRATEGY_EMA55_TOUCH_TOLERANCE_PCT", env_float),
     "ema55_touch_lookback_bars": ("STRATEGY_EMA55_TOUCH_LOOKBACK_BARS", env_int),
@@ -572,7 +577,7 @@ def build_events(
     Reutiliza el motor `Backtester` de `strategy/strategy.py` sobre las velas
     cerradas, de modo que el bot publica exactamente las acciones que tomaría
     el backtest: aperturas pullback (incluidas reversals), cierres por EMA_CROSS,
-    ADX_REVERSAL, EMA_WEAKENING, RSI_DIVERGENCE y
+    ADX_REVERSAL, EMA_WEAKENING, RSI_DIVERGENCE, RSI_SHORT_EXIT y
     EMA55_REPEATED_TOUCH_WEAKNESS(_SHORT), además de STOP_LOSS, BREAKEVEN,
     PARTIAL_TP y EMA_SLOW_TOUCH. La posición abierta al final no se
     cierra (`force_close_at_end=False`): en vivo sigue vigente.

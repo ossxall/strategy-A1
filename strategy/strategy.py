@@ -21,6 +21,10 @@ con máximos más altos, RSI con máximos más bajos) cierra un LONG y la alcist
 pivote de precio se confirma tras `rsi_divergence_pivot` velas y se compara con
 el pivote anterior del mismo tipo en `rsi_divergence_lookback` velas.
 
+Además, `rsi_short_exit_enabled` cierra el 100 % de un SHORT cuando el RSI(14)
+de 30 minutos alcanza 30 o menos; la condición se decide al cierre y se ejecuta
+en la apertura siguiente.
+
 Archivo único con API reutilizable para backtesting y bots.
 
 Protecciones de riesgo (ver `Config`):
@@ -75,6 +79,7 @@ from strategy.models import (
     MONTHLY_LIMIT_REASON,
     RSI_DIVERGENCE_BULL_REASON,
     RSI_DIVERGENCE_BEAR_REASON,
+    RSI_SHORT_EXIT_REASON,
     DEFAULT_OUTPUT_DIR,
     empty_trades,
 )
@@ -90,6 +95,7 @@ from strategy.indicators import (
     build_weakening_exit,
     build_rsi_divergence_flags,
     build_rsi_divergence_exit,
+    build_rsi_short_exit,
     spread_flags,
 )
 from strategy.utils import (
@@ -364,6 +370,9 @@ class EMACrossStrategy:
             elif armed_side == -1 and pullback_short_candidate[i] and short_allowed[i] and valid[i]:
                 pullback_short[i] = True
                 armed_side = 0
+        rsi_short_exit = build_rsi_short_exit(raw, bars, cfg)
+        if rsi_short_exit is None:
+            rsi_short_exit = np.zeros(len(bars), dtype=bool)
         output = {
             "ema_fast": fast, "ema_slow": slow, "macd_line": macd_line,
             "adx_entry": entry_adx,
@@ -381,6 +390,7 @@ class EMACrossStrategy:
             # para cerrar una posición en el cruce opuesto.
             "ema_cross_up": cross_up, "ema_cross_down": cross_down,
             "pullback_long": pullback_long, "pullback_short": pullback_short,
+            "rsi_short_exit": rsi_short_exit,
             "valid": valid,
             "trend_bias": bias if bias is not None else np.zeros(len(bars), int),
             "target": np.select([pullback_long, pullback_short], [1, -1], default=0),
@@ -479,6 +489,14 @@ class Backtester:
             else self.signals["cross_down"].to_numpy(bool)
             if "cross_down" in self.signals else np.zeros(len(bars), dtype=bool)
         )
+        if config.rsi_short_exit_enabled and "rsi_short_exit" in self.signals:
+            self.rsi_short_exit = self.signals["rsi_short_exit"].to_numpy(bool)
+        else:
+            generated_rsi_exit = build_rsi_short_exit(None, bars, config)
+            self.rsi_short_exit = (
+                np.asarray(generated_rsi_exit, dtype=bool)
+                if generated_rsi_exit is not None else np.zeros(len(bars), dtype=bool)
+            )
         self.adx_exit = np.asarray(adx_exit, bool) if adx_exit is not None else np.zeros(len(bars), bool)
         self.weak_exit = np.asarray(weak_exit, bool) if weak_exit is not None else np.zeros(len(bars), bool)
         # Divergencia RSI: +1 alcista (cierra SHORT), -1 bajista (cierra LONG), 0 sin señal.
@@ -499,6 +517,7 @@ class Backtester:
         if len(self.rsi_div) != len(bars): self.rsi_div = np.zeros(len(bars), int)
         if len(self.ema_cross_up) != len(bars): self.ema_cross_up = np.zeros(len(bars), bool)
         if len(self.ema_cross_down) != len(bars): self.ema_cross_down = np.zeros(len(bars), bool)
+        if len(self.rsi_short_exit) != len(bars): self.rsi_short_exit = np.zeros(len(bars), bool)
         self.o, self.h, self.l, self.c = (bars[k].to_numpy(float) for k in ("open", "high", "low", "close"))
         self.times = bars.index
         self.cash = config.initial_capital
@@ -878,6 +897,7 @@ class Backtester:
                               for tf in cfg.adx_timeframes)
         adx_base = f"ADX_{adx_labels}_REVERSAL"
         adx_reason = adx_base if cfg.adx_exit_pct >= 100 else f"{adx_base}_{cfg.adx_exit_pct:g}%"
+        rsi_short_reason = f"{RSI_SHORT_EXIT_REASON}_{cfg.rsi_short_exit_threshold:g}"
         weak_tfs = cfg.ema_weakening_timeframes or (cfg.timeframe,)
         weak_fast, weak_slow = cfg.ema_weakening_lengths
         weak_base = "EMA_WEAKENING_" + "_".join(tf.upper() for tf in weak_tfs)
@@ -980,6 +1000,9 @@ class Backtester:
                     self.pending_exit = (weak_reason, cfg.ema_weakening_exit_pct)
                 elif self.position is not None and self.adx_exit[i]:
                     self.pending_exit = (adx_reason, cfg.adx_exit_pct)
+                elif (self.position is not None and self.position.side == -1
+                      and self.rsi_short_exit[i]):
+                    self.pending_exit = (rsi_short_reason, 100.0)
                 elif self.position is not None:
                     # Primero se atiende la divergencia RSI confirmada.
                     div_reason = self._rsi_divergence_reason(i)
@@ -1036,7 +1059,7 @@ def parse_args():
     p.add_argument("--confirm-bars", type=int, default=d.confirm_bars)
     p.add_argument("--entry-pullback-tolerance-pct", type=float,
                    default=d.entry_pullback_tolerance_pct,
-                   help="Tolerancia porcentual de la zona de retroceso a EMA rápida (default 1.62%%).")
+                   help="Tolerancia porcentual de la zona de retroceso a EMA rápida (default 0.2%%).")
     p.add_argument("--entry-adx-filter", action=argparse.BooleanOptionalAction,
                    default=d.entry_adx_enabled,
                    help="Exige ADX de entrada por encima del mínimo (activo por defecto).")
@@ -1113,6 +1136,16 @@ def parse_args():
                    help="Velas a cada lado para confirmar un pivote de precio (default 5).")
     p.add_argument("--rsi-divergence-lookback", type=int, default=d.rsi_divergence_lookback,
                    help="Velas hacia atrás para emparejar el pivote con el anterior (default 60).")
+    p.add_argument("--rsi-short-exit", action=argparse.BooleanOptionalAction,
+                   default=d.rsi_short_exit_enabled,
+                   help="Cierra SHORT cuando RSI cae al umbral (activo por defecto).")
+    p.add_argument("--rsi-short-exit-len", type=int, default=d.rsi_short_exit_len,
+                   help="Periodo RSI para la salida SHORT (default 14).")
+    p.add_argument("--rsi-short-exit-threshold", type=float,
+                   default=d.rsi_short_exit_threshold,
+                   help="Nivel RSI que cierra SHORT (default 30).")
+    p.add_argument("--rsi-short-exit-timeframe", default=d.rsi_short_exit_timeframe,
+                   help="Timeframe RSI para cerrar SHORT (default 30min).")
     p.add_argument("--ema55-touch-exit", action=argparse.BooleanOptionalAction,
                    default=d.ema55_touch_exit_enabled,
                    help="Salida LONG en 30m por toques repetidos a EMA55 sin ruptura.")
@@ -1219,6 +1252,10 @@ def config_from_args(a) -> Config:
         rsi_divergence_len=a.rsi_divergence_len,
         rsi_divergence_pivot=a.rsi_divergence_pivot,
         rsi_divergence_lookback=a.rsi_divergence_lookback,
+        rsi_short_exit_enabled=a.rsi_short_exit,
+        rsi_short_exit_len=a.rsi_short_exit_len,
+        rsi_short_exit_threshold=a.rsi_short_exit_threshold,
+        rsi_short_exit_timeframe=a.rsi_short_exit_timeframe,
         ema55_touch_exit_enabled=a.ema55_touch_exit,
         ema55_touch_tolerance_pct=a.ema55_touch_tolerance_pct,
         ema55_touch_lookback_bars=a.ema55_touch_lookback_bars,

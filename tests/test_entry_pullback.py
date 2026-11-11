@@ -189,7 +189,7 @@ def test_pullback_is_rejected_when_wick_misses_the_ema_zone(
 
 
 def test_pullback_tolerance_is_configurable_and_validated():
-    assert Config().entry_pullback_tolerance_pct == 1.62
+    assert Config().entry_pullback_tolerance_pct == 0.2
     assert not Config().streak_trend_only
     assert Config(entry_pullback_tolerance_pct=0.0).entry_pullback_tolerance_pct == 0.0
     with pytest.raises(ValueError, match="entry_pullback_tolerance_pct"):

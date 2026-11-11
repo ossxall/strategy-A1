@@ -40,7 +40,7 @@ class Config:
 
     confirm_bars: int = 4
     # La entrada pullback está activa por defecto y utiliza las EMAs anteriores.
-    # Tolerancia de la zona respecto a EMA rápida/EMA55 (por defecto 1.62%).
+    # Tolerancia de la zona respecto a EMA rápida/EMA55 (por defecto 0.2%).
     entry_pullback_tolerance_pct: float = 0.2
     # Bloquea entradas pullback si el ADX de entrada no supera el mínimo.
     entry_adx_enabled: bool = True
@@ -115,6 +115,12 @@ class Config:
     rsi_divergence_pivot: int = 5      # Velas a cada lado para confirmar un pivote
     rsi_divergence_lookback: int = 60  # Ventana hacia atrás para el pivote previo
 
+    # Cierre de SHORT al entrar el RSI en sobreventa (sólo en este lado).
+    rsi_short_exit_enabled: bool = True
+    rsi_short_exit_len: int = 14
+    rsi_short_exit_threshold: float = 30.0
+    rsi_short_exit_timeframe: str = "30min"
+
     # --- Debilidad por toques repetidos a EMA55 (30m únicamente) ------------
     # Un toque es el rango de la vela intersectando EMA55 ± tolerancia. Se sale
     # tras 2 toques seguidos o 3 dentro de 5 velas, sin ruptura y con pérdida abierta.
@@ -133,7 +139,7 @@ class Config:
     # stop del resto a breakeven. Sube el win rate real (rompe rachas de
     # stop-loss consecutivos) a cambio de recortar parte del retorno.
     partial_tp_enabled: bool = True
-    partial_tp_r: float = 1.0
+    partial_tp_r: float = 0.9
     partial_tp_pct: float = 25.0
     # Second partial take-profit (optional). If enabled (>0), it triggers at
     # partial_tp2_r (R-multiple of initial risk) closing partial_tp2_pct of
@@ -245,6 +251,11 @@ class Config:
         for timeframe in self.rsi_divergence_timeframes:
             if pd.Timedelta(timeframe) <= pd.Timedelta(0):
                 raise ValueError(f"rsi_divergence_timeframe inválido: {timeframe!r}.")
+        if self.rsi_short_exit_enabled:
+            if self.rsi_short_exit_len <= 0 or not 0 <= self.rsi_short_exit_threshold <= 100:
+                raise ValueError("Configuración de salida RSI SHORT inválida.")
+            if pd.Timedelta(self.rsi_short_exit_timeframe) <= pd.Timedelta(0):
+                raise ValueError("rsi_short_exit_timeframe debe ser positivo.")
         if self.initial_capital <= 0 or self.max_leverage <= 0:
             raise ValueError("Capital y leverage deben ser positivos.")
         if not 0 < self.risk_pct <= 0.2:

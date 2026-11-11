@@ -572,6 +572,9 @@ def build_backtest_figure(
         (weak_flags, bars_high + 3 * pad, "diamond", WEAK_EXIT_COLOR, "salida weakening"),
         (div_bull, bars_low - 2 * pad, "star", RSI_DIV_COLOR, "divergencia RSI alcista"),
         (div_bear, bars_high + 4 * pad, "star", RSI_DIV_COLOR, "divergencia RSI bajista"),
+        (_flag(signals["rsi_short_exit"]) if signals is not None and "rsi_short_exit" in signals
+         else np.zeros(len(bars), dtype=bool), bars_high + 5 * pad, "triangle-down",
+         RSI_DIV_COLOR, "RSI short ≤ 30"),
     ):
         if mask.any():
             fig.add_trace(_marker_trace(bars_x[mask], y[mask], label, symbol, color, 8),
