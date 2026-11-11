@@ -592,6 +592,10 @@ class Backtester:
         self.cash -= fee
         self.position_id += 1
         self._position_pnl = 0.0
+        # La señal se evaluó al cierre de la vela anterior a esta ejecución.
+        signal_index = self._bar_index - 1
+        signal_high = self.h[signal_index] if 0 <= signal_index < len(self.h) else None
+        signal_low = self.l[signal_index] if 0 <= signal_index < len(self.l) else None
         self.position = Position(
             position_id=self.position_id,
             side=side,
@@ -611,6 +615,8 @@ class Backtester:
             entry_remaining_quantity=entry_remaining_qty,
             entry_bar_index=self._bar_index,
             first_entry_price=price,
+            entry_signal_high=signal_high,
+            entry_signal_low=signal_low,
         )
         self.opened.append({
             "position_id": self.position_id, "time": ts, "price": price, "side": side,
@@ -881,6 +887,13 @@ class Backtester:
             pos.entry_remaining_quantity = 0.0
             pos.partial_entry_done = True
 
+    @staticmethod
+    def _entry_add_confirmed(pos: Position, close: float) -> bool:
+        """Confirma el segundo tramo si el cierre rompe la vela de señal."""
+        if pos.side == 1:
+            return pos.entry_signal_high is not None and close > pos.entry_signal_high
+        return pos.entry_signal_low is not None and close < pos.entry_signal_low
+
     def _execute_target(self, i: int, target: int):
         if self.position is not None and self.position.side != target:
             self.close_position(100, self.o[i], self.times[i], CROSS_REASON)
@@ -959,9 +972,14 @@ class Backtester:
                 if self.position.breakeven:
                     self.position.entry_remaining_quantity = 0.0
                     self.position.partial_entry_done = True
-                else:
+                elif self._entry_add_confirmed(self.position, self.c[i]):
                     close_time = self.times[i] + pd.Timedelta(cfg.timeframe)
                     self.add_position(self.c[i], close_time)
+                else:
+                    # El segundo tramo solo puede añadirse en la vela de entrada.
+                    # Si el cierre no rompe la vela de señal, se cancela.
+                    self.position.entry_remaining_quantity = 0.0
+                    self.position.partial_entry_done = True
 
             # Equity mark-to-market para el límite de pérdida mensual.
             equity_now = self._equity_value(self.c[i])

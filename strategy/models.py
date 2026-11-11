@@ -25,6 +25,8 @@ class Position:
     entry_remaining_quantity: float = 0.0  # tramo aún pendiente, independiente de cierres parciales
     entry_bar_index: int = -1           # Índice de barra donde se hizo la 1ª entrada
     first_entry_price: float | None = None  # Precio ejecutado del primer tramo, sin promediar adds
+    entry_signal_high: float | None = None  # Máximo de la vela que generó la entrada
+    entry_signal_low: float | None = None   # Mínimo de la vela que generó la entrada
 
 
 @dataclass

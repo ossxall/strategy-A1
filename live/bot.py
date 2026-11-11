@@ -23,10 +23,10 @@ Reglas de diseño
 - Las decisiones se conocen al cierre de la vela y se ejecutan en la apertura
   siguiente (igual que el backtest); por eso se guardan `bar_time` (vela de la
   señal) y `signal_time` (momento de ejecución). La entrada parcial se completa
-  con `ENTRY_ADD` al cierre de la vela de entrada, salvo si ya se activó el
-  breakeven. Las salidas por stop/
-  breakeven/partial/toque a la EMA slow/movimiento adverso desde la confirmación se
-  disparan dentro de la vela, por lo que `bar_time == signal_time`.
+  con `ENTRY_ADD` al cierre de la vela de entrada solo si rompe el máximo de la
+  vela de señal (LONG) o el mínimo (SHORT), y no se activó breakeven. Las salidas
+  por stop/breakeven/partial/toque a EMA slow/movimiento adverso se disparan
+  dentro de la vela, por lo que `bar_time == signal_time`.
 - `force_close_at_end` se desactiva: en vivo una posición abierta no debe
   cerrarse artificialmente al final de los datos disponibles.
 
@@ -39,7 +39,8 @@ ordena por `(signal_time, bar_time, event)` con `EXIT` antes que `ENTRY`:
 - `ENTRY`: `signal_time = bar_time + timeframe` (se ejecuta en la apertura
   siguiente a la vela de señal de pullback a EMA55).
 - `ENTRY_ADD`: `signal_time = bar_time + timeframe` (se ejecuta al cierre de la
-  vela donde se abrió el primer tramo; se omite si antes se activa breakeven).
+  vela donde se abrió el primer tramo; requiere ruptura de la vela de señal y
+  se omite si no rompe o si antes se activa breakeven).
 - `EXIT` por EMA_CROSS / ADX / EMA_WEAKENING / RSI_DIVERGENCE / RSI_SHORT_EXIT: también
   `signal_time = bar_time + timeframe` (se decide al cierre y se ejecuta en la
   apertura siguiente).
@@ -292,7 +293,7 @@ _CONFIG_ENV = {
     "ema55_touch_exit_loss_pct": ("STRATEGY_EMA55_TOUCH_EXIT_LOSS_PCT", env_float),
     "ema55_touch_short_exit_loss_pct": ("STRATEGY_EMA55_TOUCH_SHORT_EXIT_LOSS_PCT", env_float),
     "timestamp_is_close": ("STRATEGY_TIMESTAMP_IS_CLOSE", env_bool),
-    # Entrada parcial: el segundo tramo se añade al cierre de la vela de entrada.
+    # Entrada parcial: el segundo tramo requiere ruptura del máximo/mínimo de señal.
     "entry_partial_enabled": ("STRATEGY_ENTRY_PARTIAL", env_bool),
     "entry_partial_pct": ("STRATEGY_ENTRY_PARTIAL_PCT", env_float),
 }

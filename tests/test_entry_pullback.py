@@ -61,7 +61,7 @@ def test_long_pullback_after_ema_cross_enters_on_next_open_and_keeps_50_50_split
         open_=[99.0, 99.0, 100.0, 102.0],
         high=[100.0, 100.5, 101.4, 102.5],
         low=[98.5, 99.3, 100.2, 101.5],
-        close=[99.0, 99.5, 101.3, 102.0],
+        close=[99.0, 99.5, 101.3, 102.1],
     )
     fast = np.array([99.0, 100.0, 100.0, 100.0])
     slow = np.array([100.0, 99.0, 99.0, 99.0])

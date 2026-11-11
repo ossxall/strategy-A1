@@ -66,6 +66,42 @@ def test_entry_is_split_between_next_open_and_same_candle_close():
     assert engine.position.quantity == engine.position.target_quantity
     assert engine.position.entry_price == 102.0
     assert engine.position.first_entry_price == 100.0
+    assert engine.position.entry_signal_high == bars.iloc[0]["high"]
+    assert engine.position.entry_signal_low == bars.iloc[0]["low"]
+
+
+@pytest.mark.parametrize(
+    ("side", "close", "expected_add"),
+    [
+        (1, 101.0, True),
+        (1, 100.5, False),
+        (1, 100.25, False),
+        (1, 99.0, False),
+        (-1, 99.0, True),
+        (-1, 99.5, False),
+        (-1, 99.75, False),
+        (-1, 101.0, False),
+    ],
+)
+def test_entry_add_requires_close_breakout_of_signal_candle(side, close, expected_add):
+    index, bars, signals, config = setup_entry()
+    config.rsi_short_exit_enabled = False
+    signals.loc[index[0], "target"] = side
+    bars.loc[index[1], ["open", "high", "low", "close"]] = [
+        100.0, max(100.5, close), min(99.5, close), close
+    ]
+
+    engine = Backtester(bars, config, signals=signals)
+    engine.run()
+
+    assert bool(engine.adds) is expected_add
+    assert engine.position is not None
+    assert engine.position.partial_entry_done
+    if expected_add:
+        assert engine.position.quantity == engine.position.target_quantity
+    else:
+        assert engine.position.quantity < engine.position.target_quantity
+        assert engine.position.entry_remaining_quantity == 0.0
 
 
 def test_live_event_reports_add_at_close_of_entry_candle():
