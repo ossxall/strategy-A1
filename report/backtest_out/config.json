@@ -39,7 +39,7 @@
   "entry_er_risk_slope": 1.0,
   "entry_er_risk_min": 0.5,
   "entry_er_risk_max": 1.25,
-  "adx_exit_enabled": true,
+  "adx_exit_enabled": false,
   "adx_timeframe": "1D",
   "adx_exit_range": 9,
   "adx_dilen": 14,
