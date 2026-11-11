@@ -248,16 +248,16 @@ class EMACrossStrategy:
         if cfg.confirm_bars:
             up = confirmed_crosses(up, fast > slow, cfg.confirm_bars)
             down = confirmed_crosses(down, fast < slow, cfg.confirm_bars)
-        entry_dmi = (
+        entry_adx_values = (
             adx(bars, cfg.entry_adx_len, cfg.entry_adx_len)
-            if cfg.entry_adx_enabled or cfg.entry_dmi_risk_scaling_enabled
+            if cfg.entry_adx_enabled
             else None
         )
         entry_adx_by_timeframe: dict[str, np.ndarray] = {}
         if cfg.entry_adx_enabled:
             for timeframe in cfg.entry_adx_timeframes:
                 if pd.Timedelta(timeframe) == pd.Timedelta(cfg.timeframe):
-                    values = entry_dmi["adx"].to_numpy(float)
+                    values = entry_adx_values["adx"].to_numpy(float)
                 else:
                     values = self._entry_adx_line(bars, raw, timeframe)
                 entry_adx_by_timeframe[timeframe] = values
@@ -335,9 +335,6 @@ class EMACrossStrategy:
             "trend_bias": bias if bias is not None else np.zeros(len(bars), int),
             "target": np.select([up, down], [1, -1], default=0),
         }
-        if cfg.entry_dmi_risk_scaling_enabled and entry_dmi is not None:
-            output["entry_plus_di"] = entry_dmi["plus_di"].to_numpy(float)
-            output["entry_minus_di"] = entry_dmi["minus_di"].to_numpy(float)
         for timeframe, values in entry_adx_by_timeframe.items():
             output[f"adx_entry_{timeframe}"] = values
         if entry_mfi is not None:
@@ -412,14 +409,6 @@ class Backtester:
         else:
             self.entry_rsi_bull_divergence_blocked = np.zeros(len(bars), dtype=bool)
             self.entry_rsi_bear_divergence_blocked = np.zeros(len(bars), dtype=bool)
-        self.entry_plus_di = (
-            self.signals["entry_plus_di"].to_numpy(float)
-            if "entry_plus_di" in self.signals else None
-        )
-        self.entry_minus_di = (
-            self.signals["entry_minus_di"].to_numpy(float)
-            if "entry_minus_di" in self.signals else None
-        )
         self.entry_mfi = (
             self.signals["entry_mfi"].to_numpy(float)
             if "entry_mfi" in self.signals else None
@@ -489,7 +478,6 @@ class Backtester:
         risk_unit = self._risk_per_unit(side, price, pct_sl) if pct_sl > 0 else 0.0
         by_risk = (
             self.cash * self.cfg.risk_pct * self._risk_multiplier()
-            * self._entry_dmi_risk_multiplier(side)
             * self._entry_mfi_risk_multiplier(side) * self._entry_er_risk_multiplier()
             / risk_unit
             if risk_unit > 0 else np.inf
@@ -590,25 +578,6 @@ class Backtester:
         win_rate = sum(wins) / len(wins)
         factor = 1 + cfg.adaptive_risk_k * (win_rate - 0.5)
         return float(min(max(factor, cfg.adaptive_risk_min), cfg.adaptive_risk_max))
-
-    def _entry_dmi_risk_multiplier(self, side: int) -> float:
-        """Escala tamaño por DMI de la vela confirmada, sin bloquear entradas."""
-        cfg = self.cfg
-        if (not cfg.entry_dmi_risk_scaling_enabled or self.entry_plus_di is None
-                or self.entry_minus_di is None or side not in (1, -1)):
-            return 1.0
-        signal_index = self._bar_index - 1
-        if signal_index < 0 or signal_index >= len(self.entry_plus_di):
-            return 1.0
-        plus_di = self.entry_plus_di[signal_index]
-        minus_di = self.entry_minus_di[signal_index]
-        if not (np.isfinite(plus_di) and np.isfinite(minus_di)):
-            return 1.0
-        spread_in_trade_direction = (plus_di - minus_di) * side
-        factor = cfg.entry_dmi_risk_base + (
-            spread_in_trade_direction / cfg.entry_dmi_risk_spread_scale
-        )
-        return float(np.clip(factor, cfg.entry_dmi_risk_min, cfg.entry_dmi_risk_max))
 
     def _entry_mfi_risk_multiplier(self, side: int) -> float:
         """Escala tamaño por flujo MFI de la última vela de señal ya cerrada."""
@@ -1021,15 +990,6 @@ def parse_args():
     p.add_argument("--entry-rsi-divergence-lookback", type=int,
                    default=d.entry_rsi_divergence_lookback,
                    help="Velas hacia atrás durante las que se bloquean entradas (default 20).")
-    p.add_argument("--entry-dmi-risk-scaling", action=argparse.BooleanOptionalAction,
-                   default=d.entry_dmi_risk_scaling_enabled,
-                   help="Modula el tamaño con DI+/DI- sin bloquear entradas.")
-    p.add_argument("--entry-dmi-risk-base", type=float, default=d.entry_dmi_risk_base)
-    p.add_argument("--entry-dmi-risk-spread-scale", type=float,
-                   default=d.entry_dmi_risk_spread_scale,
-                   help="Escala de diferencia DI direccional para el multiplicador de riesgo.")
-    p.add_argument("--entry-dmi-risk-min", type=float, default=d.entry_dmi_risk_min)
-    p.add_argument("--entry-dmi-risk-max", type=float, default=d.entry_dmi_risk_max)
     p.add_argument("--entry-mfi-risk-scaling", action=argparse.BooleanOptionalAction,
                    default=d.entry_mfi_risk_scaling_enabled,
                    help="Modula el tamaño con MFI (precio/volumen), sin bloquear entradas.")
@@ -1160,11 +1120,6 @@ def config_from_args(a) -> Config:
         entry_atr_max_ratio=a.entry_atr_max_ratio,
         entry_rsi_divergence_enabled=a.entry_rsi_divergence_filter,
         entry_rsi_divergence_lookback=a.entry_rsi_divergence_lookback,
-        entry_dmi_risk_scaling_enabled=a.entry_dmi_risk_scaling,
-        entry_dmi_risk_base=a.entry_dmi_risk_base,
-        entry_dmi_risk_spread_scale=a.entry_dmi_risk_spread_scale,
-        entry_dmi_risk_min=a.entry_dmi_risk_min,
-        entry_dmi_risk_max=a.entry_dmi_risk_max,
         entry_mfi_risk_scaling_enabled=a.entry_mfi_risk_scaling,
         entry_mfi_len=a.entry_mfi_len,
         entry_mfi_risk_base=a.entry_mfi_risk_base,

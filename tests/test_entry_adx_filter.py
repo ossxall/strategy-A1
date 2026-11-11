@@ -64,7 +64,6 @@ def make_config(adx_min=20.0, adx_timeframe="30min"):
         entry_adx_min=adx_min,
         entry_adx_timeframe=adx_timeframe,
         entry_atr_enabled=False,
-        entry_dmi_risk_scaling_enabled=False,
         entry_mfi_risk_scaling_enabled=False,
         entry_er_risk_scaling_enabled=False,
         streak_trend_only=False,

@@ -55,13 +55,6 @@ class Config:
     # dentro de las últimas N velas del timeframe de estrategia.
     entry_rsi_divergence_enabled: bool = True
     entry_rsi_divergence_lookback: int = 20
-    # Escala el riesgo (no bloquea la señal) según DI direccional en la vela
-    # confirmada: factor = clamp(base + (DI a favor - DI en contra) / escala).
-    entry_dmi_risk_scaling_enabled: bool = True
-    entry_dmi_risk_base: float = 0.9
-    entry_dmi_risk_spread_scale: float = 100.0
-    entry_dmi_risk_min: float = 0.5
-    entry_dmi_risk_max: float = 1.25
     # MFI modula adicionalmente el tamaño según flujo de dinero a favor.
     entry_mfi_risk_scaling_enabled: bool = True
     entry_mfi_len: int = 14
@@ -117,13 +110,6 @@ class Config:
     rsi_divergence_len: int = 14       # Periodo del RSI (Wilder)
     rsi_divergence_pivot: int = 5      # Velas a cada lado para confirmar un pivote
     rsi_divergence_lookback: int = 60  # Ventana hacia atrás para el pivote previo
-
-    # DI direccional modula el tamaño de entrada; no bloquea señales.
-    entry_dmi_risk_scaling_enabled: bool = True
-    entry_dmi_risk_base: float = 0.9
-    entry_dmi_risk_spread_scale: float = 100.0
-    entry_dmi_risk_min: float = 0.5
-    entry_dmi_risk_max: float = 1.25
 
     # --- Debilidad por toques repetidos a EMA55 (30m únicamente) ------------
     # Un toque es el rango de la vela intersectando EMA55 ± tolerancia. Se sale
@@ -280,12 +266,6 @@ class Config:
             raise ValueError("Configuración del filtro ATR de entrada inválida.")
         if self.entry_rsi_divergence_enabled and self.entry_rsi_divergence_lookback < 1:
             raise ValueError("entry_rsi_divergence_lookback debe ser >= 1.")
-        if self.entry_dmi_risk_scaling_enabled and (
-            self.entry_adx_len <= 0 or self.entry_dmi_risk_spread_scale <= 0
-            or self.entry_dmi_risk_min <= 0
-            or self.entry_dmi_risk_max < self.entry_dmi_risk_min
-        ):
-            raise ValueError("Configuración de escalado DMI de riesgo inválida.")
         if self.entry_mfi_risk_scaling_enabled and (
             self.entry_mfi_len <= 0 or self.entry_mfi_risk_spread_scale <= 0
             or self.entry_mfi_risk_min <= 0
@@ -298,12 +278,6 @@ class Config:
             or self.entry_er_risk_max < self.entry_er_risk_min
         ):
             raise ValueError("Configuración de escalado Efficiency Ratio inválida.")
-        if self.entry_dmi_risk_scaling_enabled and (
-            self.entry_adx_len <= 0 or self.entry_dmi_risk_spread_scale <= 0
-            or self.entry_dmi_risk_min <= 0
-            or self.entry_dmi_risk_max < self.entry_dmi_risk_min
-        ):
-            raise ValueError("Configuración de escalado DMI de riesgo inválida.")
         if self.adx_exit_enabled:
             if min(self.adx_dilen, self.adx_adxlen) <= 0 or self.adx_key_level < 0:
                 raise ValueError("Configuración de ADX de salida inválida.")
