@@ -14,8 +14,8 @@ timeframe `ema_weakening_timeframe` se estrecha por debajo de
 independientes de los del cruce de entrada: `ema_weakening_fast` /
 `ema_weakening_slow` (0 = reutilizar `ema_fast` / `ema_slow`).
 
-Y, por último, una **divergencia RSI en contra de la posición cierra el 100 %
-de la misma** (`rsi_divergence_exit_enabled`): la divergencia bajista (precio
+Y, por último, una **divergencia RSI en contra cierra el porcentaje configurado**
+(`rsi_divergence_exit_pct`, 100 % por defecto): la divergencia bajista (precio
 con máximos más altos, RSI con máximos más bajos) cierra un LONG y la alcista
 (precio con mínimos más bajos, RSI con mínimos más altos) cierra un SHORT. El
 pivote de precio se confirma tras `rsi_divergence_pivot` velas y se compara con
@@ -1247,7 +1247,10 @@ class Backtester:
                     # Primero se atiende la divergencia RSI confirmada.
                     div_reason = self._rsi_divergence_reason(i)
                     if div_reason is not None:
-                        self.pending_exit = (div_reason, 100.0)
+                        div_pct = cfg.rsi_divergence_exit_pct
+                        if div_pct < 100:
+                            div_reason = f"{div_reason}_{div_pct:g}%"
+                        self.pending_exit = (div_reason, div_pct)
                     else:
                         ema55_reason = self._ema55_touch_weakness_exit_reason(i)
                         if ema55_reason is not None:
@@ -1367,8 +1370,10 @@ def parse_args():
     p.add_argument("--ema-weakening-exit-pct", type=float, default=d.ema_weakening_exit_pct)
     p.add_argument("--rsi-divergence-exit", action=argparse.BooleanOptionalAction,
                    default=d.rsi_divergence_exit_enabled,
-                   help="Cierra el 100%% de la posición ante una divergencia RSI en su contra "
-                        "(bajista contra LONG, alcista contra SHORT).")
+                   help="Cierra el porcentaje configurado ante divergencia RSI en contra.")
+    p.add_argument("--rsi-divergence-exit-pct", type=float,
+                   default=d.rsi_divergence_exit_pct,
+                   help="Porcentaje de la posición que se cierra por divergencia RSI (default 100).")
     p.add_argument("--rsi-divergence-timeframe", default=d.rsi_divergence_timeframe,
                    help="Timeframe(s) de divergencia RSI separados por coma; se combinan con OR (p. ej. 1D,30min).")
     p.add_argument("--rsi-divergence-len", type=int, default=d.rsi_divergence_len,
@@ -1494,6 +1499,7 @@ def config_from_args(a) -> Config:
         ema_weakening_fast=a.ema_weakening_fast, ema_weakening_slow=a.ema_weakening_slow,
         ema_weakening_gap_pct=a.ema_weakening_gap_pct, ema_weakening_exit_pct=a.ema_weakening_exit_pct,
         rsi_divergence_exit_enabled=a.rsi_divergence_exit,
+        rsi_divergence_exit_pct=a.rsi_divergence_exit_pct,
         rsi_divergence_timeframe=a.rsi_divergence_timeframe,
         rsi_divergence_len=a.rsi_divergence_len,
         rsi_divergence_pivot=a.rsi_divergence_pivot,

@@ -111,6 +111,7 @@ class Config:
     # anterior del mismo tipo dentro de `rsi_divergence_lookback` velas; la
     # señal se emite al confirmarse el pivote, sin lookahead.
     rsi_divergence_exit_enabled: bool = True
+    rsi_divergence_exit_pct: float = 100.0  # % de la posición que se cierra
     # Uno o varios timeframes (combinados con OR), como en las otras salidas.
     rsi_divergence_timeframe: str | list[str] | tuple[str, ...] = "1D"
     rsi_divergence_len: int = 14       # Periodo del RSI (Wilder)
@@ -333,6 +334,8 @@ class Config:
                 raise ValueError("rsi_divergence_pivot debe ser >= 1.")
             if self.rsi_divergence_lookback < 1:
                 raise ValueError("rsi_divergence_lookback debe ser >= 1.")
+        if self.rsi_divergence_exit_enabled and not 0 < self.rsi_divergence_exit_pct <= 100:
+            raise ValueError("rsi_divergence_exit_pct debe estar en (0, 100].")
         if (self.ema55_touch_tolerance_pct < 0 or self.ema55_touch_breakout_buffer_pct < 0
                 or self.ema55_touch_exit_loss_pct < 0
                 or self.ema55_touch_short_exit_loss_pct < 0):

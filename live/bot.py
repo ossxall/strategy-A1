@@ -269,8 +269,9 @@ _CONFIG_ENV = {
     "ema_weakening_slow": ("STRATEGY_EMA_WEAKENING_SLOW", env_int),
     "ema_weakening_gap_pct": ("STRATEGY_EMA_WEAKENING_GAP_PCT", env_float),
     "ema_weakening_exit_pct": ("STRATEGY_EMA_WEAKENING_EXIT_PCT", env_float),
-    # Salida total por divergencia RSI en contra de la posición.
+    # Salida por divergencia RSI en contra de la posición.
     "rsi_divergence_exit_enabled": ("STRATEGY_RSI_DIVERGENCE_EXIT", env_bool),
+    "rsi_divergence_exit_pct": ("STRATEGY_RSI_DIVERGENCE_EXIT_PCT", env_float),
     "rsi_divergence_timeframe": ("STRATEGY_RSI_DIVERGENCE_TIMEFRAME", env_str),
     "rsi_divergence_len": ("STRATEGY_RSI_DIVERGENCE_LEN", env_int),
     "rsi_divergence_pivot": ("STRATEGY_RSI_DIVERGENCE_PIVOT", env_int),

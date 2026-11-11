@@ -1,6 +1,6 @@
 {
   "strategy": "strategy2_ema_cross",
-  "generated_at": "2026-11-10T23:50:58.183851+00:00",
+  "generated_at": "2026-11-11T01:04:46.189569+00:00",
   "dataset": {
     "source": "dataset/binance/BTCUSDT/merged/BTCUSDT-1m.parquet",
     "bars": 118320,
@@ -74,6 +74,7 @@
     "ema_weakening_gap_pct": 0.0001,
     "ema_weakening_exit_pct": 100.0,
     "rsi_divergence_exit_enabled": true,
+    "rsi_divergence_exit_pct": 100.0,
     "rsi_divergence_timeframe": "1D",
     "rsi_divergence_len": 14,
     "rsi_divergence_pivot": 5,
