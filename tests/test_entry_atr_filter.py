@@ -67,12 +67,6 @@ def test_atr_filter_is_applied_to_both_long_and_short_entries(monkeypatch):
             index=bars.index,
         ),
     )
-    empty = np.zeros(4, dtype=bool)
-    monkeypatch.setattr(
-        EMACrossStrategy,
-        "_candle_confirmations",
-        lambda self, bars, raw=None: (empty, empty, empty),
-    )
     cfg = Config(
         timeframe="30min",
         macd_timeframe=None,

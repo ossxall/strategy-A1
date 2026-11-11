@@ -49,12 +49,6 @@ def test_entries_are_filtered_by_recent_divergence_in_the_same_direction(monkeyp
         "build_rsi_divergence_flags",
         lambda raw, source_bars, cfg: np.array([1, 0, -1, 0]),
     )
-    empty = np.zeros(4, dtype=bool)
-    monkeypatch.setattr(
-        EMACrossStrategy,
-        "_candle_confirmations",
-        lambda self, bars, raw=None: (empty, empty, empty),
-    )
     cfg = Config(
         timeframe="30min",
         macd_timeframe=None,

@@ -157,13 +157,6 @@ class Config:
     # y añade el resto al cierre de esa misma vela. Activado por defecto (50/50).
     entry_partial_enabled: bool = True
     entry_partial_pct: float = 50.0        # % inicial (0 < pct < 100)
-    # Opciones legacy: se conservan por compatibilidad, pero ya no condicionan
-    # el añadido, que siempre se ejecuta al cierre de la vela de entrada.
-    entry_confirm_mode: str = "pullback_retest"  # legacy
-    entry_confirm_bars: int = 2            # Nº de velas tras entrada parcial
-    entry_confirm_close_in_dir: bool = True  # Exige cierre a favor para barras y patrones
-    entry_confirm_retest_tol_pct: float = 0.10  # Tolerancia % para pullback_retest
-    entry_confirm_max_move_pct: float = 0.3  # Si > 0, no añade el resto si el precio se ha movido > X% desde la entrada parcial
     # Sesgo de tendencia de timeframe superior, usado sólo después de una pérdida.
     trend_timeframe: str = "1D"
 
@@ -353,14 +346,6 @@ class Config:
         if self.entry_partial_enabled:
             if not (0 < self.entry_partial_pct < 100):
                 raise ValueError("entry_partial_pct debe estar en (0, 100).")
-            if self.entry_confirm_mode not in ("bars", "close_above_ema", "pullback_retest"):
-                raise ValueError("entry_confirm_mode debe ser 'bars', 'close_above_ema' o 'pullback_retest'.")
-            if self.entry_confirm_bars < 0:
-                raise ValueError("entry_confirm_bars no puede ser negativo.")
-            if self.entry_confirm_retest_tol_pct < 0:
-                raise ValueError("entry_confirm_retest_tol_pct no puede ser negativo.")
-            if self.entry_confirm_max_move_pct < 0:
-                raise ValueError("entry_confirm_max_move_pct no puede ser negativo.")
         if not (self.allow_long or self.allow_short):
             raise ValueError("Debe habilitarse LONG, SHORT o ambos.")
         if self.streak_trend_only and pd.Timedelta(self.trend_timeframe) <= pd.Timedelta(0):

@@ -51,12 +51,6 @@ def configure_crosses(monkeypatch, adx_values):
             index=bars.index,
         ),
     )
-    empty = np.zeros(4, dtype=bool)
-    monkeypatch.setattr(
-        EMACrossStrategy,
-        "_candle_confirmations",
-        lambda self, bars, raw=None: (empty, empty, empty),
-    )
     return bars
 
 
@@ -102,7 +96,7 @@ def test_entry_adx_defaults_to_enabled_period_14_and_threshold_20():
     assert cfg.entry_adx_enabled
     assert cfg.entry_adx_len == 14
     assert cfg.entry_adx_min == 20.0
-    assert cfg.entry_adx_timeframes == ("30min", "1h")
+    assert cfg.entry_adx_timeframes == ("30min",)
 
 
 def test_multiple_entry_adx_timeframes_all_must_be_above_the_threshold(monkeypatch):

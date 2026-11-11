@@ -378,7 +378,6 @@ def build_backtest_figure(
     html_path: str | Path | None = None,
     opens: list | None = None,
     adds: list | None = None,
-    add_skipped: list | None = None,
 ):
     """Construye una figura Plotly con todo el backtest, optimizada para web.
 
@@ -392,9 +391,8 @@ def build_backtest_figure(
       ``EMA_SLOW_TOUCH_*``), estas últimas con un marcador propio;
     * **entradas parciales**: si se recibe ``opens``/``adds`` (listas del motor
       `Backtester`), las entradas parciales se etiquetan en el hover y el
-      añadido de confirmación (``ENTRY_ADD``) se dibuja con un triángulo verde
-      apuntando a la derecha, de forma que se distingue la primera entrada del
-      cierre de la posición;
+      segundo tramo añadido al cierre se dibuja con un triángulo verde apuntando
+      a la derecha;
     * paneles de ADX de entrada, `target` (señal), volumen y curva de equity;
     * series e indicadores de los timeframes de salida (ADX y EMA weakening)
       cuando se dispone del dataset original `raw`.
@@ -596,7 +594,7 @@ def build_backtest_figure(
                                          line=dict(color=color, width=1, dash="dot"),
                                          hoverinfo="skip"), row=r, col=1)
 
-        # --- Ayuda visual de entradas parciales (ENTRY 50% → ADD confirmación) --
+        # --- Ayuda visual de entradas parciales (primer tramo → ADD al cierre) --
         # `opens`/`adds` provienen del motor (`Backtester.opened` / `.adds`).
         entry_pct_by_pid: dict[int, float] = {}
         if opens:
@@ -630,7 +628,7 @@ def build_backtest_figure(
                         if pid in add_pct_by_pid:
                             tag = f" · ENTRADA PARCIAL {epct:g}% → ADD +{add_pct_by_pid[pid]:g}% (completada)"
                         else:
-                            tag = f" · ENTRADA PARCIAL {epct:g}% (sin confirmar)"
+                            tag = f" · ENTRADA PARCIAL {epct:g}% (incompleta)"
                     else:
                         tag = ""
                     texts.append(f"ENTRADA {s}{tag}<br>#{pid} · {t:%Y-%m-%d %H:%M}<br>precio {pr:,.4f}")
@@ -638,7 +636,7 @@ def build_backtest_figure(
                                             f"entrada {side}", symbol, color, 13, text=texts),
                               row=r, col=1)
 
-        # Marcadores de ADD: confirmación que completa la entrada parcial.
+        # Marcadores de ADD: segundo tramo que completa la entrada al cierre.
         if adds:
             add_df = pd.DataFrame(adds)
             add_df["time"] = pd.to_datetime(add_df["time"], utc=True)
@@ -653,39 +651,13 @@ def build_backtest_figure(
                     tgt = float(a.target_quantity or 0.0)
                     pct = (float(a.quantity) / tgt * 100.0) if tgt > 0 else 0.0
                     texts.append(
-                        f"ADD CONFIRMACIÓN (entrada parcial {epct:g}% → 100%)<br>"
+                        f"ADD AL CIERRE (entrada parcial {epct:g}% → 100%)<br>"
                         f"pos #{pid} {side_lbl}<br>{a.time:%Y-%m-%d %H:%M}<br>"
                         f"+{float(a.quantity):,.4f} (+{pct:g}%) @ {float(a.price):,.4f}"
                     )
                 fig.add_trace(_marker_trace(_x_ms(add_df["time"]), add_df["price"].to_numpy(float),
-                                            "ADD (confirmación entrada parcial)", "triangle-right",
+                                            "ADD al cierre (entrada parcial)", "triangle-right",
                                             "#81c784", 11, text=texts),
-                              row=r, col=1)
-
-        # Marcadores de ADD bloqueado por entry_confirm_max_move_pct
-        if add_skipped:
-            skip_df = pd.DataFrame(add_skipped)
-            skip_df["time"] = pd.to_datetime(skip_df["time"], utc=True)
-            if win_start is not None:
-                skip_df = skip_df[(skip_df["time"] >= win_start) & (skip_df["time"] < win_end)]
-            if not skip_df.empty:
-                texts = []
-                for s in skip_df.itertuples():
-                    pid = int(s.position_id)
-                    side_lbl = "LONG" if int(s.side) == 1 else "SHORT"
-                    epct = float(getattr(s, "entry_pct", 50.0) or 50.0)
-                    m = float(getattr(s, "move_pct_against", 0.0) or 0.0)
-                    th = float(getattr(s, "threshold", 0.0) or 0.0)
-                    texts.append(
-                        f"ADD BLOQUEADO · entry_confirm_max_move_pct<br>"
-                        f"pos #{pid} {side_lbl} · entrada parcial {epct:g}%<br>"
-                        f"{s.time:%Y-%m-%d %H:%M}<br>"
-                        f"precio {float(s.price):,.4f}<br>"
-                        f"Movido {m:.2f}% en contra (umbral {th:.2f}%)"
-                    )
-                fig.add_trace(_marker_trace(_x_ms(skip_df["time"]), skip_df["price"].to_numpy(float),
-                                            "ADD bloqueado (max move en contra)", "x",
-                                            "#ff7043", 12, text=texts),
                               row=r, col=1)
 
         for won, label, color in ((True, "salida +", UP_COLOR), (False, "salida −", DOWN_COLOR)):
@@ -974,7 +946,6 @@ def build_monthly_backtest_htmls(
     index_path: str | Path | None = None,
     opens: list | None = None,
     adds: list | None = None,
-    add_skipped: list | None = None,
 ) -> list[Path]:
     """Genera **un HTML de Plotly por mes** y un índice que los enlaza.
 
@@ -999,7 +970,7 @@ def build_monthly_backtest_htmls(
             bars, cfg, signals=signals, trades=trades, equity=equity,
             adx_exit=adx_exit, weak_exit=weak_exit, rsi_div_exit=rsi_div_exit, raw=raw, source=source,
             title=f"{source or 'backtest'} · {label} · {month_positions} posiciones",
-            window=(start, end), html_path=target, opens=opens, adds=adds, add_skipped=add_skipped,
+            window=(start, end), html_path=target, opens=opens, adds=adds,
         )
         written.append(target)
         links.append((label, target.name, month_positions))
@@ -1018,8 +989,7 @@ def generate_report(trades: pd.DataFrame, equity: pd.DataFrame, cfg: Config, dat
                     rsi_div_exit: np.ndarray | None = None,
                     plotly_path: str | Path | None = None,
                     opens: list | None = None,
-                    adds: list | None = None,
-                    add_skipped: list | None = None) -> dict:
+                    adds: list | None = None) -> dict:
     """Calcula métricas, imprime el informe, guarda outputs y genera los gráficos.
 
     Punto de entrada único que unifica `calculate_metrics`, `print_report`,
@@ -1042,6 +1012,5 @@ def generate_report(trades: pd.DataFrame, equity: pd.DataFrame, cfg: Config, dat
             data, cfg, signals=signals, trades=trades, equity=equity,
             adx_exit=adx_exit, weak_exit=weak_exit, rsi_div_exit=rsi_div_exit, raw=raw, source=source,
             output_dir=output_dir, index_path=plotly_path, opens=opens, adds=adds,
-            add_skipped=add_skipped,
         )
     return metrics

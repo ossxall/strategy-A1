@@ -105,84 +105,8 @@ import talib
 import numpy as np
 import pandas as pd
 
-# Patrones unidireccionales según la clasificación solicitada. Los patrones
-# bidireccionales se interpretan por el signo que devuelve TA-Lib. Los dojis
-# se publican como información, pero nunca confirman una entrada por sí solos.
-LONG_CANDLE_PATTERNS = (
-    "CDLHAMMER",
-    "CDLINVERTEDHAMMER",
-    "CDLPIERCING",
-    "CDLMORNINGSTAR",
-    "CDLMORNINGDOJISTAR",
-    "CDL3WHITESOLDIERS",
-    "CDLHOMINGPIGEON",
-    "CDLMATCHINGLOW",
-    "CDLLADDERBOTTOM",
-    "CDLSTICKSANDWICH",
-    "CDLUNIQUE3RIVER",
-    "CDL3STARSINSOUTH",
-    "CDLCONCEALBABYSWALL",
-    "CDLTAKURI",
-    "CDLMATHOLD",
-)
-
-SHORT_CANDLE_PATTERNS = (
-    "CDLHANGINGMAN",
-    "CDLSHOOTINGSTAR",
-    "CDLDARKCLOUDCOVER",
-    "CDLEVENINGSTAR",
-    "CDLEVENINGDOJISTAR",
-    "CDL3BLACKCROWS",
-    "CDLIDENTICAL3CROWS",
-    "CDL2CROWS",
-    "CDLUPSIDEGAP2CROWS",
-    "CDLADVANCEBLOCK",
-    "CDLSTALLEDPATTERN",
-    "CDLINNECK",
-    "CDLONNECK",
-    "CDLTHRUSTING",
-)
-
-SIGNED_CANDLE_PATTERNS = (
-    "CDLENGULFING",
-    "CDLHARAMI",
-    "CDLHARAMICROSS",
-    "CDL3INSIDE",
-    "CDL3OUTSIDE",
-    "CDL3LINESTRIKE",
-    "CDLABANDONEDBABY",
-    "CDLKICKING",
-    "CDLKICKINGBYLENGTH",
-    "CDLBREAKAWAY",
-    "CDLCOUNTERATTACK",
-    "CDLDOJISTAR",
-    "CDLTRISTAR",
-    "CDLHIKKAKE",
-    "CDLHIKKAKEMOD",
-    "CDLSEPARATINGLINES",
-    "CDLTASUKIGAP",
-    "CDLGAPSIDESIDEWHITE",
-    "CDLXSIDEGAP3METHODS",
-    "CDLRISEFALL3METHODS",
-    "CDLBELTHOLD",
-    "CDLMARUBOZU",
-    "CDLCLOSINGMARUBOZU",
-    "CDLLONGLINE",
-    "CDLSHORTLINE",
-    "CDLSPINNINGTOP",
-    "CDLHIGHWAVE",
-)
-
-NEUTRAL_CANDLE_PATTERNS = (
-    "CDLDOJI",
-    "CDLDRAGONFLYDOJI",
-    "CDLGRAVESTONEDOJI",
-    "CDLLONGLEGGEDDOJI",
-    "CDLRICKSHAWMAN",
-)
-
 # ---------------------------------------------------------------------------
-# Estrategia: compartida por backtest y bots
+# Estrategia: compartida por backtesting y bots
 # ---------------------------------------------------------------------------
 
 class EMACrossStrategy:
@@ -309,129 +233,6 @@ class EMACrossStrategy:
         aligned = align_closed_values(bars_upper.index, direction, bars.index, upper_tf, cfg.timeframe)
         return np.where(np.isfinite(aligned), np.sign(aligned), 0.0).astype(int)
 
-    def _candle_confirmations(
-        self, bars: pd.DataFrame, raw: Optional[pd.DataFrame] = None
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Detecta confirmaciones LONG/SHORT y dojis neutrales en varios marcos.
-
-        Los patrones de marcos distintos se asignan al cierre de estrategia que
-        los contiene. Dentro de un mismo marco prevalece el patrón más reciente;
-        entre marcos, prevalece el marco mayor. Así se evita que una señal menor
-        y antigua sobreescriba contexto reciente, sin usar velas abiertas.
-        """
-        empty = np.zeros(len(bars), dtype=bool)
-        if bars.empty:
-            return empty.copy(), empty.copy(), empty.copy()
-
-        strategy_delta = pd.Timedelta(self.cfg.timeframe)
-        frames: list[tuple[pd.DataFrame, pd.Timedelta]] = []
-        seen: set[tuple[int, int]] = set()
-
-        def add_frame(frame: pd.DataFrame, delta: pd.Timedelta) -> None:
-            if frame.empty or delta <= pd.Timedelta(0):
-                return
-            key = (int(delta.value), int(frame.index[0].value))
-            if key not in seen:
-                seen.add(key)
-                frames.append((frame, delta))
-
-        # El marco de estrategia tiene la máxima prioridad y sigue siendo útil
-        # aunque sea mayor que 30m.
-        add_frame(bars, strategy_delta)
-
-        if raw is not None and not raw.empty:
-            source_delta = pd.Timedelta(minutes=source_minutes(raw))
-            # En estrategias de 5m o menos no hay agregados estándar inferiores;
-            # usar el origen. En marcos mayores, evitar el ruido de velas de 1m
-            # cuando se pueden construir agregados de 5m/15m/30m.
-            if source_delta < strategy_delta and (
-                source_delta >= pd.Timedelta("5min")
-                or strategy_delta <= pd.Timedelta("5min")
-            ):
-                add_frame(raw, source_delta)
-            for timeframe in ("5min", "15min", "30min", "1h", "4h", "1D"):
-                target_delta = pd.Timedelta(timeframe)
-                if source_delta < target_delta < strategy_delta:
-                    try:
-                        add_frame(resample_ohlcv(raw, timeframe), target_delta)
-                    except ValueError:
-                        continue
-
-        def align_latest(values: np.ndarray, source_index: pd.DatetimeIndex,
-                         source_delta: pd.Timedelta) -> np.ndarray:
-            """Último evento cerrado de cada timeframe al cierre de estrategia."""
-            values = np.asarray(values)
-            if source_index.equals(bars.index) and source_delta == strategy_delta:
-                return values.copy()
-            aligned = np.zeros(len(bars), dtype=values.dtype)
-            source_ends = (source_index + source_delta).asi8
-            target_ends = (bars.index + strategy_delta).asi8
-            target_starts = bars.index.asi8
-            # side=left asigna una vela que cierra exactamente junto con la
-            # estrategia a esa misma barra (y nunca a una anterior).
-            target_locs = np.searchsorted(target_ends, source_ends, side="left")
-            valid = (target_locs < len(bars)) & (source_ends <= target_ends[-1])
-            safe_locs = np.minimum(target_locs, len(bars) - 1)
-            # No arrastrar un patrón anterior al primer intervalo disponible ni
-            # asignar señales que caigan dentro de huecos del timeframe destino.
-            valid &= source_ends > target_starts[safe_locs]
-            for source_loc in np.flatnonzero(valid & (values != 0)):
-                aligned[target_locs[source_loc]] = values[source_loc]
-            return aligned
-
-        # Resolución descendente: una señal direccional del marco más alto gana;
-        # si ese marco no tiene patrón (o tiene conflicto), se consulta el menor.
-        frame_signals: list[tuple[pd.Timedelta, np.ndarray, np.ndarray, np.ndarray]] = []
-        for frame, source_delta in sorted(frames, key=lambda item: item[1], reverse=True):
-            o, h, low, c = (
-                np.ascontiguousarray(frame[column].to_numpy(dtype=np.float64))
-                for column in ("open", "high", "low", "close")
-            )
-            bullish = np.zeros(len(frame), dtype=bool)
-            bearish = np.zeros(len(frame), dtype=bool)
-            neutral = np.zeros(len(frame), dtype=bool)
-            for pattern_name in LONG_CANDLE_PATTERNS:
-                bullish |= getattr(talib, pattern_name)(o, h, low, c) != 0
-            for pattern_name in SHORT_CANDLE_PATTERNS:
-                bearish |= getattr(talib, pattern_name)(o, h, low, c) != 0
-            for pattern_name in SIGNED_CANDLE_PATTERNS:
-                pattern = getattr(talib, pattern_name)(o, h, low, c)
-                bullish |= pattern > 0
-                bearish |= pattern < 0
-            for pattern_name in NEUTRAL_CANDLE_PATTERNS:
-                neutral |= getattr(talib, pattern_name)(o, h, low, c) != 0
-
-            # Un conflicto dentro del mismo marco no aporta dirección. Para
-            # direccionales, conservar sólo el evento más reciente del marco.
-            direction = np.zeros(len(frame), dtype=np.int8)
-            direction[bullish & ~bearish] = 1
-            direction[bearish & ~bullish] = -1
-            direction[bullish & bearish] = 2
-            aligned_direction = align_latest(direction, frame.index, source_delta)
-            aligned_neutral = align_latest(neutral.astype(np.int8), frame.index, source_delta) > 0
-            frame_signals.append((source_delta, aligned_direction == 1,
-                                  aligned_direction == -1, aligned_neutral))
-
-        long_confirmation = np.zeros(len(bars), dtype=bool)
-        short_confirmation = np.zeros(len(bars), dtype=bool)
-        neutral_confirmation = np.zeros(len(bars), dtype=bool)
-        unresolved = np.ones(len(bars), dtype=bool)
-        for _, bullish, bearish, neutral in frame_signals:
-            has_direction = bullish ^ bearish
-            accepted = unresolved & has_direction
-            long_confirmation |= accepted & bullish
-            short_confirmation |= accepted & bearish
-            unresolved &= ~accepted
-            neutral_confirmation |= neutral
-
-        return long_confirmation, short_confirmation, neutral_confirmation
-
-    def _long_candle_confirmation(
-        self, bars: pd.DataFrame, raw: Optional[pd.DataFrame] = None
-    ) -> np.ndarray:
-        """Compatibilidad con consumidores del antiguo detector alcista."""
-        return self._candle_confirmations(bars, raw)[0]
-
     def generate_signals(
         self, bars: pd.DataFrame, raw: Optional[pd.DataFrame] = None
     ) -> pd.DataFrame:
@@ -518,8 +319,6 @@ class EMACrossStrategy:
         bias = self.trend_bias(bars) if cfg.streak_trend_only else None
         up &= valid
         down &= valid
-        (long_candle_confirmation, short_candle_confirmation,
-         neutral_candle_pattern) = self._candle_confirmations(bars, raw)
         output = {
             "ema_fast": fast, "ema_slow": slow, "macd_line": macd_line,
             "adx_entry": entry_adx,
@@ -533,9 +332,6 @@ class EMACrossStrategy:
             # Alias histórico del filtro LONG.
             "entry_rsi_divergence_blocked": entry_rsi_bull_divergence_blocked,
             "cross_up": up, "cross_down": down, "valid": valid,
-            "long_candle_confirmation": long_candle_confirmation,
-            "short_candle_confirmation": short_candle_confirmation,
-            "neutral_candle_pattern": neutral_candle_pattern,
             "trend_bias": bias if bias is not None else np.zeros(len(bars), int),
             "target": np.select([up, down], [1, -1], default=0),
         }
@@ -660,7 +456,6 @@ class Backtester:
         # Aperturas y añadidos de entrada parcial (scale-in) para reportar/públicar.
         self.opened: list[dict] = []
         self.adds: list[dict] = []
-        self.add_skipped: list[dict] = []
         self.trade_id = self.position_id = 0
         self.eq_time, self.eq_cash, self.eq_value, self.eq_side, self.eq_qty = [], [], [], [], []
         # Estado del límite mensual y pnl acumulado de la posición abierta.
@@ -974,14 +769,11 @@ class Backtester:
         if self.verbose: print(f"[STOP] {self.times[i]} fill={fill:.8f}", flush=True)
         return True
 
-    def add_position(self, percent_of_remaining: float, raw_price: float, ts: pd.Timestamp):
-        """Añade a la posición abierta. `percent_of_remaining` % de lo que falta
-        para alcanzar `target_quantity` (respecto al restante)."""
+    def add_position(self, raw_price: float, ts: pd.Timestamp):
+        """Completa al cierre de la vela la cantidad pendiente de la entrada."""
         pos = self.position
         if pos is None:
             return
-        if not 0 < percent_of_remaining <= 100:
-            raise ValueError("percent_of_remaining debe estar en (0, 100]")
         if pos.target_quantity <= 0:
             pos.partial_entry_done = True
             return
@@ -996,7 +788,7 @@ class Backtester:
         if remaining_target <= 1e-12:
             pos.partial_entry_done = True
             return
-        qty_add = remaining_target * percent_of_remaining / 100.0
+        qty_add = remaining_target
         if qty_add <= 1e-12:
             return
         side = pos.side
@@ -1094,7 +886,7 @@ class Backtester:
                     and self.position.entry_bar_index == i
                     and not self.position.partial_entry_done):
                 close_time = self.times[i] + pd.Timedelta(cfg.timeframe)
-                self.add_position(100.0, self.c[i], close_time)
+                self.add_position(self.c[i], close_time)
 
             # Equity mark-to-market para el límite de pérdida mensual.
             equity_now = self._equity_value(self.c[i])
@@ -1313,23 +1105,11 @@ def parse_args():
     p.add_argument("--partial-tp2-r", type=float, default=d.partial_tp2_r)
     p.add_argument("--partial-tp2-pct", type=float, default=d.partial_tp2_pct)
     p.add_argument("--breakeven-stop", action=argparse.BooleanOptionalAction, default=d.move_stop_to_breakeven)
-    # Entrada parcial y opciones legacy de confirmación
+    # Entrada parcial: el segundo tramo se añade al cierre de la vela de entrada.
     p.add_argument("--entry-partial", action=argparse.BooleanOptionalAction, default=d.entry_partial_enabled,
                    help="Activa/desactiva entrada parcial (por defecto: 50%% al abrir y resto al cierre de esa vela).")
     p.add_argument("--entry-partial-pct", type=float, default=d.entry_partial_pct,
                    help="%% de la posición a entrar en la primera fase (default 50).")
-    p.add_argument("--entry-confirm-mode", choices=("bars", "close_above_ema", "pullback_retest"),
-                    default=d.entry_confirm_mode,
-                    help="Legacy; ya no condiciona el añadido, que se hace al cierre de la vela de entrada.")
-    p.add_argument("--entry-confirm-bars", type=int, default=d.entry_confirm_bars,
-                   help="Legacy; ya no cambia el momento del añadido.")
-    p.add_argument("--entry-confirm-close-in-dir", action=argparse.BooleanOptionalAction,
-                   default=d.entry_confirm_close_in_dir,
-                   help="Legacy; ya no cambia el momento del añadido.")
-    p.add_argument("--entry-confirm-retest-tol-pct", type=float, default=d.entry_confirm_retest_tol_pct,
-                   help="Legacy; ya no cambia el momento del añadido.")
-    p.add_argument("--entry-confirm-max-move-pct", type=float, default=d.entry_confirm_max_move_pct,
-                   help="Legacy; ya no bloquea el añadido al cierre de la vela.")
     p.add_argument("--no-long", action="store_true")
     p.add_argument("--no-short", action="store_true")
     p.add_argument("--trend-timeframe", default=d.trend_timeframe,
@@ -1418,11 +1198,6 @@ def config_from_args(a) -> Config:
         move_stop_to_breakeven=a.breakeven_stop,
         entry_partial_enabled=a.entry_partial,
         entry_partial_pct=a.entry_partial_pct,
-        entry_confirm_mode=a.entry_confirm_mode,
-        entry_confirm_bars=a.entry_confirm_bars,
-        entry_confirm_close_in_dir=a.entry_confirm_close_in_dir,
-        entry_confirm_retest_tol_pct=a.entry_confirm_retest_tol_pct,
-        entry_confirm_max_move_pct=a.entry_confirm_max_move_pct,
         trend_timeframe=a.trend_timeframe,
         monthly_loss_limit_pct=a.monthly_loss_limit_pct,
         monthly_loss_limit_close=a.monthly_loss_limit_close,
@@ -1468,7 +1243,6 @@ def main():
         rsi_div_exit=rsi_div_exit,
         opens=engine.opened,
         adds=engine.adds,
-        add_skipped=getattr(engine, "add_skipped", None),
     )
 
 

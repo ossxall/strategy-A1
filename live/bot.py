@@ -288,14 +288,9 @@ _CONFIG_ENV = {
     "ema55_touch_exit_loss_pct": ("STRATEGY_EMA55_TOUCH_EXIT_LOSS_PCT", env_float),
     "ema55_touch_short_exit_loss_pct": ("STRATEGY_EMA55_TOUCH_SHORT_EXIT_LOSS_PCT", env_float),
     "timestamp_is_close": ("STRATEGY_TIMESTAMP_IS_CLOSE", env_bool),
-    # Entrada parcial + confirmación (scale-in)
+    # Entrada parcial: el segundo tramo se añade al cierre de la vela de entrada.
     "entry_partial_enabled": ("STRATEGY_ENTRY_PARTIAL", env_bool),
     "entry_partial_pct": ("STRATEGY_ENTRY_PARTIAL_PCT", env_float),
-    "entry_confirm_mode": ("STRATEGY_ENTRY_CONFIRM_MODE", env_str),
-    "entry_confirm_bars": ("STRATEGY_ENTRY_CONFIRM_BARS", env_int),
-    "entry_confirm_close_in_dir": ("STRATEGY_ENTRY_CONFIRM_CLOSE_IN_DIR", env_bool),
-    "entry_confirm_retest_tol_pct": ("STRATEGY_ENTRY_CONFIRM_RETEST_TOL_PCT", env_float),
-    "entry_confirm_max_move_pct": ("STRATEGY_ENTRY_CONFIRM_MAX_MOVE_PCT", env_float),
 }
 
 

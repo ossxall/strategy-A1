@@ -36,14 +36,6 @@ def configure_crosses(monkeypatch, macd_line, signal_line, histogram):
         "MACD",
         lambda *args, **kwargs: (macd_line, signal_line, histogram),
     )
-    empty = np.zeros(4, dtype=bool)
-    monkeypatch.setattr(
-        EMACrossStrategy,
-        "_candle_confirmations",
-        lambda self, bars, raw=None: (empty, empty, empty),
-    )
-
-
 def make_config():
     return Config(
         timeframe="30min",
