@@ -84,6 +84,7 @@ from strategy.indicators import (
     efficiency_ratio,
     adx,
     atr_volatility_filter,
+    pure_momentum_oscillator,
     confirmed_crosses,
     align_closed_values,
     build_adx_exit,
@@ -493,6 +494,15 @@ class EMACrossStrategy:
             efficiency_ratio(bars.close, cfg.entry_er_len).to_numpy(float)
             if cfg.entry_er_risk_scaling_enabled else None
         )
+        entry_pmo = (
+            pure_momentum_oscillator(
+                bars,
+                cfg.entry_pmo_len,
+                cfg.entry_pmo_long_threshold,
+                cfg.entry_pmo_short_threshold,
+            )
+            if cfg.entry_pmo_enabled else None
+        )
         if cfg.entry_rsi_divergence_enabled:
             divergence = build_rsi_divergence_flags(raw, bars, cfg)
             entry_rsi_bull_divergence_blocked = spread_flags(
@@ -513,6 +523,9 @@ class EMACrossStrategy:
             for values in entry_adx_by_timeframe.values():
                 allowed &= np.isfinite(values) & (values > cfg.entry_adx_min)
             up, down = up & allowed, down & allowed
+        if entry_pmo is not None:
+            up &= entry_pmo["bullish"].to_numpy(bool)
+            down &= entry_pmo["bearish"].to_numpy(bool)
         up, down = up & atr_allowed, down & atr_allowed
         up, down = up & (macd_line > 0), down & (macd_line < 0)
         bias = self.trend_bias(bars) if cfg.streak_trend_only else None
@@ -544,6 +557,11 @@ class EMACrossStrategy:
             output["entry_minus_di"] = entry_dmi["minus_di"].to_numpy(float)
         for timeframe, values in entry_adx_by_timeframe.items():
             output[f"adx_entry_{timeframe}"] = values
+        if entry_pmo is not None:
+            output["entry_pmo"] = entry_pmo["momentum"].to_numpy(float)
+            output["entry_pmo_bullish"] = entry_pmo["bullish"].to_numpy(bool)
+            output["entry_pmo_bearish"] = entry_pmo["bearish"].to_numpy(bool)
+            output["entry_pmo_trend"] = entry_pmo["trend"].to_numpy(np.int8)
         if entry_mfi is not None:
             output["entry_mfi"] = np.asarray(entry_mfi, dtype=float)
         if entry_er is not None:
@@ -616,6 +634,23 @@ class Backtester:
         else:
             self.entry_rsi_bull_divergence_blocked = np.zeros(len(bars), dtype=bool)
             self.entry_rsi_bear_divergence_blocked = np.zeros(len(bars), dtype=bool)
+        if config.entry_pmo_enabled:
+            if {"entry_pmo_bullish", "entry_pmo_bearish"} <= set(self.signals.columns):
+                self.entry_pmo_bullish = self.signals["entry_pmo_bullish"].to_numpy(bool)
+                self.entry_pmo_bearish = self.signals["entry_pmo_bearish"].to_numpy(bool)
+            else:
+                # Aplicar PMO también a señales personalizadas entregadas al motor.
+                pmo = pure_momentum_oscillator(
+                    bars,
+                    config.entry_pmo_len,
+                    config.entry_pmo_long_threshold,
+                    config.entry_pmo_short_threshold,
+                )
+                self.entry_pmo_bullish = pmo["bullish"].to_numpy(bool)
+                self.entry_pmo_bearish = pmo["bearish"].to_numpy(bool)
+        else:
+            self.entry_pmo_bullish = np.ones(len(bars), dtype=bool)
+            self.entry_pmo_bearish = np.ones(len(bars), dtype=bool)
         self.entry_plus_di = (
             self.signals["entry_plus_di"].to_numpy(float)
             if "entry_plus_di" in self.signals else None
@@ -1220,6 +1255,11 @@ class Backtester:
                 target = int(self.signals["target"].iloc[i])
                 if cfg.entry_atr_enabled and not self.entry_atr_allowed[i]:
                     target = 0
+                if cfg.entry_pmo_enabled and (
+                    (target == 1 and not self.entry_pmo_bullish[i])
+                    or (target == -1 and not self.entry_pmo_bearish[i])
+                ):
+                    target = 0
                 if target == 1 and cfg.entry_rsi_divergence_enabled \
                         and self.entry_rsi_bull_divergence_blocked[i]:
                     target = 0
@@ -1304,6 +1344,17 @@ def parse_args():
                         "(p. ej. 30min,1h).")
     p.add_argument("--entry-adx-min", type=float, default=d.entry_adx_min,
                    help="Umbral estricto del ADX: la señal requiere ADX > mínimo (default 20).")
+    p.add_argument("--entry-pmo-filter", action=argparse.BooleanOptionalAction,
+                   default=d.entry_pmo_enabled,
+                   help="Exige PMO alcista para LONG y bajista para SHORT (activo por defecto).")
+    p.add_argument("--entry-pmo-len", type=int, default=d.entry_pmo_len,
+                   help="Longitud del Pure Momentum Oscillator (default 45).")
+    p.add_argument("--entry-pmo-long-threshold", type=float,
+                   default=d.entry_pmo_long_threshold,
+                   help="Umbral alcista del PMO (default 0.05).")
+    p.add_argument("--entry-pmo-short-threshold", type=float,
+                   default=d.entry_pmo_short_threshold,
+                   help="Umbral bajista del PMO (default -0.05).")
     p.add_argument("--entry-atr-filter", action=argparse.BooleanOptionalAction,
                    default=d.entry_atr_enabled,
                    help="Descarta entradas con ATR comprimido o anormalmente elevado.")
@@ -1464,6 +1515,9 @@ def config_from_args(a) -> Config:
         max_leverage=a.max_leverage, stop_loss_pct=a.stop_loss_pct, confirm_bars=a.confirm_bars,
         entry_adx_enabled=a.entry_adx_filter, entry_adx_len=a.entry_adx_len,
         entry_adx_min=a.entry_adx_min, entry_adx_timeframe=a.entry_adx_timeframe,
+        entry_pmo_enabled=a.entry_pmo_filter, entry_pmo_len=a.entry_pmo_len,
+        entry_pmo_long_threshold=a.entry_pmo_long_threshold,
+        entry_pmo_short_threshold=a.entry_pmo_short_threshold,
         entry_atr_enabled=a.entry_atr_filter, entry_atr_len=a.entry_atr_len,
         entry_atr_lookback=a.entry_atr_lookback,
         entry_atr_min_ratio=a.entry_atr_min_ratio,

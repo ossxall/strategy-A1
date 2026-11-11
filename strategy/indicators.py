@@ -91,6 +91,85 @@ def atr(bars: pd.DataFrame, length: int = 14) -> pd.Series:
     return pd.Series(tr, index=bars.index).ewm(alpha=1 / length, adjust=False).mean()
 
 
+def _weighted_moving_average(values: np.ndarray, length: int) -> np.ndarray:
+    """WMA con pesos crecientes, equivalente a ``ta.wma`` de Pine."""
+    out = np.full(len(values), np.nan, dtype=float)
+    if len(values) < length:
+        return out
+    windows = np.lib.stride_tricks.sliding_window_view(values, length)
+    weights = np.arange(1, length + 1, dtype=float)
+    out[length - 1 :] = windows @ weights / weights.sum()
+    return out
+
+
+def _wilder_rma(values: np.ndarray, length: int) -> np.ndarray:
+    """RMA sembrada con SMA, como ``ta.rma``/``ta.atr`` de Pine."""
+    out = np.full(len(values), np.nan, dtype=float)
+    first = None
+    for end in range(length - 1, len(values)):
+        window = values[end - length + 1 : end + 1]
+        if np.isfinite(window).all():
+            first = end
+            out[end] = window.mean()
+            break
+    if first is None:
+        return out
+    for idx in range(first + 1, len(values)):
+        if np.isfinite(values[idx]):
+            out[idx] = (out[idx - 1] * (length - 1) + values[idx]) / length
+        else:
+            out[idx] = out[idx - 1]
+    return out
+
+
+def pure_momentum_oscillator(
+    bars: pd.DataFrame,
+    length: int = 45,
+    long_threshold: float = 0.05,
+    short_threshold: float = -0.05,
+) -> pd.DataFrame:
+    """Calcula el Pure Momentum Oscillator de MisinkoMaster.
+
+    ``bullish``/``bearish`` son las condiciones instantáneas de entrada del Pine
+    (momentum por encima/debajo de cada umbral); ``trend`` conserva el último
+    estado direccional para reproducir su variable persistente de visualización.
+    """
+    if length < 2:
+        raise ValueError("La longitud PMO debe ser >= 2.")
+    if short_threshold >= long_threshold:
+        raise ValueError("El umbral short PMO debe ser menor que el long.")
+
+    close = bars["close"].to_numpy(float)
+    detrended_close = 2 * close - ema(bars["close"], length).to_numpy(float)
+    smoothed_close = _weighted_moving_average(detrended_close, length)
+    high = bars["high"].to_numpy(float)
+    low = bars["low"].to_numpy(float)
+    volatility = _wilder_rma(true_range(high, low, close), length)
+
+    momentum = np.full(len(bars), np.nan, dtype=float)
+    if len(bars) > 1:
+        numerator = smoothed_close[1:] - smoothed_close[:-1]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            momentum[1:] = numerator / volatility[1:]
+    momentum[~np.isfinite(momentum)] = np.nan
+    bullish = np.isfinite(momentum) & (momentum > long_threshold)
+    bearish = np.isfinite(momentum) & (momentum < short_threshold)
+
+    trend = np.zeros(len(bars), dtype=np.int8)
+    state = 0
+    for idx in range(len(bars)):
+        if bullish[idx]:
+            state = 1
+        elif bearish[idx]:
+            state = -1
+        trend[idx] = state
+
+    return pd.DataFrame(
+        {"momentum": momentum, "bullish": bullish, "bearish": bearish, "trend": trend},
+        index=bars.index,
+    )
+
+
 def atr_volatility_filter(
     bars: pd.DataFrame,
     length: int = 14,
