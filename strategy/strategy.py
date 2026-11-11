@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Strategy 2 — EMA Cross + MACD + ADX / EMA Weakening
+Strategy 2 — EMA Pullback + MACD + ADX / EMA Weakening
 ============================================
 
 Gestión de salida por defecto: take-profit parcial a 1R (50%) y stop a
@@ -25,10 +25,9 @@ Archivo único con API reutilizable para backtesting y bots.
 
 Protecciones de riesgo (ver `Config`):
 
-* `streak_trend_only` (default True): tras una posición cerrada en pérdida,
-  la siguiente entrada sólo se abre si la señal coincide con el sesgo de
+* `streak_trend_only` (default False): si se activa, tras una posición cerrada
+  en pérdida la siguiente entrada sólo se abre si coincide con el sesgo de
   tendencia de `trend_timeframe` (vela superior ya cerrada, sin lookahead).
-  Corta las rachas de -1R del whipsaw sin recortar los cruces en tendencia.
 * `monthly_loss_limit_pct` (default 5.0): si la equity cae más de X% por
   debajo de la equity al inicio del mes calendario se cierra la posición (opcional)
   y no se abren nuevas hasta el siguiente mes (o `monthly_loss_limit_days` días).
@@ -36,8 +35,9 @@ Protecciones de riesgo (ver `Config`):
   con el win rate de las últimas n posiciones: penaliza las rachas frías
   (donde se concentran los meses rojos) y reutiliza el tamaño en las cálidas.
 
-Reducción de meses rojos (BTCUSDT 2020-2026, 30min, 82 meses). Partiendo del
-uso previo (`streak_trend_only`, `monthly_loss_limit_pct=5`, `adaptive_risk_window=0`):
+Reducción histórica de meses rojos con `streak_trend_only` activado (BTCUSDT
+2020-2026, 30min, 82 meses), partiendo del uso previo (`monthly_loss_limit_pct=5`,
+`adaptive_risk_window=0`):
 
 | variante                                   | meses en rojo | peor mes | suma meses rojos | retorno | max DD | PF   |
 |--------------------------------------------|---------------|----------|------------------|---------|--------|------|
@@ -242,12 +242,33 @@ class EMACrossStrategy:
         # Usar la línea principal MACD, no la línea de señal ni el histograma.
         macd_line = self._macd_line(bars, raw)
         prev_fast, prev_slow = np.r_[np.nan, fast[:-1]], np.r_[np.nan, slow[:-1]]
-        up = (fast > slow) & (prev_fast <= prev_slow)
-        down = (fast < slow) & (prev_fast >= prev_slow)
+        cross_up = (fast > slow) & (prev_fast <= prev_slow)
+        cross_down = (fast < slow) & (prev_fast >= prev_slow)
         valid = np.isfinite(fast) & np.isfinite(slow) & np.isfinite(prev_fast) & np.isfinite(prev_slow)
         if cfg.confirm_bars:
-            up = confirmed_crosses(up, fast > slow, cfg.confirm_bars)
-            down = confirmed_crosses(down, fast < slow, cfg.confirm_bars)
+            cross_up = confirmed_crosses(cross_up, fast > slow, cfg.confirm_bars)
+            cross_down = confirmed_crosses(cross_down, fast < slow, cfg.confirm_bars)
+
+        # La entrada se produce en el rebote/rechazo de la EMA rápida dentro
+        # de una tendencia definida por la relación entre EMA rápida y lenta.
+        # La señal corresponde a la vela cerrada actual; el motor entra en la
+        # apertura de la siguiente, sin usar datos futuros.
+        close = bars.close.to_numpy(float)
+        high = bars.high.to_numpy(float)
+        low = bars.low.to_numpy(float)
+        tolerance = cfg.entry_pullback_tolerance_pct / 100.0
+        pullback_long_candidate = (
+            (close > slow)
+            & (fast > slow)
+            & (low <= fast * (1.0 + tolerance))
+            & (close > fast)
+        )
+        pullback_short_candidate = (
+            (close < slow)
+            & (fast < slow)
+            & (high >= fast * (1.0 - tolerance))
+            & (close < fast)
+        )
         entry_adx_values = (
             adx(bars, cfg.entry_adx_len, cfg.entry_adx_len)
             if cfg.entry_adx_enabled
@@ -304,21 +325,45 @@ class EMACrossStrategy:
                 divergence < 0 if divergence is not None else np.zeros(len(bars), bool),
                 cfg.entry_rsi_divergence_lookback,
             )
-            up &= ~entry_rsi_bull_divergence_blocked
-            down &= ~entry_rsi_bear_divergence_blocked
+            long_allowed = ~entry_rsi_bull_divergence_blocked
+            short_allowed = ~entry_rsi_bear_divergence_blocked
         else:
             entry_rsi_bull_divergence_blocked = np.zeros(len(bars), dtype=bool)
             entry_rsi_bear_divergence_blocked = np.zeros(len(bars), dtype=bool)
+            long_allowed = np.ones(len(bars), dtype=bool)
+            short_allowed = np.ones(len(bars), dtype=bool)
         if cfg.entry_adx_enabled:
             allowed = np.ones(len(bars), dtype=bool)
             for values in entry_adx_by_timeframe.values():
                 allowed &= np.isfinite(values) & (values > cfg.entry_adx_min)
-            up, down = up & allowed, down & allowed
-        up, down = up & atr_allowed, down & atr_allowed
-        up, down = up & (macd_line > 0), down & (macd_line < 0)
+            long_allowed &= allowed
+            short_allowed &= allowed
+        long_allowed &= atr_allowed & (macd_line > 0)
+        short_allowed &= atr_allowed & (macd_line < 0)
         bias = self.trend_bias(bars) if cfg.streak_trend_only else None
-        up &= valid
-        down &= valid
+        up = cross_up & long_allowed & valid
+        down = cross_down & short_allowed & valid
+
+        # Un cruce confirmado habilita como máximo una entrada pullback. El
+        # primer pullback que pasa los filtros consume el cruce; si la posición
+        # luego se cierra, no se reentra hasta que aparezca otro cruce.
+        pullback_long = np.zeros(len(bars), dtype=bool)
+        pullback_short = np.zeros(len(bars), dtype=bool)
+        armed_side = 0
+        armed_at = -1
+        for i in range(len(bars)):
+            if cross_up[i]:
+                armed_side, armed_at = 1, i
+            elif cross_down[i]:
+                armed_side, armed_at = -1, i
+            if i <= armed_at:
+                continue
+            if armed_side == 1 and pullback_long_candidate[i] and long_allowed[i] and valid[i]:
+                pullback_long[i] = True
+                armed_side = 0
+            elif armed_side == -1 and pullback_short_candidate[i] and short_allowed[i] and valid[i]:
+                pullback_short[i] = True
+                armed_side = 0
         output = {
             "ema_fast": fast, "ema_slow": slow, "macd_line": macd_line,
             "adx_entry": entry_adx,
@@ -331,9 +376,14 @@ class EMACrossStrategy:
             "entry_rsi_bear_divergence_blocked": entry_rsi_bear_divergence_blocked,
             # Alias histórico del filtro LONG.
             "entry_rsi_divergence_blocked": entry_rsi_bull_divergence_blocked,
-            "cross_up": up, "cross_down": down, "valid": valid,
+            "cross_up": up, "cross_down": down,
+            # Cruces EMA confirmados sin filtros de entrada; el motor los usa
+            # para cerrar una posición en el cruce opuesto.
+            "ema_cross_up": cross_up, "ema_cross_down": cross_down,
+            "pullback_long": pullback_long, "pullback_short": pullback_short,
+            "valid": valid,
             "trend_bias": bias if bias is not None else np.zeros(len(bars), int),
-            "target": np.select([up, down], [1, -1], default=0),
+            "target": np.select([pullback_long, pullback_short], [1, -1], default=0),
         }
         for timeframe, values in entry_adx_by_timeframe.items():
             output[f"adx_entry_{timeframe}"] = values
@@ -417,6 +467,18 @@ class Backtester:
             self.signals["entry_er"].to_numpy(float)
             if "entry_er" in self.signals else None
         )
+        self.ema_cross_up = (
+            self.signals["ema_cross_up"].to_numpy(bool)
+            if "ema_cross_up" in self.signals
+            else self.signals["cross_up"].to_numpy(bool)
+            if "cross_up" in self.signals else np.zeros(len(bars), dtype=bool)
+        )
+        self.ema_cross_down = (
+            self.signals["ema_cross_down"].to_numpy(bool)
+            if "ema_cross_down" in self.signals
+            else self.signals["cross_down"].to_numpy(bool)
+            if "cross_down" in self.signals else np.zeros(len(bars), dtype=bool)
+        )
         self.adx_exit = np.asarray(adx_exit, bool) if adx_exit is not None else np.zeros(len(bars), bool)
         self.weak_exit = np.asarray(weak_exit, bool) if weak_exit is not None else np.zeros(len(bars), bool)
         # Divergencia RSI: +1 alcista (cierra SHORT), -1 bajista (cierra LONG), 0 sin señal.
@@ -435,6 +497,8 @@ class Backtester:
         if len(self.adx_exit) != len(bars): self.adx_exit = np.zeros(len(bars), bool)
         if len(self.weak_exit) != len(bars): self.weak_exit = np.zeros(len(bars), bool)
         if len(self.rsi_div) != len(bars): self.rsi_div = np.zeros(len(bars), int)
+        if len(self.ema_cross_up) != len(bars): self.ema_cross_up = np.zeros(len(bars), bool)
+        if len(self.ema_cross_down) != len(bars): self.ema_cross_down = np.zeros(len(bars), bool)
         self.o, self.h, self.l, self.c = (bars[k].to_numpy(float) for k in ("open", "high", "low", "close"))
         self.times = bars.index
         self.cash = config.initial_capital
@@ -905,6 +969,13 @@ class Backtester:
                                   flush=True)
                     else:
                         self.pending_target = target
+                elif self.position is not None and (
+                    (self.position.side == 1 and self.ema_cross_down[i])
+                    or (self.position.side == -1 and self.ema_cross_up[i])
+                ):
+                    # El cruce opuesto cierra la posición en la apertura
+                    # siguiente; la nueva dirección esperará su pullback.
+                    self.pending_exit = (CROSS_REASON, 100.0)
                 elif self.position is not None and self.weak_exit[i]:
                     self.pending_exit = (weak_reason, cfg.ema_weakening_exit_pct)
                 elif self.position is not None and self.adx_exit[i]:
@@ -943,7 +1014,7 @@ class Backtester:
 
 def parse_args():
     d = Config()
-    p = argparse.ArgumentParser(description="Backtest EMA cross con salidas ADX y EMA weakening.")
+    p = argparse.ArgumentParser(description="Backtest EMA pullback con salidas ADX y EMA weakening.")
     p.add_argument("parquet", help="Dataset OHLCV en Parquet")
     p.add_argument("--capital", type=float, default=d.initial_capital)
     p.add_argument("--ema-fast", type=int, default=d.ema_fast)
@@ -963,6 +1034,9 @@ def parse_args():
     p.add_argument("--max-leverage", type=float, default=d.max_leverage)
     p.add_argument("--stop-loss-pct", type=float, default=d.stop_loss_pct)
     p.add_argument("--confirm-bars", type=int, default=d.confirm_bars)
+    p.add_argument("--entry-pullback-tolerance-pct", type=float,
+                   default=d.entry_pullback_tolerance_pct,
+                   help="Tolerancia porcentual de la zona de retroceso a EMA rápida (default 1.62%%).")
     p.add_argument("--entry-adx-filter", action=argparse.BooleanOptionalAction,
                    default=d.entry_adx_enabled,
                    help="Exige ADX de entrada por encima del mínimo (activo por defecto).")
@@ -1112,6 +1186,7 @@ def config_from_args(a) -> Config:
         allow_long=not a.no_long, allow_short=not a.no_short, initial_capital=a.capital,
         commission_bps=a.commission_bps, slippage_bps=a.slippage_bps, risk_pct=a.risk_pct,
         max_leverage=a.max_leverage, stop_loss_pct=a.stop_loss_pct, confirm_bars=a.confirm_bars,
+        entry_pullback_tolerance_pct=a.entry_pullback_tolerance_pct,
         entry_adx_enabled=a.entry_adx_filter, entry_adx_len=a.entry_adx_len,
         entry_adx_min=a.entry_adx_min, entry_adx_timeframe=a.entry_adx_timeframe,
         entry_atr_enabled=a.entry_atr_filter, entry_atr_len=a.entry_atr_len,

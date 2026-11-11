@@ -79,12 +79,16 @@ def test_atr_filter_is_applied_to_both_long_and_short_entries(monkeypatch):
 
     signals = EMACrossStrategy(cfg).generate_signals(bars)
 
-    assert signals.target.tolist() == [0, 0, 0, -1]
+    assert signals.target.tolist() == [0, 0, 0, 0]
+    assert not signals.cross_up.any()
+    assert signals.cross_down.tolist() == [False, False, False, True]
     assert signals.atr_filter_allowed.tolist() == [True, False, True, True]
 
     allowed[:] = [True, True, True, False]
     signals = EMACrossStrategy(cfg).generate_signals(bars)
-    assert signals.target.tolist() == [0, 1, 0, 0]
+    assert signals.target.tolist() == [0, 0, 0, 0]
+    assert signals.cross_up.tolist() == [False, True, False, False]
+    assert not signals.cross_down.any()
 
 
 def test_atr_filter_defaults_and_validation():

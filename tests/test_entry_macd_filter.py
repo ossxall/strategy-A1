@@ -60,7 +60,9 @@ def test_entries_use_macd_main_line_zero_side(monkeypatch):
 
     signals = EMACrossStrategy(make_config()).generate_signals(make_bars())
 
-    assert signals.target.tolist() == [0, 1, 0, -1]
+    assert signals.target.tolist() == [0, 0, 0, 0]
+    assert signals.cross_up.tolist() == [False, True, False, False]
+    assert signals.cross_down.tolist() == [False, False, False, True]
     assert signals.macd_line.tolist() == [0.0, 1.0, 1.0, -1.0]
 
 
@@ -131,7 +133,9 @@ def test_macd_can_use_higher_timeframe_and_only_closed_values(monkeypatch):
     # Cuatro velas de 30m producen dos velas horarias. El primer cruce se
     # confirma al cierre horario y el segundo usa la siguiente vela cerrada.
     assert received["bars"] == 2
-    assert signals.target.tolist() == [0, 1, 0, -1]
+    assert signals.target.tolist() == [0, 0, 0, 0]
+    assert signals.cross_up.tolist() == [False, True, False, False]
+    assert signals.cross_down.tolist() == [False, False, False, True]
 
 
 def test_macd_can_use_lower_timeframe_when_raw_bars_are_provided(monkeypatch):
@@ -160,7 +164,9 @@ def test_macd_can_use_lower_timeframe_when_raw_bars_are_provided(monkeypatch):
     signals = EMACrossStrategy(cfg).generate_signals(make_bars(), raw=raw)
 
     assert received["bars"] == 8
-    assert signals.target.tolist() == [0, 1, 0, -1]
+    assert signals.target.tolist() == [0, 0, 0, 0]
+    assert signals.cross_up.tolist() == [False, True, False, False]
+    assert signals.cross_down.tolist() == [False, False, False, True]
 
 
 def test_lower_macd_timeframe_requires_sufficient_raw_data():

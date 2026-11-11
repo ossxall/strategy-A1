@@ -18,6 +18,7 @@ def timeframe_tuple(raw: str | list[str] | tuple[str, ...]) -> tuple[str, ...]:
 
 @dataclass
 class Config:
+    # EMAs de tendencia para entrada pullback (valores por defecto: 55/200).
     ema_fast: int = 55
     ema_slow: int = 200
     # Periodos del MACD de entrada: la señal usa la línea principal respecto a cero.
@@ -38,7 +39,10 @@ class Config:
     stop_loss_pct: float = 0.01
 
     confirm_bars: int = 4
-    # Bloquea cruces EMA si el ADX de entrada no supera el mínimo.
+    # La entrada pullback está activa por defecto y utiliza las EMAs anteriores.
+    # Tolerancia de la zona respecto a EMA rápida/EMA55 (por defecto 1.62%).
+    entry_pullback_tolerance_pct: float = 0.2
+    # Bloquea entradas pullback si el ADX de entrada no supera el mínimo.
     entry_adx_enabled: bool = True
     entry_adx_len: int = 14
     entry_adx_min: float = 20.0
@@ -70,7 +74,7 @@ class Config:
     entry_er_risk_min: float = 0.5
     entry_er_risk_max: float = 1.25
 
-    adx_exit_enabled: bool = True
+    adx_exit_enabled: bool = False
     # Uno o varios timeframes (combinados con OR). Acepta "1D", "1D,30min" o
     # ["1D", "30min"]; la salida ADX se dispara si hay reversión en cualquiera.
     adx_timeframe: str | list[str] | tuple[str, ...] = ("1D")
@@ -159,16 +163,9 @@ class Config:
     monthly_loss_limit_close: bool = True
     monthly_loss_limit_days: int = 0
 
-    # Tras una posición cerrada en pérdida, la siguiente entrada sólo se abre
-    # si va en la dirección del sesgo de tendencia de `trend_timeframe` (vela
-    # superior ya cerrada, sin lookahead); una victoria reinicia el requisito.
-    # Ataca la racha de pérdidas: en whipsaw la señal de cruce suele ir contra
-    # la tendencia mayor. Sólo exige el sesgo tras perder, no siempre, para no
-    # recortar el retorno de los cruces en tendencia. En BTCUSDT 2020-2026
-    # baja la racha máxima de 7 a 5 (train y test), sube el PF de 1,76 a 2,07
-    # y recorta el peor mes de -4,75% a -2,65%, con el rendimiento total
-    # encima del baseline (328% -> 363%). False = desactivado.
-    streak_trend_only: bool = True
+    # Si se activa, tras una pérdida exige que la siguiente entrada coincida
+    # con el sesgo de `trend_timeframe`. False = desactivado (default).
+    streak_trend_only: bool = False
 
     # --- Tamaño de posición adaptativo -------------------------------------
     # `risk_pct` se multiplica por `clamp(1 + k * (win_rate últimas n posiciones
@@ -256,6 +253,8 @@ class Config:
             raise ValueError("Comisiones, slippage y stop no pueden ser negativos.")
         if self.confirm_bars < 0:
             raise ValueError("confirm_bars no puede ser negativo.")
+        if not 0 <= self.entry_pullback_tolerance_pct < 100:
+            raise ValueError("entry_pullback_tolerance_pct debe estar en [0, 100).")
         if self.entry_adx_enabled and (self.entry_adx_len <= 0 or self.entry_adx_min < 0):
             raise ValueError("Configuración de ADX de entrada inválida.")
         if self.entry_atr_enabled and (

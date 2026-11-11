@@ -73,6 +73,7 @@ def test_live_event_reports_add_at_close_of_entry_candle():
 
     entry = next(event for event in events if event["event"] == "ENTRY")
     add = next(event for event in events if event["event"] == "ENTRY_ADD")
+    assert entry["reason"] == "EMA_PULLBACK"
     assert entry["signal_time"] == ts_ms(index[1])
     assert entry["payload"]
     assert add["signal_time"] == ts_ms(index[2])

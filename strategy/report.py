@@ -559,6 +559,8 @@ def build_backtest_figure(
         for column, y, symbol, color, label in (
             ("cross_up", bars_low - pad, "triangle-up", UP_COLOR, "cruce ↑"),
             ("cross_down", bars_high + pad, "triangle-down", DOWN_COLOR, "cruce ↓"),
+            ("pullback_long", bars_low - 2 * pad, "circle", UP_COLOR, "pullback LONG"),
+            ("pullback_short", bars_high + 2 * pad, "circle", DOWN_COLOR, "pullback SHORT"),
         ):
             if column in signals:
                 mask = _flag(signals[column])

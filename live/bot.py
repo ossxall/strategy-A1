@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Bot 1 — Estrategia EMA Cross en vivo (eventos en signal.db)
+Bot 1 — Estrategia EMA Pullback en vivo (eventos en signal.db)
 ===========================================================
 
 Lee la data OHLCV almacenada por `feed.py` en `data/feed.db` (1m por defecto) y
@@ -36,7 +36,7 @@ breakeven, stop, reversal o cierre completo). Para reproducir el backtest,
 ordena por `(signal_time, bar_time, event)` con `EXIT` antes que `ENTRY`:
 
 - `ENTRY`: `signal_time = bar_time + timeframe` (se ejecuta en la apertura
-  siguiente a la vela de la señal).
+  siguiente a la vela de señal de pullback a EMA55).
 - `ENTRY_ADD`: `signal_time = bar_time + timeframe` (se ejecuta al cierre de la
   vela donde se abrió el primer tramo; se omite si antes se activa breakeven).
 - `EXIT` por EMA_CROSS / ADX / EMA_WEAKENING / RSI_DIVERGENCE: también
@@ -224,6 +224,7 @@ _CONFIG_ENV = {
     "entry_adx_len": ("STRATEGY_ENTRY_ADX_LEN", env_int),
     "entry_adx_min": ("STRATEGY_ENTRY_ADX_MIN", env_float),
     "entry_adx_timeframe": ("STRATEGY_ENTRY_ADX_TIMEFRAME", env_str),
+    "entry_pullback_tolerance_pct": ("STRATEGY_ENTRY_PULLBACK_TOLERANCE_PCT", env_float),
     "entry_atr_enabled": ("STRATEGY_ENTRY_ATR", env_bool),
     "entry_atr_len": ("STRATEGY_ENTRY_ATR_LEN", env_int),
     "entry_atr_lookback": ("STRATEGY_ENTRY_ATR_LOOKBACK", env_int),
@@ -570,7 +571,7 @@ def build_events(
 
     Reutiliza el motor `Backtester` de `strategy/strategy.py` sobre las velas
     cerradas, de modo que el bot publica exactamente las acciones que tomaría
-    el backtest: aperturas (incluidas reversals), cierres por EMA_CROSS,
+    el backtest: aperturas pullback (incluidas reversals), cierres por EMA_CROSS,
     ADX_REVERSAL, EMA_WEAKENING, RSI_DIVERGENCE y
     EMA55_REPEATED_TOUCH_WEAKNESS(_SHORT), además de STOP_LOSS, BREAKEVEN,
     PARTIAL_TP y EMA_SLOW_TOUCH. La posición abierta al final no se
@@ -655,7 +656,7 @@ def build_events(
         signal_time = ts_ms(entry_time)
         events.append(
             make_event(
-                "ENTRY", side, "EMA_CROSS", signal_time - tf_ms, signal_time,
+                "ENTRY", side, "EMA_PULLBACK", signal_time - tf_ms, signal_time,
                 entry_price,
                 {
                     "action": "OPEN",

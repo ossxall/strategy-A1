@@ -76,7 +76,10 @@ def test_adx_filter_requires_a_value_strictly_above_20(monkeypatch):
     signals = EMACrossStrategy(make_config()).generate_signals(bars)
 
     # ADX 20.01 permite el cruce alcista; ADX exactamente 20 bloquea el bajista.
-    assert signals.target.tolist() == [0, 1, 0, 0]
+    # Estos datos no contienen un pullback, así que no producen entradas.
+    assert signals.target.tolist() == [0, 0, 0, 0]
+    assert signals.cross_up.tolist() == [False, True, False, False]
+    assert not signals.cross_down.any()
 
 
 def test_adx_filter_allows_long_and_short_crosses_above_the_configured_threshold(monkeypatch):
@@ -84,7 +87,9 @@ def test_adx_filter_allows_long_and_short_crosses_above_the_configured_threshold
 
     signals = EMACrossStrategy(make_config(adx_min=25.0)).generate_signals(bars)
 
-    assert signals.target.tolist() == [0, 1, 0, -1]
+    assert signals.target.tolist() == [0, 0, 0, 0]
+    assert signals.cross_up.tolist() == [False, True, False, False]
+    assert signals.cross_down.tolist() == [False, False, False, True]
     assert signals.adx_entry.tolist() == [40.0, 25.01, 40.0, 25.01]
 
 
@@ -128,7 +133,8 @@ def test_multiple_entry_adx_timeframes_all_must_be_above_the_threshold(monkeypat
     # La vela 1h siguiente solo queda disponible al cierre de la barra 01:30.
     assert np.isnan(signals["adx_entry_1h"].iloc[0])
     assert signals["adx_entry_1h"].iloc[1:].tolist() == [10.0, 10.0, 40.0]
-    assert signals.target.tolist() == [0, 0, 0, -1]
+    assert signals.target.tolist() == [0, 0, 0, 0]
+    assert signals.cross_down.tolist() == [False, False, False, True]
 
 
 def test_entry_adx_timeframes_accept_comma_separated_cli_values(monkeypatch):
