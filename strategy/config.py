@@ -44,11 +44,6 @@ class Config:
     entry_adx_min: float = 20.0
     # Todos los timeframes deben superar el umbral para permitir una entrada.
     entry_adx_timeframe: str | list[str] | tuple[str, ...] = ("30min")
-    # Pure Momentum Oscillator (Pine): exige momentum alcista en LONG y bajista en SHORT.
-    entry_pmo_enabled: bool = True
-    entry_pmo_len: int = 45
-    entry_pmo_long_threshold: float = 0.05
-    entry_pmo_short_threshold: float = -0.05
     # Bloquea entradas cuando ATR(14) es anormalmente bajo/alto frente a su
     # media de las velas anteriores. No afecta las salidas de posiciones abiertas.
     entry_atr_enabled: bool = True
@@ -284,11 +279,6 @@ class Config:
             raise ValueError("confirm_bars no puede ser negativo.")
         if self.entry_adx_enabled and (self.entry_adx_len <= 0 or self.entry_adx_min < 0):
             raise ValueError("Configuración de ADX de entrada inválida.")
-        if self.entry_pmo_enabled and (
-            self.entry_pmo_len < 2
-            or self.entry_pmo_short_threshold >= self.entry_pmo_long_threshold
-        ):
-            raise ValueError("Configuración del filtro PMO de entrada inválida.")
         if self.entry_atr_enabled and (
             self.entry_atr_len <= 0 or self.entry_atr_lookback <= 0
             or self.entry_atr_min_ratio < 0

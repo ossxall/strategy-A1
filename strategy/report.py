@@ -478,8 +478,6 @@ def build_backtest_figure(
     panels = ["price"]
     if signals is not None and "adx_entry" in signals:
         panels.append("adx")
-    if signals is not None and "entry_pmo" in signals:
-        panels.append("pmo")
     if signals is not None and "target" in signals:
         panels.append("target")
     panels.extend(adx_panels)
@@ -487,7 +485,7 @@ def build_backtest_figure(
     if equity is not None and not equity.empty:
         panels.append("equity")
 
-    weights = {"price": 1.0, "adx": 0.25, "pmo": 0.25, "target": 0.2, "equity": 0.4}
+    weights = {"price": 1.0, "adx": 0.25, "target": 0.2, "equity": 0.4}
     for name in adx_panels:
         weights[name] = 0.35
     for name in weak_panels:
@@ -781,21 +779,6 @@ def build_backtest_figure(
                           row=rr, col=1)
         fig.update_yaxes(title_text="ADX", row=rr, col=1)
 
-    # -- Panel PMO de entrada ----------------------------------------------
-    if "pmo" in row:
-        rr = row["pmo"]
-        fig.add_trace(
-            _line_trace(sig_x, signals["entry_pmo"].to_numpy(float), "PMO momentum", NEUTRAL_COLOR),
-            row=rr,
-            col=1,
-        )
-        if cfg.entry_pmo_enabled:
-            fig.add_hline(y=cfg.entry_pmo_long_threshold,
-                          line=dict(color=UP_COLOR, width=0.9, dash="dash"), row=rr, col=1)
-            fig.add_hline(y=cfg.entry_pmo_short_threshold,
-                          line=dict(color=DOWN_COLOR, width=0.9, dash="dash"), row=rr, col=1)
-        fig.update_yaxes(title_text="PMO", row=rr, col=1)
-
     # -- Panel target ------------------------------------------------------
     if "target" in row:
         rr = row["target"]
@@ -882,7 +865,7 @@ def build_backtest_figure(
         fig.update_yaxes(title_text="equity", row=rr, col=1)
 
     # -- Layout ------------------------------------------------------------
-    for name in ("adx", "pmo", "target"):
+    for name in ("adx", "target"):
         if name in row:
             fig.update_xaxes(matches="x", row=row[name], col=1)
     fig.update_xaxes(rangeslider_visible=False, type="date")

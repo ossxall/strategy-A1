@@ -78,7 +78,6 @@ def test_atr_filter_is_applied_to_both_long_and_short_entries(monkeypatch):
         macd_timeframe=None,
         confirm_bars=0,
         entry_adx_enabled=False,
-        entry_pmo_enabled=False,
         entry_dmi_risk_scaling_enabled=False,
         entry_mfi_risk_scaling_enabled=False,
         entry_er_risk_scaling_enabled=False,
