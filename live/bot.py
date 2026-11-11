@@ -22,9 +22,8 @@ Reglas de diseño
 - Las decisiones se conocen al cierre de la vela y se ejecutan en la apertura
   siguiente (igual que el backtest); por eso se guardan `bar_time` (vela de la
   señal) y `signal_time` (momento de ejecución). La entrada parcial se completa
-  con `ENTRY_ADD` en la apertura siguiente a la primera entrada, salvo si ya
-  se activó el breakeven. Si esa vela cierra contra la posición, el añadido se
-  revierte al cierre. Las salidas por stop/
+  con `ENTRY_ADD` al cierre de la vela de entrada, salvo si ya se activó el
+  breakeven. Las salidas por stop/
   breakeven/partial/toque a la EMA slow/movimiento adverso desde la confirmación se
   disparan dentro de la vela, por lo que `bar_time == signal_time`.
 - `force_close_at_end` se desactiva: en vivo una posición abierta no debe
@@ -34,17 +33,12 @@ Orden de los eventos (para el consumidor)
 -----------------------------------------
 Cada posición genera un `ENTRY` y uno o más `EXIT` (partial TP, weakening,
 breakeven, stop, reversal o cierre completo). Para reproducir el backtest,
-ordena por `signal_time`; si coinciden, procesa primero `ENTRY_ADD`, luego `EXIT`
-y finalmente `ENTRY` (para que un reversal cierre antes de abrir la nueva posición):
+ordena por `(signal_time, bar_time, event)` con `EXIT` antes que `ENTRY`:
 
 - `ENTRY`: `signal_time = bar_time + timeframe` (se ejecuta en la apertura
   siguiente a la vela de la señal).
-- `ENTRY_ADD`: `signal_time = bar_time + timeframe` (se ejecuta en la apertura
-  posterior a la vela del primer tramo; se omite si antes se activa breakeven).
-  Si se publica antes de esa apertura, `price`/`add_price` son `null`: el precio
-  de ejecución todavía no se conoce.
-- `EXIT` por `ENTRY_ADD_REVERT_RED_CANDLE` / `ENTRY_ADD_REVERT_GREEN_CANDLE`:
-  se ejecuta al cierre de la vela del añadido si esta cierra contra la posición.
+- `ENTRY_ADD`: `signal_time = bar_time + timeframe` (se ejecuta al cierre de la
+  vela donde se abrió el primer tramo; se omite si antes se activa breakeven).
 - `EXIT` por EMA_CROSS / ADX / EMA_WEAKENING / RSI_DIVERGENCE: también
   `signal_time = bar_time + timeframe` (se decide al cierre y se ejecuta en la
   apertura siguiente).
@@ -295,7 +289,7 @@ _CONFIG_ENV = {
     "ema55_touch_exit_loss_pct": ("STRATEGY_EMA55_TOUCH_EXIT_LOSS_PCT", env_float),
     "ema55_touch_short_exit_loss_pct": ("STRATEGY_EMA55_TOUCH_SHORT_EXIT_LOSS_PCT", env_float),
     "timestamp_is_close": ("STRATEGY_TIMESTAMP_IS_CLOSE", env_bool),
-    # Entrada parcial: el segundo tramo se añade en la apertura siguiente.
+    # Entrada parcial: el segundo tramo se añade al cierre de la vela de entrada.
     "entry_partial_enabled": ("STRATEGY_ENTRY_PARTIAL", env_bool),
     "entry_partial_pct": ("STRATEGY_ENTRY_PARTIAL_PCT", env_float),
 }
@@ -549,8 +543,7 @@ def build_series_frames(
 def events_to_trades(events: list[dict]) -> list[dict]:
     """Eventos ENTRY/EXIT -> trades planos para graficar (tiempos en epoch ms).
 
-    Se ordenan por tiempo de ejecución; un ADD va antes de una salida simultánea,
-    y los EXIT van antes de una nueva ENTRY por reversal.
+    Se ordenan como el backtest: por tiempo de ejecución, EXIT antes que ENTRY.
     """
     trades = [
         {
@@ -559,8 +552,7 @@ def events_to_trades(events: list[dict]) -> list[dict]:
         }
         for e in events
     ]
-    priority = {"ENTRY_ADD": 0, "EXIT": 1, "ENTRY": 2}
-    return sorted(trades, key=lambda t: (t["time"], priority.get(t["event"], 3)))
+    return sorted(trades, key=lambda t: (t["time"], t["event"] != "EXIT"))
 
 
 def _reason_is_intrabar(reason: str) -> bool:
@@ -679,28 +671,7 @@ def build_events(
         )
 
     # --- Añadidos de entrada parcial (scale-in): completan la posición ---
-    adds = list(getattr(engine, "adds", []))
-    # Si la última vela cerrada abrió el primer tramo, publicar desde ya el
-    # añadido pendiente para la próxima apertura (su precio aún es desconocido).
-    pending_reversal = (
-        engine.pending_target is not None and engine.pending_target != open_pos.side
-        if open_pos is not None else False
-    )
-    pending_full_exit = engine.pending_exit is not None and engine.pending_exit[1] >= 100.0
-    if (open_pos is not None and cfg.entry_partial_enabled
-            and not open_pos.partial_entry_done and not open_pos.breakeven
-            and not pending_reversal and not pending_full_exit
-            and open_pos.entry_bar_index == len(bars) - 1
-            and open_pos.entry_remaining_quantity > 1e-12):
-        adds.append({
-            "position_id": open_pos.position_id,
-            "time": bars.index[-1] + pd.Timedelta(cfg.timeframe),
-            "price": None,
-            "quantity": open_pos.entry_remaining_quantity,
-            "target_quantity": open_pos.target_quantity,
-            "side": open_pos.side,
-        })
-    for add in adds:
+    for add in getattr(engine, "adds", []):
         pid = add["position_id"]
         side = "LONG" if add["side"] == 1 else "SHORT"
         signal_time = ts_ms(add["time"])
@@ -709,12 +680,12 @@ def build_events(
         events.append(
             make_event(
                 "ENTRY_ADD", side, "ENTRY_ADD", signal_time - tf_ms, signal_time,
-                add.get("price"),
+                add["price"],
                 {
                     "action": "ADD",
                     "position_id": pid,
                     "add_pct": add_pct,
-                    "add_price": opt_float(add.get("price")),
+                    "add_price": opt_float(add["price"]),
                 },
             )
         )
@@ -735,8 +706,8 @@ def build_events(
             signal_time = ts_ms(leg.exit_time)
             bar_time = signal_time if _reason_is_intrabar(leg.reason) else signal_time - tf_ms
             # El consumidor cierra un porcentaje de la cantidad que tiene en ese
-            # momento. Los cierres de la vela inicial solo ven el primer tramo;
-            # los adds en la apertura siguiente se cuentan desde ese instante.
+            # momento. Un TP dentro de la vela de entrada solo ve el primer tramo;
+            # los adds al cierre se cuentan desde ese instante en adelante.
             quantity_before_close = initial_quantity + sum(
                 add["quantity"] for add in position_adds
                 if ts_ms(add["time"]) <= signal_time

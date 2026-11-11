@@ -49,7 +49,7 @@ def setup_entry():
     return index, bars, signals, config
 
 
-def test_entry_is_split_between_consecutive_opens():
+def test_entry_is_split_between_next_open_and_same_candle_close():
     index, bars, signals, config = setup_entry()
     engine = Backtester(bars, config, signals=signals)
     engine.run()
@@ -59,13 +59,13 @@ def test_entry_is_split_between_consecutive_opens():
     assert engine.opened[0]["entry_pct"] == 50.0
     assert len(engine.adds) == 1
     assert engine.adds[0]["time"] == index[2]
-    assert engine.adds[0]["price"] == bars.iloc[2]["open"]
+    assert engine.adds[0]["price"] == bars.iloc[1]["close"]
     assert engine.position is not None
     assert engine.position.quantity == engine.position.target_quantity
     assert engine.position.entry_price == 102.0
 
 
-def test_live_event_reports_add_at_next_candle_open():
+def test_live_event_reports_add_at_close_of_entry_candle():
     index, bars, signals, config = setup_entry()
     events = build_events(
         bars, signals, None, None, None, config, "BTCUSDT", "30m"
@@ -77,20 +77,8 @@ def test_live_event_reports_add_at_next_candle_open():
     assert entry["payload"]
     assert add["signal_time"] == ts_ms(index[2])
     assert add["bar_time"] == ts_ms(index[1])
-    assert add["price"] == bars.iloc[2]["open"]
+    assert add["price"] == bars.iloc[1]["close"]
     assert '"add_pct": 50.0' in add["payload"]
-
-
-def test_live_event_schedules_pending_add_for_next_open():
-    index, bars, signals, config = setup_entry()
-    events = build_events(
-        bars.iloc[:2], signals.iloc[:2], None, None, None, config, "BTCUSDT", "30m"
-    )
-
-    add = next(event for event in events if event["event"] == "ENTRY_ADD")
-    assert add["signal_time"] == ts_ms(index[2])
-    assert add["bar_time"] == ts_ms(index[1])
-    assert add["price"] is None
 
 
 def test_tp1_on_entry_candle_cancels_pending_add_after_moving_stop_to_breakeven():
@@ -109,39 +97,3 @@ def test_tp1_on_entry_candle_cancels_pending_add_after_moving_stop_to_breakeven(
     assert '"close_pct": 50.0' in exit_event["payload"]
     assert exit_event["signal_time"] == ts_ms(index[1])
     assert not any(event["event"] == "ENTRY_ADD" for event in events)
-
-
-def test_red_long_add_candle_reverts_only_the_second_tranche():
-    index, bars, signals, config = setup_entry()
-    bars.loc[index[2], ["open", "high", "low", "close"]] = [104.0, 104.5, 102.5, 103.0]
-    engine = Backtester(bars, config, signals=signals)
-    engine.run()
-
-    assert len(engine.trades) == 1
-    assert engine.trades[0].reason == "ENTRY_ADD_REVERT_RED_CANDLE"
-    assert engine.trades[0].exit_time == index[2] + pd.Timedelta(config.timeframe)
-    assert engine.position is not None
-    assert engine.position.quantity == engine.position.target_quantity / 2
-    assert engine.position.entry_added_quantity == 0.0
-
-    events = build_events(bars, signals, None, None, None, config, "BTCUSDT", "30m")
-    reversal = next(
-        event for event in events
-        if event["reason"] == "ENTRY_ADD_REVERT_RED_CANDLE"
-    )
-    assert reversal["signal_time"] == ts_ms(index[2] + pd.Timedelta(config.timeframe))
-    assert '"close_pct": 50.0' in reversal["payload"]
-
-
-def test_green_short_add_candle_reverts_only_the_second_tranche():
-    index, bars, signals, config = setup_entry()
-    signals["target"] = [ -1, 0, 0]
-    signals["trend_bias"] = [-1, -1, -1]
-    bars.loc[index[2], ["open", "high", "low", "close"]] = [96.0, 97.5, 95.5, 97.0]
-    engine = Backtester(bars, config, signals=signals)
-    engine.run()
-
-    assert len(engine.trades) == 1
-    assert engine.trades[0].reason == "ENTRY_ADD_REVERT_GREEN_CANDLE"
-    assert engine.position is not None
-    assert engine.position.quantity == engine.position.target_quantity / 2

@@ -23,7 +23,6 @@ class Position:
     entry_partial_pct: float = 100.0    # % del objetivo cubierto en 1ª entrada
     entry_remaining_quantity: float = 0.0  # tramo aún pendiente, independiente de cierres parciales
     entry_bar_index: int = -1           # Índice de barra donde se hizo la 1ª entrada
-    entry_added_quantity: float = 0.0    # Cantidad viva del segundo tramo añadido
 
 
 @dataclass
