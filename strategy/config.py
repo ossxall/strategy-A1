@@ -137,7 +137,7 @@ class Config:
     # <= 80 % de la media de las 5 anteriores.
     volume_exit_enabled: bool = True
     volume_exit_bars: int = 10
-    volume_exit_pct: float = 25.0
+    volume_exit_pct: float = 20.0
     volume_exit_min_drop_pct: float = 20.0
 
     # Gestión de salida orientada a reducir la racha de pérdidas en whipsaw:
