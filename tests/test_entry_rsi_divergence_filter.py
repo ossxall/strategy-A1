@@ -64,9 +64,9 @@ def test_entries_are_filtered_by_recent_divergence_in_the_same_direction(monkeyp
 
     signals = EMACrossStrategy(cfg).generate_signals(bars)
 
-    assert signals.entry_rsi_divergence_blocked.tolist() == [True, True, False, False]
+    assert signals.entry_rsi_divergence_blocked.tolist() == [False, False, True, True]
     assert signals.entry_rsi_bear_divergence_blocked.tolist() == [False, False, True, True]
-    assert signals.target.tolist() == [0, 0, 0, 0]
+    assert signals.target.tolist() == [0, 1, 0, -1]
 
 
 def test_backtester_applies_recent_divergence_to_custom_long_signals_only():
@@ -77,7 +77,7 @@ def test_backtester_applies_recent_divergence_to_custom_long_signals_only():
             "target": [0, 0, 1, 0, -1, 1, 0],
             "trend_bias": 0,
             "entry_rsi_divergence_blocked": [False, True, True, False, False, False, False],
-            "entry_rsi_bear_divergence_blocked": [False, False, False, True, True, False, False],
+            "entry_rsi_bull_divergence_blocked": [False, False, False, True, True, False, False],
         },
         index=bars.index,
     )

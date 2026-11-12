@@ -315,8 +315,9 @@ class EMACrossStrategy:
                 divergence < 0 if divergence is not None else np.zeros(len(bars), bool),
                 cfg.entry_rsi_divergence_lookback,
             )
-            up &= ~entry_rsi_bull_divergence_blocked
-            down &= ~entry_rsi_bear_divergence_blocked
+            # Divergencia alcista (+) anticipa subida → bloquea SHORT; bajista (-) anticipa caída → bloquea LONG.
+            up &= ~entry_rsi_bear_divergence_blocked
+            down &= ~entry_rsi_bull_divergence_blocked
         else:
             entry_rsi_bull_divergence_blocked = np.zeros(len(bars), dtype=bool)
             entry_rsi_bear_divergence_blocked = np.zeros(len(bars), dtype=bool)
@@ -346,8 +347,8 @@ class EMACrossStrategy:
             "atr_filter_allowed": atr_allowed,
             "entry_rsi_bull_divergence_blocked": entry_rsi_bull_divergence_blocked,
             "entry_rsi_bear_divergence_blocked": entry_rsi_bear_divergence_blocked,
-            # Alias histórico del filtro LONG.
-            "entry_rsi_divergence_blocked": entry_rsi_bull_divergence_blocked,
+            # Alias histórico del filtro LONG (ahora la divergencia bajista bloquea LONG).
+            "entry_rsi_divergence_blocked": entry_rsi_bear_divergence_blocked,
             "cross_up": up, "cross_down": down, "valid": valid,
             "trend_bias": bias if bias is not None else np.zeros(len(bars), int),
             "target": np.select([up, down], [1, -1], default=0),
@@ -405,10 +406,6 @@ class Backtester:
                 self.entry_rsi_bull_divergence_blocked = self.signals[
                     "entry_rsi_bull_divergence_blocked"
                 ].to_numpy(bool)
-            elif "entry_rsi_divergence_blocked" in self.signals:
-                self.entry_rsi_bull_divergence_blocked = self.signals[
-                    "entry_rsi_divergence_blocked"
-                ].to_numpy(bool)
             else:
                 self.entry_rsi_bull_divergence_blocked = spread_flags(
                     divergence > 0 if divergence is not None else np.zeros(len(bars), bool),
@@ -417,6 +414,10 @@ class Backtester:
             if "entry_rsi_bear_divergence_blocked" in self.signals:
                 self.entry_rsi_bear_divergence_blocked = self.signals[
                     "entry_rsi_bear_divergence_blocked"
+                ].to_numpy(bool)
+            elif "entry_rsi_divergence_blocked" in self.signals:
+                self.entry_rsi_bear_divergence_blocked = self.signals[
+                    "entry_rsi_divergence_blocked"
                 ].to_numpy(bool)
             else:
                 self.entry_rsi_bear_divergence_blocked = spread_flags(
@@ -919,10 +920,10 @@ class Backtester:
                 if cfg.entry_atr_enabled and not self.entry_atr_allowed[i]:
                     target = 0
                 if target == 1 and cfg.entry_rsi_divergence_enabled \
-                        and self.entry_rsi_bull_divergence_blocked[i]:
+                        and self.entry_rsi_bear_divergence_blocked[i]:
                     target = 0
                 if target == -1 and cfg.entry_rsi_divergence_enabled \
-                        and self.entry_rsi_bear_divergence_blocked[i]:
+                        and self.entry_rsi_bull_divergence_blocked[i]:
                     target = 0
                 if target == 1 and not cfg.allow_long: target = 0
                 if target == -1 and not cfg.allow_short: target = 0
