@@ -675,14 +675,19 @@ class Backtester:
         return "EMA55_REPEATED_TOUCH_WEAKNESS_SHORT"
 
     def _tp3_slow_ema_touch_exit(self, i: int) -> bool:
-        """Cierra el SHORT restante al tocar la EMA lenta después de TP3."""
+        """Cierra el SHORT restante si supera la EMA lenta tras TP3."""
         pos = self.position
         if pos is None or pos.side != -1 or not pos.partial3_done or i >= len(self.ema_slow_line):
             return False
         line = self.ema_slow_line[i]
-        if not np.isfinite(line) or self.l[i] > line or self.h[i] < line:
+        if not np.isfinite(line):
             return False
-        self.close_position(100, line, self.times[i], "EMA_SLOW_TOUCH_SHORT_AFTER_TP3")
+        trigger = line * (1.0 + self.cfg.tp3_ema_slow_penetration_pct / 100.0)
+        if self.h[i] < trigger:
+            return False
+        # Si abre más allá del nivel, el fill no puede ser mejor que la apertura.
+        fill = max(trigger, self.o[i])
+        self.close_position(100, fill, self.times[i], "EMA_SLOW_TOUCH_SHORT_AFTER_TP3")
         return True
 
     def _manage(self, i: int) -> None:
@@ -1022,6 +1027,9 @@ def parse_args():
     p.add_argument("--partial-tp2-pct", type=float, default=d.partial_tp2_pct)
     p.add_argument("--partial-tp3-r", type=float, default=d.partial_tp3_r)
     p.add_argument("--partial-tp3-pct", type=float, default=d.partial_tp3_pct)
+    p.add_argument("--tp3-ema-slow-penetration-pct", type=float,
+                   default=d.tp3_ema_slow_penetration_pct,
+                   help="Ruptura porcentual de EMA lenta requerida para cerrar SHORT tras TP3 (default 0.1%%).")
     p.add_argument("--breakeven-stop", action=argparse.BooleanOptionalAction, default=d.move_stop_to_breakeven)
     p.add_argument("--no-long", action="store_true")
     p.add_argument("--no-short", action="store_true")
@@ -1104,6 +1112,7 @@ def config_from_args(a) -> Config:
         partial_tp_enabled=a.partial_tp, partial_tp_r=a.partial_tp_r, partial_tp_pct=a.partial_tp_pct,
         partial_tp2_r=a.partial_tp2_r, partial_tp2_pct=a.partial_tp2_pct,
         partial_tp3_r=a.partial_tp3_r, partial_tp3_pct=a.partial_tp3_pct,
+        tp3_ema_slow_penetration_pct=a.tp3_ema_slow_penetration_pct,
         move_stop_to_breakeven=a.breakeven_stop,
         trend_timeframe=a.trend_timeframe,
         monthly_loss_limit_pct=a.monthly_loss_limit_pct,

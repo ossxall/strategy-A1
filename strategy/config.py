@@ -139,6 +139,9 @@ class Config:
     # Third partial take-profit, at a larger distance than TP2.
     partial_tp3_r: float = 2.5
     partial_tp3_pct: float = 10.0
+    # Tras TP3, el SHORT restante sale si el precio supera EMA lenta por este %.
+    # 0 = basta con tocarla.
+    tp3_ema_slow_penetration_pct: float = 1.25
     move_stop_to_breakeven: bool = True
 
     # Sesgo de tendencia de timeframe superior, usado sólo después de una pérdida.
@@ -304,6 +307,8 @@ class Config:
                 or self.ema55_touch_exit_loss_pct < 0
                 or self.ema55_touch_short_exit_loss_pct < 0):
             raise ValueError("Tolerancias y pérdida mínima de EMA55 no pueden ser negativas.")
+        if self.tp3_ema_slow_penetration_pct < 0:
+            raise ValueError("tp3_ema_slow_penetration_pct no puede ser negativo.")
         if min(self.ema55_touch_lookback_bars, self.ema55_touch_min_touches,
                self.ema55_touch_consecutive) < 1:
             raise ValueError("La ventana y los conteos de toques EMA55 deben ser >= 1.")
