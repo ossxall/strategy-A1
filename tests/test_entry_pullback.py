@@ -56,7 +56,7 @@ def make_config(**kwargs):
     )
 
 
-def test_long_pullback_after_ema_cross_enters_on_next_open_and_keeps_50_50_split(monkeypatch):
+def test_long_pullback_enters_full_position_on_next_open(monkeypatch):
     bars = make_bars(
         open_=[99.0, 99.0, 100.0, 102.0],
         high=[100.0, 100.5, 101.4, 102.5],
@@ -81,11 +81,8 @@ def test_long_pullback_after_ema_cross_enters_on_next_open_and_keeps_50_50_split
     assert len(engine.opened) == 1
     assert engine.opened[0]["time"] == bars.index[3]
     assert engine.opened[0]["price"] == bars.iloc[3]["open"]
-    assert engine.opened[0]["entry_pct"] == 50.0
-    assert len(engine.adds) == 1
-    assert engine.adds[0]["time"] == bars.index[3] + pd.Timedelta("30min")
     assert engine.position is not None
-    assert engine.position.quantity == pytest.approx(engine.position.target_quantity)
+    assert engine.position.quantity == pytest.approx(engine.position.initial_quantity)
 
 
 def test_short_pullback_uses_high_and_rejects_ema_zone(monkeypatch):
@@ -143,7 +140,6 @@ def test_opposite_ema_cross_closes_position_but_waits_for_pullback_to_reverse(mo
     assert engine.trades[0].reason == "EMA_CROSS_EXIT"
     assert engine.trades[0].exit_time == bars.index[6]
     assert engine.opened[1]["time"] == bars.index[7]
-    assert engine.opened[1]["entry_pct"] == 50.0
 
 
 def test_stop_closed_position_cannot_reenter_until_a_new_ema_cross(monkeypatch):

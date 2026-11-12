@@ -31,7 +31,6 @@ def make_config(**kwargs):
         entry_mfi_risk_scaling_enabled=False,
         entry_er_risk_scaling_enabled=False,
         partial_tp_enabled=False,
-        entry_partial_enabled=False,
         adx_exit_enabled=False,
         ema_weakening_exit_enabled=False,
         rsi_divergence_exit_enabled=False,

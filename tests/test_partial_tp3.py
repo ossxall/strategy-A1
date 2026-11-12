@@ -47,7 +47,6 @@ def make_engine(side):
         entry_fee=0.0,
         stop_pct=0.1,
         risk_amount=10.0,
-        partial_entry_done=True,
     )
     return engine
 

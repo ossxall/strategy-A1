@@ -22,10 +22,8 @@ Reglas de diseño
   (symbol, interval, timeframe, event, signal, reason, bar_time).
 - Las decisiones se conocen al cierre de la vela y se ejecutan en la apertura
   siguiente (igual que el backtest); por eso se guardan `bar_time` (vela de la
-  señal) y `signal_time` (momento de ejecución). La entrada parcial se completa
-  con `ENTRY_ADD` al cierre de una vela de confirmación si rompe el máximo de la
-  vela de señal (LONG) o el mínimo (SHORT). El añadido permanece pendiente aunque
-  se active breakeven; las salidas
+  señal) y `signal_time` (momento de ejecución). Cada `ENTRY` abre la posición
+  completa; las salidas
   por stop/breakeven/partial/toque a EMA slow/movimiento adverso se disparan
   dentro de la vela, por lo que `bar_time == signal_time`.
 - `force_close_at_end` se desactiva: en vivo una posición abierta no debe
@@ -39,9 +37,6 @@ ordena por `(signal_time, bar_time, event)` con `EXIT` antes que `ENTRY`:
 
 - `ENTRY`: `signal_time = bar_time + timeframe` (se ejecuta en la apertura
   siguiente a la vela de señal de pullback a EMA55).
-- `ENTRY_ADD`: `signal_time = bar_time + timeframe` (se ejecuta al cierre de la
-  vela de confirmación; requiere ruptura de la vela de señal y se omite si la
-  posición se cierra antes de romper).
 - `EXIT` por EMA_CROSS / ADX / EMA_WEAKENING / RSI_DIVERGENCE / RSI_SHORT_EXIT: también
   `signal_time = bar_time + timeframe` (se decide al cierre y se ejecuta en la
   apertura siguiente).
@@ -294,9 +289,6 @@ _CONFIG_ENV = {
     "ema55_touch_exit_loss_pct": ("STRATEGY_EMA55_TOUCH_EXIT_LOSS_PCT", env_float),
     "ema55_touch_short_exit_loss_pct": ("STRATEGY_EMA55_TOUCH_SHORT_EXIT_LOSS_PCT", env_float),
     "timestamp_is_close": ("STRATEGY_TIMESTAMP_IS_CLOSE", env_bool),
-    # Entrada parcial: el segundo tramo requiere ruptura del máximo/mínimo de señal.
-    "entry_partial_enabled": ("STRATEGY_ENTRY_PARTIAL", env_bool),
-    "entry_partial_pct": ("STRATEGY_ENTRY_PARTIAL_PCT", env_float),
 }
 
 
@@ -632,29 +624,17 @@ def build_events(
     open_pos = engine.position
     entries: dict[int, tuple] = {}              # position_id -> (side, time, price)
     legs: dict[int, list] = {}                  # position_id -> tramos de cierre
-    entry_meta: dict[int, float] = {}           # position_id -> % del objetivo en 1ª entrada
+    for opened in engine.opened:
+        entries[opened["position_id"]] = (
+            "LONG" if opened["side"] == 1 else "SHORT", opened["time"], opened["price"],
+        )
     for trade in engine.trades:
-        entries.setdefault(trade.position_id, (trade.side, trade.entry_time, trade.entry_price))
         legs.setdefault(trade.position_id, []).append(trade)
     if open_pos is not None:
         entries.setdefault(
             open_pos.position_id,
             ("LONG" if open_pos.side == 1 else "SHORT", open_pos.entry_time, open_pos.entry_price),
         )
-    for opened in engine.opened:
-        entries.setdefault(
-            op_id := op["position_id"],  # noqa: F821
-        ) if False else None
-    # La primera entrada y el % del objetivo entrado en esa fase salen del motor;
-    # los añadidos se publican aparte como ENTRY_ADD.
-    for op in getattr(engine, "opened", []):
-        pid = op["position_id"]
-        entries[pid] = (
-            "LONG" if op["side"] == 1 else "SHORT", op["time"],
-            op["price"],
-        )
-        entry_meta[pid] = float(op["entry_pct"])
-
     events: list[dict] = []
 
     # --- Aperturas: una por posición (cerrada o todavía abierta) ---
@@ -668,37 +648,12 @@ def build_events(
                 {
                     "action": "OPEN",
                     "position_id": pid,
-                    "entry_pct": float(entry_meta.get(pid, 100.0)),
-                },
-            )
-        )
-
-    # --- Añadidos de entrada parcial (scale-in): completan la posición ---
-    for add in getattr(engine, "adds", []):
-        pid = add["position_id"]
-        side = "LONG" if add["side"] == 1 else "SHORT"
-        signal_time = ts_ms(add["time"])
-        target = add.get("target_quantity") or 0.0
-        add_pct = 100.0 * add["quantity"] / target if target else 100.0
-        events.append(
-            make_event(
-                "ENTRY_ADD", side, "ENTRY_ADD", signal_time - tf_ms, signal_time,
-                add["price"],
-                {
-                    "action": "ADD",
-                    "position_id": pid,
-                    "add_pct": add_pct,
-                    "add_price": opt_float(add["price"]),
                 },
             )
         )
 
     # --- Cierres: un evento por cada tramo ejecutado por el backtest ---
     for position_id in sorted(legs):
-        position_adds = [
-            add for add in getattr(engine, "adds", [])
-            if add["position_id"] == position_id
-        ]
         entry_op = next(
             (op for op in getattr(engine, "opened", []) if op["position_id"] == position_id),
             None,
@@ -708,13 +663,8 @@ def build_events(
         for leg in sorted(legs[position_id], key=lambda item: item.trade_id):
             signal_time = ts_ms(leg.exit_time)
             bar_time = signal_time if _reason_is_intrabar(leg.reason) else signal_time - tf_ms
-            # El consumidor cierra un porcentaje de la cantidad que tiene en ese
-            # momento. Un TP dentro de la vela de entrada solo ve el primer tramo;
-            # los adds al cierre se cuentan desde ese instante en adelante.
-            quantity_before_close = initial_quantity + sum(
-                add["quantity"] for add in position_adds
-                if ts_ms(add["time"]) <= signal_time
-            ) - prior_closed_quantity
+            # El consumidor cierra un porcentaje de la cantidad que tiene en ese momento.
+            quantity_before_close = initial_quantity - prior_closed_quantity
             close_pct = (
                 100.0 * leg.quantity / quantity_before_close
                 if quantity_before_close > 0 else 100.0

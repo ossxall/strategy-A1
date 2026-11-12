@@ -27,7 +27,6 @@ def make_engine(closes, touches, *, side=1, timeframe="30min", entry_bar=0):
     config = Config(
         timeframe=timeframe,
         streak_trend_only=False,
-        entry_partial_enabled=False,
         partial_tp_enabled=False,
         partial_tp2_r=0,
         partial_tp2_pct=0,
@@ -59,7 +58,6 @@ def make_engine(closes, touches, *, side=1, timeframe="30min", entry_bar=0):
         stop_pct=0.0,
         risk_amount=0.0,
         entry_bar_index=entry_bar,
-        partial_entry_done=True,
     )
     return engine
 

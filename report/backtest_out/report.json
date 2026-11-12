@@ -1,6 +1,6 @@
 {
   "strategy": "strategy2_ema_cross",
-  "generated_at": "2026-11-12T00:52:43.750870+00:00",
+  "generated_at": "2026-11-12T01:27:49.056473+00:00",
   "dataset": {
     "source": "dataset/binance/BTCUSDT/merged/BTCUSDT-1m.parquet",
     "bars": 118320,
@@ -95,8 +95,6 @@
     "partial_tp3_r": 2.5,
     "partial_tp3_pct": 10.0,
     "move_stop_to_breakeven": true,
-    "entry_partial_enabled": true,
-    "entry_partial_pct": 50.0,
     "trend_timeframe": "1D",
     "monthly_loss_limit_pct": 5.0,
     "monthly_loss_limit_close": true,
@@ -111,118 +109,118 @@
   },
   "metrics": {
     "initial_capital": 10000.0,
-    "final_equity": 20056.857466046833,
-    "net_pnl": 10056.857466046858,
-    "return_pct": 100.56857466046833,
-    "max_drawdown_pct": -16.328161557005494,
-    "max_dd_peak_equity": 18535.428368409033,
-    "max_dd_trough_equity": 15508.933679132178,
-    "max_dd_peak_vs_capital_pct": 85.35428368409032,
-    "max_dd_trough_vs_capital_pct": 55.08933679132178,
-    "min_equity": 9924.516174247907,
-    "min_equity_vs_capital_pct": -0.7548382575209289,
-    "return_over_maxdd": 6.159209921420701,
-    "sharpe_daily_365": 1.089395409728262,
-    "sortino_daily_365": 2.1196565668934504,
-    "legs": 988,
+    "final_equity": 31971.390296659465,
+    "net_pnl": 21971.390296659425,
+    "return_pct": 219.71390296659465,
+    "max_drawdown_pct": -18.31783281231121,
+    "max_dd_peak_equity": 23554.97849145406,
+    "max_dd_trough_equity": 19240.21691241364,
+    "max_dd_peak_vs_capital_pct": 135.54978491454062,
+    "max_dd_trough_vs_capital_pct": 92.4021691241364,
+    "min_equity": 9945.523486663413,
+    "min_equity_vs_capital_pct": -0.5447651333658765,
+    "return_over_maxdd": 11.9945358830291,
+    "sharpe_daily_365": 1.37142112527691,
+    "sortino_daily_365": 2.5623874907648445,
+    "legs": 1057,
     "positions": 548,
-    "wins": 209,
-    "losses": 339,
-    "win_rate_pct": 38.13868613138686,
-    "profit_factor": 1.550013682102526,
-    "avg_pnl": 18.35192968256726,
-    "expectancy_r": 0.20118454378894515,
-    "max_consecutive_losses": 12
+    "wins": 301,
+    "losses": 247,
+    "win_rate_pct": 54.92700729927007,
+    "profit_factor": 1.5954378119362098,
+    "avg_pnl": 40.09377791361209,
+    "expectancy_r": 0.24387985861298417,
+    "max_consecutive_losses": 6
   },
   "by_side": {
     "LONG": {
       "positions": 269,
-      "wins": 97,
-      "losses": 172,
-      "win_rate_pct": 36.059479553903344,
-      "profit_factor": 1.74579968403439,
-      "net_pnl": 7333.170353401867,
-      "avg_pnl": 27.260856332348947,
-      "expectancy_r": 0.3277560165466994,
-      "max_consecutive_losses": 18
+      "wins": 143,
+      "losses": 126,
+      "win_rate_pct": 53.159851301115246,
+      "profit_factor": 1.6821269819906417,
+      "net_pnl": 13406.697453977016,
+      "avg_pnl": 49.83902399247962,
+      "expectancy_r": 0.3286442922657316,
+      "max_consecutive_losses": 5
     },
     "SHORT": {
       "positions": 279,
-      "wins": 112,
-      "losses": 167,
-      "win_rate_pct": 40.14336917562724,
-      "profit_factor": 1.3222492466201403,
-      "net_pnl": 2723.6871126449887,
-      "avg_pnl": 9.76231940016125,
-      "expectancy_r": 0.07914968295799207,
-      "max_consecutive_losses": 19
+      "wins": 158,
+      "losses": 121,
+      "win_rate_pct": 56.63082437275986,
+      "profit_factor": 1.4966392406933402,
+      "net_pnl": 8564.692842682405,
+      "avg_pnl": 30.69782380889751,
+      "expectancy_r": 0.1621535767040627,
+      "max_consecutive_losses": 8
     }
   },
   "exit_reasons": {
+    "PARTIAL_TP_0.9R": {
+      "legs": 276,
+      "positions": 276,
+      "pnl_net": 12030.158027146064
+    },
     "PARTIAL_TP2_1.75R": {
-      "legs": 113,
-      "positions": 113,
-      "pnl_net": 1746.9980035820608
+      "legs": 143,
+      "positions": 143,
+      "pnl_net": 3791.24988546191
     },
     "RSI_SHORT_EXIT_30": {
-      "legs": 62,
-      "positions": 62,
-      "pnl_net": 8604.704814670495
+      "legs": 64,
+      "positions": 64,
+      "pnl_net": 16727.496309750928
+    },
+    "EMA55_REPEATED_TOUCH_WEAKNESS": {
+      "legs": 18,
+      "positions": 18,
+      "pnl_net": -3050.183909901341
     },
     "STOP_LOSS_1.00%": {
-      "legs": 177,
-      "positions": 177,
-      "pnl_net": -13125.672789475415
+      "legs": 158,
+      "positions": 158,
+      "pnl_net": -28897.602224258313
     },
-    "PARTIAL_TP_0.9R": {
-      "legs": 255,
-      "positions": 255,
-      "pnl_net": 5131.894606810628
+    "BREAKEVEN": {
+      "legs": 197,
+      "positions": 197,
+      "pnl_net": -141.39637622753565
     },
     "PARTIAL_TP3_2.5R": {
-      "legs": 72,
-      "positions": 72,
-      "pnl_net": 1345.748105759456
+      "legs": 90,
+      "positions": 90,
+      "pnl_net": 2950.245504273016
     },
     "EMA_CROSS_EXIT": {
       "legs": 30,
       "positions": 30,
-      "pnl_net": 11782.345238139415
-    },
-    "BREAKEVEN": {
-      "legs": 173,
-      "positions": 173,
-      "pnl_net": -4544.792342319896
+      "pnl_net": 18444.060098173177
     },
     "FIRST_CANDLE_EMA_FAST_EXIT": {
       "legs": 58,
       "positions": 58,
-      "pnl_net": -1185.853084565935
-    },
-    "EMA55_REPEATED_TOUCH_WEAKNESS": {
-      "legs": 23,
-      "positions": 23,
-      "pnl_net": -1710.8248245360714
+      "pnl_net": -3828.8083976841426
     },
     "EMA_WEAKENING_4H_1D_EMA21/55": {
       "legs": 15,
       "positions": 15,
-      "pnl_net": 2066.676076834978
+      "pnl_net": 3886.674057609044
     },
     "RSI_DIVERGENCE_BEAR": {
       "legs": 4,
       "positions": 4,
-      "pnl_net": 115.26199656017694
-    },
-    "EMA55_REPEATED_TOUCH_WEAKNESS_SHORT": {
-      "legs": 3,
-      "positions": 3,
-      "pnl_net": -219.92602517150192
+      "pnl_net": 156.895785171765
     },
     "RSI_DIVERGENCE_BULL": {
       "legs": 3,
       "positions": 3,
-      "pnl_net": 50.297689758468074
+      "pnl_net": 148.7862155341505
+    },
+    "EMA55_REPEATED_TOUCH_WEAKNESS_SHORT": {
+      "legs": 1,
+      "positions": 1,
+      "pnl_net": -246.18467838930286
     }
   }
 }

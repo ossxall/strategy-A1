@@ -21,7 +21,6 @@ def test_rsi_divergence_exit_closes_configured_percent():
     )
     config = Config(
         rsi_divergence_exit_pct=50.0,
-        entry_partial_enabled=False,
         partial_tp_enabled=False,
         partial_tp2_r=0,
         partial_tp2_pct=0,
@@ -50,7 +49,6 @@ def test_rsi_divergence_exit_closes_configured_percent():
         stop_pct=0.0,
         risk_amount=0.0,
         entry_bar_index=0,
-        partial_entry_done=True,
     )
 
     trades, _ = engine.run()

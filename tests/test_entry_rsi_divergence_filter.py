@@ -86,7 +86,6 @@ def test_backtester_applies_recent_divergence_to_custom_long_signals_only():
         entry_atr_enabled=False,
         entry_mfi_risk_scaling_enabled=False,
         entry_er_risk_scaling_enabled=False,
-        entry_partial_enabled=False,
         streak_trend_only=False,
         monthly_loss_limit_pct=0,
         force_close_at_end=True,
