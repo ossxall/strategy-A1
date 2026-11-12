@@ -81,6 +81,8 @@
   "partial_tp5_pct": 10.0,
   "partial_tp6_r": 3.5,
   "partial_tp6_pct": 10.0,
+  "partial_tp7_r": 4.0,
+  "partial_tp7_pct": 10.0,
   "tp3_ema_slow_penetration_pct": 1.25,
   "move_stop_to_breakeven": true,
   "trend_timeframe": "1D",

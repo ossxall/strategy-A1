@@ -6,9 +6,9 @@ from strategy.models import Position
 from strategy.strategy import Backtester
 
 
-def make_engine(side, *, reach_tp5=False, reach_tp6=False):
-    high = 137.0 if reach_tp6 else 131.0 if reach_tp5 else 126.0
-    low = 63.0 if reach_tp6 else 69.0 if reach_tp5 else 74.0
+def make_engine(side, *, reach_tp5=False, reach_tp6=False, reach_tp7=False):
+    high = 142.0 if reach_tp7 else 137.0 if reach_tp6 else 131.0 if reach_tp5 else 126.0
+    low = 58.0 if reach_tp7 else 63.0 if reach_tp6 else 69.0 if reach_tp5 else 74.0
     index = pd.date_range("2026-01-01", periods=2, freq="30min", tz="UTC")
     bars = pd.DataFrame(
         {
@@ -131,3 +131,30 @@ def test_tp6_defaults_and_ordering_validation():
         Config(partial_tp6_r=0, partial_tp6_pct=10)
     with pytest.raises(ValueError, match="mayor que TP5"):
         Config(partial_tp6_r=3.0)
+
+
+@pytest.mark.parametrize("side", [1, -1])
+def test_tp7_closes_configured_percent_before_nearer_targets(side):
+    engine = make_engine(side, reach_tp7=True)
+
+    engine._manage(1)
+
+    trade = engine.trades[0]
+    assert trade.reason == "PARTIAL_TP7_4R"
+    assert trade.exit_price == (140.0 if side == 1 else 60.0)
+    assert trade.quantity == pytest.approx(0.1)
+    assert engine.position is not None
+    assert engine.position.partial7_done
+    assert not engine.position.partial6_done
+
+
+def test_tp7_defaults_and_ordering_validation():
+    config = Config()
+    assert config.partial_tp7_r == 4.0
+    assert config.partial_tp7_pct == 10.0
+    assert Config(partial_tp7_r=0, partial_tp7_pct=0).partial_tp7_r == 0
+
+    with pytest.raises(ValueError, match="take-profit parcial 7"):
+        Config(partial_tp7_r=0, partial_tp7_pct=10)
+    with pytest.raises(ValueError, match="mayor que TP6"):
+        Config(partial_tp7_r=3.5)
