@@ -134,16 +134,16 @@ class Config:
     # Second partial take-profit (optional). If enabled (>0), it triggers at
     # partial_tp2_r (R-multiple of initial risk) closing partial_tp2_pct of
     # the position. Partial 2 is intended to be at larger distance than TP1.
-    partial_tp2_r: float = 1.75
+    partial_tp2_r: float = 1.5
     partial_tp2_pct: float = 10.0
     # Third partial take-profit, at a larger distance than TP2.
-    partial_tp3_r: float = 2.5
+    partial_tp3_r: float = 2.0
     partial_tp3_pct: float = 10.0
     # Fourth partial take-profit, at a larger distance than TP3.
-    partial_tp4_r: float = 3.25
+    partial_tp4_r: float = 2.5
     partial_tp4_pct: float = 10.0
     # Fifth partial take-profit, at a larger distance than TP4.
-    partial_tp5_r: float = 4.0
+    partial_tp5_r: float = 3.0
     partial_tp5_pct: float = 10.0
     # Tras TP3, el SHORT restante sale si el precio supera EMA lenta por este %.
     # 0 = basta con tocarla.
