@@ -240,38 +240,6 @@ def align_closed_values(
     return out
 
 
-def htf_trend(
-    bars: pd.DataFrame,
-    timeframe: str,
-    fast_len: int,
-    slow_len: int,
-    strategy_timeframe: str,
-) -> np.ndarray | None:
-    """Tendencia (+1/-1/0) del timeframe superior, alineada a ``bars``.
-
-    Calcula ``EMA(fast_len)`` y ``EMA(slow_len)`` sobre las velas de
-    ``timeframe`` (remuestreadas desde ``bars``) y devuelve ``+1`` cuando la
-    EMA rápida está por encima de la lenta, ``-1`` cuando está por debajo y
-    ``0`` cuando son iguales o no hay dato. Para cada barra de ``bars`` se usa
-    la última vela del HTF ya cerrada (sin look-ahead). Devuelve ``None`` si no
-    hay velas suficientes para sembrar las EMAs.
-    """
-    if pd.Timedelta(timeframe) == pd.Timedelta(strategy_timeframe):
-        source, source_tf = bars, strategy_timeframe
-    else:
-        source, source_tf = resample_ohlcv(bars, timeframe), timeframe
-    if len(source) < max(fast_len, slow_len) + 2:
-        return None
-    fast = ema(source.close, fast_len).to_numpy(float)
-    slow = ema(source.close, slow_len).to_numpy(float)
-    trend = np.where(fast > slow, 1.0, np.where(fast < slow, -1.0, 0.0))
-    if source.index.equals(bars.index):
-        return trend
-    return align_closed_values(
-        source.index, trend, bars.index, source_tf, strategy_timeframe
-    )
-
-
 def spread_flags(flags: np.ndarray, window: int) -> np.ndarray:
     """Mantiene activo cada flag durante ``window`` velas consecutivas.
 
