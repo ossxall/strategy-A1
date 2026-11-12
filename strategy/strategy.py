@@ -432,6 +432,11 @@ class Backtester:
         else:
             self.ema55_line = np.full(len(bars), np.nan, dtype=float)
             self.ema55_touches = np.zeros(len(bars), dtype=bool)
+        self.ema_slow_line = (
+            self.signals["ema_slow"].to_numpy(float)
+            if "ema_slow" in self.signals
+            else ema(bars.close, config.ema_slow).to_numpy(float)
+        )
         if len(self.adx_exit) != len(bars): self.adx_exit = np.zeros(len(bars), bool)
         if len(self.weak_exit) != len(bars): self.weak_exit = np.zeros(len(bars), bool)
         if len(self.rsi_div) != len(bars): self.rsi_div = np.zeros(len(bars), int)
@@ -669,6 +674,17 @@ class Backtester:
             return None
         return "EMA55_REPEATED_TOUCH_WEAKNESS_SHORT"
 
+    def _tp3_slow_ema_touch_exit(self, i: int) -> bool:
+        """Cierra el SHORT restante al tocar la EMA lenta después de TP3."""
+        pos = self.position
+        if pos is None or pos.side != -1 or not pos.partial3_done or i >= len(self.ema_slow_line):
+            return False
+        line = self.ema_slow_line[i]
+        if not np.isfinite(line) or self.l[i] > line or self.h[i] < line:
+            return False
+        self.close_position(100, line, self.times[i], "EMA_SLOW_TOUCH_SHORT_AFTER_TP3")
+        return True
+
     def _manage(self, i: int) -> None:
         """Gestiona take-profits parciales y el stop a breakeven."""
         cfg, pos = self.cfg, self.position
@@ -788,7 +804,13 @@ class Backtester:
 
             # 2) Gestión de stops y salidas parciales
             stop_hit = self._stop(i)
+            slow_ema_touch_exit = False
             if not stop_hit:
+                # Se comprueba antes de gestionar TP en esta vela: si TP3 se
+                # activa ahora, el toque a EMA lenta sólo cuenta desde la vela
+                # siguiente.
+                slow_ema_touch_exit = self._tp3_slow_ema_touch_exit(i)
+            if not stop_hit and not slow_ema_touch_exit:
                 self._manage(i)
 
             # Equity mark-to-market para el límite de pérdida mensual.
