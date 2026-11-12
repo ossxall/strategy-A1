@@ -442,9 +442,8 @@ class Backtester:
         self.pending_target: Optional[int] = None
         self.pending_exit: Optional[tuple[str, float]] = None
         self.trades: list[Trade] = []
-        # Aperturas y añadidos de entrada parcial (scale-in) para reportar/públicar.
+        # Aperturas para publicar eventos en vivo.
         self.opened: list[dict] = []
-        self.adds: list[dict] = []
         self.trade_id = self.position_id = 0
         self.eq_time, self.eq_cash, self.eq_value, self.eq_side, self.eq_qty = [], [], [], [], []
         # Estado del límite mensual y pnl acumulado de la posición abierta.
@@ -468,7 +467,7 @@ class Backtester:
         stop_exec = self._price(self._stop_price(side, entry, pct), -side)
         return abs(stop_exec - entry) + (entry + abs(stop_exec)) * self.cfg.commission_bps / 10_000
 
-    def open_position(self, side: int, raw_price: float, ts: pd.Timestamp, partial_pct: float = 100.0):
+    def open_position(self, side: int, raw_price: float, ts: pd.Timestamp):
         if self.position is not None or self.cash <= 0:
             return
         price = self._price(raw_price, side)
@@ -486,34 +485,15 @@ class Backtester:
         qty_total = min(by_risk, by_lev)
         if not np.isfinite(qty_total) or qty_total <= 0:
             return
-        if partial_pct >= 99.999:
-            qty_init = qty_total
-            target_q = 0.0
-            pe_done = True
-            ep_pct = 100.0
-            entry_remaining_qty = 0.0
-        else:
-            if not (0 < partial_pct < 100):
-                qty_init = qty_total
-                target_q = 0.0
-                pe_done = True
-                ep_pct = 100.0
-                entry_remaining_qty = 0.0
-            else:
-                qty_init = qty_total * partial_pct / 100.0
-                target_q = qty_total
-                pe_done = False
-                ep_pct = partial_pct
-                entry_remaining_qty = qty_total - qty_init
-        fee = self._fee(price * qty_init)
+        fee = self._fee(price * qty_total)
         self.cash -= fee
         self.position_id += 1
         self._position_pnl = 0.0
         self.position = Position(
             position_id=self.position_id,
             side=side,
-            quantity=qty_init,
-            initial_quantity=qty_total,  # total objetivo (coherente con prorrateo de fees)
+            quantity=qty_total,
+            initial_quantity=qty_total,  # cantidad completa para riesgo y prorrateo de fees
             entry_price=price,
             entry_time=ts,
             entry_fee=fee,
@@ -522,15 +502,11 @@ class Backtester:
             breakeven=False,
             partial_done=False,
             partial2_done=False,
-            target_quantity=target_q,
-            partial_entry_done=pe_done,
-            entry_partial_pct=ep_pct,
-            entry_remaining_quantity=entry_remaining_qty,
             entry_bar_index=self._bar_index,
         )
         self.opened.append({
             "position_id": self.position_id, "time": ts, "price": price, "side": side,
-            "quantity": qty_init, "entry_pct": ep_pct, "target_quantity": target_q or qty_total,
+            "quantity": qty_total,
         })
 
     def close_position(self, percent: float, raw_price: float, ts: pd.Timestamp, reason: str):
@@ -738,57 +714,11 @@ class Backtester:
         if self.verbose: print(f"[STOP] {self.times[i]} fill={fill:.8f}", flush=True)
         return True
 
-    def add_position(self, raw_price: float, ts: pd.Timestamp):
-        """Completa al cierre de la vela la cantidad pendiente de la entrada."""
-        pos = self.position
-        if pos is None:
-            return
-        if pos.target_quantity <= 0:
-            pos.partial_entry_done = True
-            return
-        remaining_target = pos.entry_remaining_quantity
-        if remaining_target <= 1e-12:
-            # Compatibilidad con posiciones construidas manualmente (p. ej. tests
-            # antiguos) que no llevan el nuevo contador del tramo pendiente.
-            remaining_target = max(
-                0.0,
-                pos.target_quantity * (1.0 - pos.entry_partial_pct / 100.0),
-            )
-        if remaining_target <= 1e-12:
-            pos.partial_entry_done = True
-            return
-        qty_add = remaining_target
-        if qty_add <= 1e-12:
-            return
-        side = pos.side
-        price = self._price(raw_price, side)
-        if not np.isfinite(price) or price <= 0:
-            return
-        fee_add = self._fee(price * qty_add)
-        self.cash -= fee_add
-        total_qty_new = pos.quantity + qty_add
-        if total_qty_new > 0:
-            pos.entry_price = (pos.entry_price * pos.quantity + price * qty_add) / total_qty_new
-        pos.quantity = total_qty_new
-        pos.entry_fee += fee_add
-        self.adds.append({
-            "position_id": pos.position_id, "time": ts, "price": price,
-            "quantity": qty_add, "target_quantity": pos.target_quantity, "side": pos.side,
-        })
-        pos.entry_remaining_quantity = max(0.0, pos.entry_remaining_quantity - qty_add)
-        if pos.entry_remaining_quantity <= 1e-12:
-            pos.entry_remaining_quantity = 0.0
-            pos.partial_entry_done = True
-
     def _execute_target(self, i: int, target: int):
         if self.position is not None and self.position.side != target:
             self.close_position(100, self.o[i], self.times[i], CROSS_REASON)
         if self.position is None:
-            if self.cfg.entry_partial_enabled:
-                partial_pct = self.cfg.entry_partial_pct
-            else:
-                partial_pct = 100.0
-            self.open_position(target, self.o[i], self.times[i], partial_pct=partial_pct)
+            self.open_position(target, self.o[i], self.times[i])
 
     def _equity_value(self, close: float) -> float:
         """Equity mark-to-market al precio ``close`` (caja + posición a precio de liquidación)."""
@@ -847,19 +777,6 @@ class Backtester:
             stop_hit = self._stop(i)
             if not stop_hit:
                 self._manage(i)
-
-            # Completar al cierre la entrada parcial, salvo que ya se haya movido
-            # el stop a breakeven dentro de esta vela. En ese caso se cancela el
-            # tramo pendiente y se conserva únicamente la posición restante.
-            if (not stop_hit and self.position is not None and cfg.entry_partial_enabled
-                    and self.position.entry_bar_index == i
-                    and not self.position.partial_entry_done):
-                if self.position.breakeven:
-                    self.position.entry_remaining_quantity = 0.0
-                    self.position.partial_entry_done = True
-                else:
-                    close_time = self.times[i] + pd.Timedelta(cfg.timeframe)
-                    self.add_position(self.c[i], close_time)
 
             # Equity mark-to-market para el límite de pérdida mensual.
             equity_now = self._equity_value(self.c[i])
@@ -1069,11 +986,6 @@ def parse_args():
     p.add_argument("--partial-tp2-r", type=float, default=d.partial_tp2_r)
     p.add_argument("--partial-tp2-pct", type=float, default=d.partial_tp2_pct)
     p.add_argument("--breakeven-stop", action=argparse.BooleanOptionalAction, default=d.move_stop_to_breakeven)
-    # Entrada parcial: el segundo tramo se añade al cierre de la vela de entrada.
-    p.add_argument("--entry-partial", action=argparse.BooleanOptionalAction, default=d.entry_partial_enabled,
-                   help="Activa/desactiva entrada parcial (por defecto: 50%% al abrir y resto al cierre de esa vela).")
-    p.add_argument("--entry-partial-pct", type=float, default=d.entry_partial_pct,
-                   help="%% de la posición a entrar en la primera fase (default 50).")
     p.add_argument("--no-long", action="store_true")
     p.add_argument("--no-short", action="store_true")
     p.add_argument("--trend-timeframe", default=d.trend_timeframe,
@@ -1155,8 +1067,6 @@ def config_from_args(a) -> Config:
         partial_tp_enabled=a.partial_tp, partial_tp_r=a.partial_tp_r, partial_tp_pct=a.partial_tp_pct,
         partial_tp2_r=a.partial_tp2_r, partial_tp2_pct=a.partial_tp2_pct,
         move_stop_to_breakeven=a.breakeven_stop,
-        entry_partial_enabled=a.entry_partial,
-        entry_partial_pct=a.entry_partial_pct,
         trend_timeframe=a.trend_timeframe,
         monthly_loss_limit_pct=a.monthly_loss_limit_pct,
         monthly_loss_limit_close=a.monthly_loss_limit_close,
@@ -1200,8 +1110,6 @@ def main():
         adx_exit=adx_exit,
         weak_exit=weak_exit,
         rsi_div_exit=rsi_div_exit,
-        opens=engine.opened,
-        adds=engine.adds,
     )
 
 

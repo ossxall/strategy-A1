@@ -120,7 +120,6 @@ def test_backtester_also_filters_custom_entry_signals():
         ema_weakening_exit_enabled=False,
         rsi_divergence_exit_enabled=False,
         ema55_touch_exit_enabled=False,
-        entry_partial_enabled=False,
         streak_trend_only=False,
         monthly_loss_limit_pct=0,
         force_close_at_end=False,

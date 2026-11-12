@@ -31,8 +31,6 @@ def setup_entry():
     config = Config(
         timeframe="30min",
         stop_loss_pct=0.10,
-        entry_partial_enabled=True,
-        entry_partial_pct=50.0,
         entry_atr_enabled=False,
         entry_rsi_divergence_enabled=False,
         partial_tp_enabled=False,
@@ -49,39 +47,34 @@ def setup_entry():
     return index, bars, signals, config
 
 
-def test_entry_is_split_between_next_open_and_same_candle_close():
+def test_entry_opens_full_position_at_next_open_without_later_add():
     index, bars, signals, config = setup_entry()
     engine = Backtester(bars, config, signals=signals)
     engine.run()
 
     assert len(engine.opened) == 1
     assert engine.opened[0]["time"] == index[1]
-    assert engine.opened[0]["entry_pct"] == 50.0
-    assert len(engine.adds) == 1
-    assert engine.adds[0]["time"] == index[2]
-    assert engine.adds[0]["price"] == bars.iloc[1]["close"]
     assert engine.position is not None
-    assert engine.position.quantity == engine.position.target_quantity
-    assert engine.position.entry_price == 102.0
+    assert engine.opened[0]["quantity"] == engine.position.initial_quantity
+    assert engine.position.quantity == engine.position.initial_quantity
+    assert engine.position.entry_price == bars.iloc[1]["open"]
 
 
-def test_live_event_reports_add_at_close_of_entry_candle():
+def test_live_event_reports_single_full_entry_without_add_event():
     index, bars, signals, config = setup_entry()
     events = build_events(
         bars, signals, None, None, None, config, "BTCUSDT", "30m"
     )
 
     entry = next(event for event in events if event["event"] == "ENTRY")
-    add = next(event for event in events if event["event"] == "ENTRY_ADD")
     assert entry["signal_time"] == ts_ms(index[1])
     assert entry["payload"]
-    assert add["signal_time"] == ts_ms(index[2])
-    assert add["bar_time"] == ts_ms(index[1])
-    assert add["price"] == bars.iloc[1]["close"]
-    assert '"add_pct": 50.0' in add["payload"]
+    assert '"action": "OPEN"' in entry["payload"]
+    assert '"entry_pct": 100.0' in entry["payload"]
+    assert not any(event["event"] == "ENTRY_ADD" for event in events)
 
 
-def test_tp1_on_entry_candle_cancels_pending_add_after_moving_stop_to_breakeven():
+def test_tp1_on_entry_candle_keeps_exit_partial_without_entry_add():
     index, bars, signals, config = setup_entry()
     bars.loc[index[1], "high"] = 102.0
     config.stop_loss_pct = 0.01

@@ -138,11 +138,6 @@ class Config:
     partial_tp2_pct: float = 10.0
     move_stop_to_breakeven: bool = True
 
-    # --- Entrada parcial -----------------------------------------------------
-    # Abre `entry_partial_pct` % en la apertura posterior a la señal y añade el
-    # resto al cierre de esa vela, salvo que el stop ya haya pasado a breakeven.
-    entry_partial_enabled: bool = True
-    entry_partial_pct: float = 50.0        # % inicial (0 < pct < 100)
     # Sesgo de tendencia de timeframe superior, usado sólo después de una pérdida.
     trend_timeframe: str = "1D"
 
@@ -317,9 +312,6 @@ class Config:
                 raise ValueError("Configuración de take-profit parcial 2 inválida.")
             if self.partial_tp2_r <= self.partial_tp_r:
                 raise ValueError("partial_tp2_r debe ser mayor que partial_tp_r.")
-        if self.entry_partial_enabled:
-            if not (0 < self.entry_partial_pct < 100):
-                raise ValueError("entry_partial_pct debe estar en (0, 100).")
         if not (self.allow_long or self.allow_short):
             raise ValueError("Debe habilitarse LONG, SHORT o ambos.")
         if self.streak_trend_only and pd.Timedelta(self.trend_timeframe) <= pd.Timedelta(0):

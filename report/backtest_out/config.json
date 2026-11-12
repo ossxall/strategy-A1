@@ -74,8 +74,6 @@
   "partial_tp2_r": 1.75,
   "partial_tp2_pct": 10.0,
   "move_stop_to_breakeven": true,
-  "entry_partial_enabled": true,
-  "entry_partial_pct": 50.0,
   "trend_timeframe": "1D",
   "monthly_loss_limit_pct": 5.0,
   "monthly_loss_limit_close": true,
