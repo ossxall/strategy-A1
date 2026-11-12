@@ -502,6 +502,7 @@ class Backtester:
             breakeven=False,
             partial_done=False,
             partial2_done=False,
+            partial3_done=False,
             entry_bar_index=self._bar_index,
         )
         self.opened.append({
@@ -679,6 +680,18 @@ class Backtester:
         if risk_unit <= 0:
             return
         pos_after = pos
+        # TP3 primero para conservar el comportamiento de un solo parcial por
+        # vela: si se alcanza un objetivo lejano, se registra antes que TP1/TP2.
+        if cfg.partial_tp3_r > 0 and not pos.partial3_done:
+            trigger3 = pos.entry_price + pos.side * cfg.partial_tp3_r * risk_unit
+            hit3 = self.h[i] >= trigger3 if pos.side == 1 else self.l[i] <= trigger3
+            if hit3:
+                fill3 = max(trigger3, self.o[i]) if pos.side == 1 else min(trigger3, self.o[i])
+                self.close_position(cfg.partial_tp3_pct, fill3, self.times[i], f"PARTIAL_TP3_{cfg.partial_tp3_r:g}R")
+                pos_after = self.position
+                if pos_after is not None:
+                    pos_after.partial3_done = True
+                return
         # TP2 primero si no hecho y trigger alcanzado (mayor distancia)
         if cfg.partial_tp2_r > 0 and not pos.partial2_done:
             trigger2 = pos.entry_price + pos.side * cfg.partial_tp2_r * risk_unit
@@ -985,6 +998,8 @@ def parse_args():
     p.add_argument("--partial-tp-pct", type=float, default=d.partial_tp_pct)
     p.add_argument("--partial-tp2-r", type=float, default=d.partial_tp2_r)
     p.add_argument("--partial-tp2-pct", type=float, default=d.partial_tp2_pct)
+    p.add_argument("--partial-tp3-r", type=float, default=d.partial_tp3_r)
+    p.add_argument("--partial-tp3-pct", type=float, default=d.partial_tp3_pct)
     p.add_argument("--breakeven-stop", action=argparse.BooleanOptionalAction, default=d.move_stop_to_breakeven)
     p.add_argument("--no-long", action="store_true")
     p.add_argument("--no-short", action="store_true")
@@ -1066,6 +1081,7 @@ def config_from_args(a) -> Config:
         ema55_touch_short_exit_loss_pct=a.ema55_touch_short_exit_loss_pct,
         partial_tp_enabled=a.partial_tp, partial_tp_r=a.partial_tp_r, partial_tp_pct=a.partial_tp_pct,
         partial_tp2_r=a.partial_tp2_r, partial_tp2_pct=a.partial_tp2_pct,
+        partial_tp3_r=a.partial_tp3_r, partial_tp3_pct=a.partial_tp3_pct,
         move_stop_to_breakeven=a.breakeven_stop,
         trend_timeframe=a.trend_timeframe,
         monthly_loss_limit_pct=a.monthly_loss_limit_pct,

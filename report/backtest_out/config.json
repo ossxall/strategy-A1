@@ -73,6 +73,8 @@
   "partial_tp_pct": 25.0,
   "partial_tp2_r": 1.75,
   "partial_tp2_pct": 10.0,
+  "partial_tp3_r": 2.5,
+  "partial_tp3_pct": 10.0,
   "move_stop_to_breakeven": true,
   "trend_timeframe": "1D",
   "monthly_loss_limit_pct": 5.0,

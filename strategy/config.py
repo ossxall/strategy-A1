@@ -136,6 +136,9 @@ class Config:
     # the position. Partial 2 is intended to be at larger distance than TP1.
     partial_tp2_r: float = 1.75
     partial_tp2_pct: float = 10.0
+    # Third partial take-profit, at a larger distance than TP2.
+    partial_tp3_r: float = 2.5
+    partial_tp3_pct: float = 10.0
     move_stop_to_breakeven: bool = True
 
     # Sesgo de tendencia de timeframe superior, usado sólo después de una pérdida.
@@ -312,6 +315,11 @@ class Config:
                 raise ValueError("Configuración de take-profit parcial 2 inválida.")
             if self.partial_tp2_r <= self.partial_tp_r:
                 raise ValueError("partial_tp2_r debe ser mayor que partial_tp_r.")
+        if self.partial_tp3_r > 0 or self.partial_tp3_pct > 0:
+            if self.partial_tp3_r <= 0 or not 0 < self.partial_tp3_pct <= 100:
+                raise ValueError("Configuración de take-profit parcial 3 inválida.")
+            if self.partial_tp3_r <= self.partial_tp2_r:
+                raise ValueError("partial_tp3_r debe ser mayor que TP2.")
         if not (self.allow_long or self.allow_short):
             raise ValueError("Debe habilitarse LONG, SHORT o ambos.")
         if self.streak_trend_only and pd.Timedelta(self.trend_timeframe) <= pd.Timedelta(0):
