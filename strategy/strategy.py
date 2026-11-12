@@ -508,6 +508,7 @@ class Backtester:
             partial_done=False,
             partial2_done=False,
             partial3_done=False,
+            partial4_done=False,
             entry_bar_index=self._bar_index,
         )
         self.opened.append({
@@ -701,8 +702,18 @@ class Backtester:
         if risk_unit <= 0:
             return
         pos_after = pos
-        # TP3 primero para conservar el comportamiento de un solo parcial por
-        # vela: si se alcanza un objetivo lejano, se registra antes que TP1/TP2.
+        # Objetivos de mayor distancia primero para conservar un solo parcial
+        # por vela cuando el rango alcanza varios niveles.
+        if cfg.partial_tp4_r > 0 and not pos.partial4_done:
+            trigger4 = pos.entry_price + pos.side * cfg.partial_tp4_r * risk_unit
+            hit4 = self.h[i] >= trigger4 if pos.side == 1 else self.l[i] <= trigger4
+            if hit4:
+                fill4 = max(trigger4, self.o[i]) if pos.side == 1 else min(trigger4, self.o[i])
+                self.close_position(cfg.partial_tp4_pct, fill4, self.times[i], f"PARTIAL_TP4_{cfg.partial_tp4_r:g}R")
+                pos_after = self.position
+                if pos_after is not None:
+                    pos_after.partial4_done = True
+                return
         if cfg.partial_tp3_r > 0 and not pos.partial3_done:
             trigger3 = pos.entry_price + pos.side * cfg.partial_tp3_r * risk_unit
             hit3 = self.h[i] >= trigger3 if pos.side == 1 else self.l[i] <= trigger3
@@ -1027,6 +1038,8 @@ def parse_args():
     p.add_argument("--partial-tp2-pct", type=float, default=d.partial_tp2_pct)
     p.add_argument("--partial-tp3-r", type=float, default=d.partial_tp3_r)
     p.add_argument("--partial-tp3-pct", type=float, default=d.partial_tp3_pct)
+    p.add_argument("--partial-tp4-r", type=float, default=d.partial_tp4_r)
+    p.add_argument("--partial-tp4-pct", type=float, default=d.partial_tp4_pct)
     p.add_argument("--tp3-ema-slow-penetration-pct", type=float,
                    default=d.tp3_ema_slow_penetration_pct,
                    help="Ruptura porcentual de EMA lenta requerida para cerrar SHORT tras TP3 (default 0.1%%).")
@@ -1112,6 +1125,7 @@ def config_from_args(a) -> Config:
         partial_tp_enabled=a.partial_tp, partial_tp_r=a.partial_tp_r, partial_tp_pct=a.partial_tp_pct,
         partial_tp2_r=a.partial_tp2_r, partial_tp2_pct=a.partial_tp2_pct,
         partial_tp3_r=a.partial_tp3_r, partial_tp3_pct=a.partial_tp3_pct,
+        partial_tp4_r=a.partial_tp4_r, partial_tp4_pct=a.partial_tp4_pct,
         tp3_ema_slow_penetration_pct=a.tp3_ema_slow_penetration_pct,
         move_stop_to_breakeven=a.breakeven_stop,
         trend_timeframe=a.trend_timeframe,

@@ -19,6 +19,7 @@ class Position:
     # Índice de barra de entrada, usado por salidas que evalúan velas desde la apertura.
     entry_bar_index: int = -1
     partial3_done: bool = False
+    partial4_done: bool = False
 
 
 @dataclass

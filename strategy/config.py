@@ -139,6 +139,9 @@ class Config:
     # Third partial take-profit, at a larger distance than TP2.
     partial_tp3_r: float = 2.5
     partial_tp3_pct: float = 10.0
+    # Fourth partial take-profit, at a larger distance than TP3.
+    partial_tp4_r: float = 3.25
+    partial_tp4_pct: float = 10.0
     # Tras TP3, el SHORT restante sale si el precio supera EMA lenta por este %.
     # 0 = basta con tocarla.
     tp3_ema_slow_penetration_pct: float = 1.25
@@ -325,6 +328,11 @@ class Config:
                 raise ValueError("Configuración de take-profit parcial 3 inválida.")
             if self.partial_tp3_r <= self.partial_tp2_r:
                 raise ValueError("partial_tp3_r debe ser mayor que TP2.")
+        if self.partial_tp4_r > 0 or self.partial_tp4_pct > 0:
+            if self.partial_tp4_r <= 0 or not 0 < self.partial_tp4_pct <= 100:
+                raise ValueError("Configuración de take-profit parcial 4 inválida.")
+            if self.partial_tp4_r <= self.partial_tp3_r:
+                raise ValueError("partial_tp4_r debe ser mayor que TP3.")
         if not (self.allow_long or self.allow_short):
             raise ValueError("Debe habilitarse LONG, SHORT o ambos.")
         if self.streak_trend_only and pd.Timedelta(self.trend_timeframe) <= pd.Timedelta(0):

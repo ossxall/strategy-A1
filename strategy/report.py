@@ -664,6 +664,9 @@ def build_backtest_figure(
         if cfg.partial_tp3_r > 0 and cfg.stop_loss_pct > 0:
             _level_trace(f"TP3 {cfg.partial_tp3_r:g}R", TARGET_COLOR, "dot",
                          lambda s, sign: s["entry_price"] * (1 + sign * cfg.partial_tp3_r * cfg.stop_loss_pct))
+        if cfg.partial_tp4_r > 0 and cfg.stop_loss_pct > 0:
+            _level_trace(f"TP4 {cfg.partial_tp4_r:g}R", TARGET_COLOR, "dashdot",
+                         lambda s, sign: s["entry_price"] * (1 + sign * cfg.partial_tp4_r * cfg.stop_loss_pct))
         if cfg.move_stop_to_breakeven:
             _level_trace("breakeven", BREAKEVEN_COLOR, "dot", lambda s, sign: s["entry_price"])
 
