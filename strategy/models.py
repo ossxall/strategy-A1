@@ -20,6 +20,7 @@ class Position:
     entry_bar_index: int = -1
     partial3_done: bool = False
     partial4_done: bool = False
+    partial5_done: bool = False
 
 
 @dataclass

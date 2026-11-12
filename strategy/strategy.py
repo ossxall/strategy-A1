@@ -509,6 +509,7 @@ class Backtester:
             partial2_done=False,
             partial3_done=False,
             partial4_done=False,
+            partial5_done=False,
             entry_bar_index=self._bar_index,
         )
         self.opened.append({
@@ -704,6 +705,16 @@ class Backtester:
         pos_after = pos
         # Objetivos de mayor distancia primero para conservar un solo parcial
         # por vela cuando el rango alcanza varios niveles.
+        if cfg.partial_tp5_r > 0 and not pos.partial5_done:
+            trigger5 = pos.entry_price + pos.side * cfg.partial_tp5_r * risk_unit
+            hit5 = self.h[i] >= trigger5 if pos.side == 1 else self.l[i] <= trigger5
+            if hit5:
+                fill5 = max(trigger5, self.o[i]) if pos.side == 1 else min(trigger5, self.o[i])
+                self.close_position(cfg.partial_tp5_pct, fill5, self.times[i], f"PARTIAL_TP5_{cfg.partial_tp5_r:g}R")
+                pos_after = self.position
+                if pos_after is not None:
+                    pos_after.partial5_done = True
+                return
         if cfg.partial_tp4_r > 0 and not pos.partial4_done:
             trigger4 = pos.entry_price + pos.side * cfg.partial_tp4_r * risk_unit
             hit4 = self.h[i] >= trigger4 if pos.side == 1 else self.l[i] <= trigger4
@@ -1040,6 +1051,8 @@ def parse_args():
     p.add_argument("--partial-tp3-pct", type=float, default=d.partial_tp3_pct)
     p.add_argument("--partial-tp4-r", type=float, default=d.partial_tp4_r)
     p.add_argument("--partial-tp4-pct", type=float, default=d.partial_tp4_pct)
+    p.add_argument("--partial-tp5-r", type=float, default=d.partial_tp5_r)
+    p.add_argument("--partial-tp5-pct", type=float, default=d.partial_tp5_pct)
     p.add_argument("--tp3-ema-slow-penetration-pct", type=float,
                    default=d.tp3_ema_slow_penetration_pct,
                    help="Ruptura porcentual de EMA lenta requerida para cerrar SHORT tras TP3 (default 0.1%%).")
@@ -1126,6 +1139,7 @@ def config_from_args(a) -> Config:
         partial_tp2_r=a.partial_tp2_r, partial_tp2_pct=a.partial_tp2_pct,
         partial_tp3_r=a.partial_tp3_r, partial_tp3_pct=a.partial_tp3_pct,
         partial_tp4_r=a.partial_tp4_r, partial_tp4_pct=a.partial_tp4_pct,
+        partial_tp5_r=a.partial_tp5_r, partial_tp5_pct=a.partial_tp5_pct,
         tp3_ema_slow_penetration_pct=a.tp3_ema_slow_penetration_pct,
         move_stop_to_breakeven=a.breakeven_stop,
         trend_timeframe=a.trend_timeframe,
