@@ -153,7 +153,7 @@ class Config:
     partial_tp7_pct: float = 10.0
     # Tras TP3, el SHORT restante sale si el precio supera EMA lenta por este %.
     # 0 = basta con tocarla.
-    tp3_ema_slow_penetration_pct: float = 1.25
+    tp3_ema_slow_penetration_pct: float = 1.75
     move_stop_to_breakeven: bool = True
 
     # Sesgo de tendencia de timeframe superior, usado sólo después de una pérdida.
