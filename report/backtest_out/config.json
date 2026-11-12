@@ -65,7 +65,7 @@
   "rsi_short_exit_len": 14,
   "rsi_short_exit_threshold": 30.0,
   "rsi_short_exit_timeframe": "30min",
-  "ema55_touch_exit_enabled": true,
+  "ema55_touch_exit_enabled": false,
   "ema55_touch_tolerance_pct": 0.1,
   "ema55_touch_lookback_bars": 5,
   "ema55_touch_min_touches": 3,

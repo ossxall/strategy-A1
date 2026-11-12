@@ -424,6 +424,11 @@ class Backtester:
                  rsi_div_exit: Optional[np.ndarray] = None, verbose: bool = False):
         self.bars, self.cfg, self.verbose = bars, config, verbose
         self.signals = signals if signals is not None else EMACrossStrategy(config).generate_signals(bars)
+        self.ema_fast_line = (
+            self.signals["ema_fast"].to_numpy(float)
+            if "ema_fast" in self.signals
+            else ema(bars.close, config.ema_fast).to_numpy(float)
+        )
         if config.entry_atr_enabled:
             if "atr_filter_allowed" in self.signals:
                 self.entry_atr_allowed = self.signals["atr_filter_allowed"].to_numpy(bool)
@@ -737,6 +742,21 @@ class Backtester:
             return RSI_DIVERGENCE_BULL_REASON
         return None
 
+    def _first_candle_ema_fast_exit_reason(self, i: int) -> Optional[str]:
+        """Cierra si la vela posterior a la primera ejecución confirma contra EMA rápida."""
+        pos = self.position
+        if (pos is None or pos.entry_bar_index < 0
+                or i != pos.entry_bar_index + 1 or i >= len(self.ema_fast_line)):
+            return None
+        fast = self.ema_fast_line[i]
+        if not np.isfinite(fast):
+            return None
+        if pos.side == 1 and self.c[i] < fast:
+            return "FIRST_CANDLE_EMA_FAST_EXIT"
+        if pos.side == -1 and self.c[i] > fast:
+            return "FIRST_CANDLE_EMA_FAST_EXIT"
+        return None
+
     def _ema55_touch_weakness_exit_reason(self, i: int) -> Optional[str]:
         """Cierra LONG tras toques repetidos a EMA55 sin ruptura confirmada.
 
@@ -992,7 +1012,15 @@ class Backtester:
                           f"-{cfg.monthly_loss_limit_pct:g}% alcanzado; sin entradas hasta "
                           f"{scope}", flush=True)
 
-            if not stop_hit and bool(self.signals["valid"].iloc[i]):
+            first_candle_exit = (
+                self._first_candle_ema_fast_exit_reason(i)
+                if not stop_hit else None
+            )
+            if first_candle_exit is not None:
+                # La condición se conoce al cierre de la vela posterior a la
+                # primera ejecución y se liquida en la apertura siguiente.
+                self.pending_exit = (first_candle_exit, 100.0)
+            elif not stop_hit and bool(self.signals["valid"].iloc[i]):
                 target = int(self.signals["target"].iloc[i])
                 if cfg.entry_atr_enabled and not self.entry_atr_allowed[i]:
                     target = 0

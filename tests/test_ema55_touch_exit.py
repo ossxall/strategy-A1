@@ -44,6 +44,8 @@ def make_engine(closes, touches, *, side=1, timeframe="30min", entry_bar=0):
         {"valid": True, "target": 0, "trend_bias": 0}, index=bars.index
     )
     engine = Backtester(bars, config, signals=signals)
+    # Aísla las pruebas de EMA55 de la nueva salida de confirmación por EMA rápida.
+    engine.ema_fast_line = np.full(len(bars), 90.0 if side == 1 else 110.0)
     engine.ema55_line = np.full(len(bars), 100.0)
     engine.ema55_touches = np.asarray(touches, dtype=bool)
     engine.position = Position(

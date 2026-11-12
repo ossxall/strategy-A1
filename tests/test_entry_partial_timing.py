@@ -71,6 +71,43 @@ def test_entry_is_split_between_next_open_and_same_candle_close():
 
 
 @pytest.mark.parametrize(
+    ("side", "following_close", "should_exit"),
+    [
+        (1, 99.0, True),   # LONG: cierre por debajo de EMA rápida
+        (1, 100.0, False), # LONG: igualdad no cuenta como estar por debajo
+        (-1, 101.0, True), # SHORT: cierre por encima de EMA rápida
+        (-1, 100.0, False),# SHORT: igualdad no cuenta como estar por encima
+    ],
+)
+def test_first_candle_after_entry_closes_against_fast_ema(
+    side, following_close, should_exit
+):
+    index, bars, signals, config = setup_entry()
+    config.rsi_short_exit_enabled = False
+    signals.loc[index[0], "target"] = side
+
+    # La entrada se ejecuta en la apertura de index[1]. La condición se
+    # comprueba al cierre de index[2] y, si aplica, se ejecuta en index[3].
+    bars.loc[index[2], ["open", "high", "low", "close"]] = [
+        100.0, max(100.5, following_close), min(99.5, following_close), following_close
+    ]
+    next_index = index[-1] + pd.Timedelta("30min")
+    bars.loc[next_index] = [100.0, 100.5, 99.5, 100.0, 1.0]
+    signals.loc[next_index] = signals.iloc[-1]
+
+    engine = Backtester(bars, config, signals=signals)
+    engine.run()
+
+    if should_exit:
+        assert engine.position is None
+        assert engine.trades[-1].reason == "FIRST_CANDLE_EMA_FAST_EXIT"
+        assert engine.trades[-1].exit_time == next_index
+    else:
+        assert engine.position is not None
+        assert not engine.trades
+
+
+@pytest.mark.parametrize(
     ("side", "close", "expected_add"),
     [
         (1, 101.0, True),
