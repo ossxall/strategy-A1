@@ -74,6 +74,7 @@ def test_atr_filter_is_applied_to_both_long_and_short_entries(monkeypatch):
         entry_adx_enabled=False,
         entry_mfi_risk_scaling_enabled=False,
         entry_er_risk_scaling_enabled=False,
+        entry_price_ema_filter_enabled=False,
         streak_trend_only=False,
     )
 

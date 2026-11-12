@@ -225,6 +225,7 @@ _CONFIG_ENV = {
     "entry_atr_lookback": ("STRATEGY_ENTRY_ATR_LOOKBACK", env_int),
     "entry_atr_min_ratio": ("STRATEGY_ENTRY_ATR_MIN_RATIO", env_float),
     "entry_atr_max_ratio": ("STRATEGY_ENTRY_ATR_MAX_RATIO", env_float),
+    "entry_price_ema_filter_enabled": ("STRATEGY_ENTRY_PRICE_EMA_FILTER", env_bool),
     "entry_mfi_risk_scaling_enabled": ("STRATEGY_ENTRY_MFI_RISK_SCALING", env_bool),
     "entry_mfi_len": ("STRATEGY_ENTRY_MFI_LEN", env_int),
     "entry_mfi_risk_base": ("STRATEGY_ENTRY_MFI_RISK_BASE", env_float),

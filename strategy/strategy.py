@@ -25,6 +25,10 @@ Archivo único con API reutilizable para backtesting y bots.
 
 Protecciones de riesgo (ver `Config`):
 
+* `entry_price_ema_filter_enabled` (default True): tras confirmarse un cruce
+  alcista no se entra si el cierre queda por debajo de las EMAs rápida y lenta;
+  tras un cruce bajista no se entra si queda por encima de ambas. Evita
+  entradas contra el precio cuando el cruce ya se ha girado.
 * `streak_trend_only` (default True): tras una posición cerrada en pérdida,
   la siguiente entrada sólo se abre si la señal coincide con el sesgo de
   tendencia de `trend_timeframe` (vela superior ya cerrada, sin lookahead).
@@ -316,6 +320,12 @@ class EMACrossStrategy:
             up, down = up & allowed, down & allowed
         up, down = up & atr_allowed, down & atr_allowed
         up, down = up & (macd_line > 0), down & (macd_line < 0)
+        if cfg.entry_price_ema_filter_enabled:
+            # Tras un cruce alcista no se entra si el precio queda por debajo
+            # de ambas EMAs; tras un bajista, no se entra si queda por encima.
+            price = bars.close.to_numpy(float)
+            up &= ~((price < fast) & (price < slow))
+            down &= ~((price > fast) & (price > slow))
         bias = self.trend_bias(bars) if cfg.streak_trend_only else None
         up &= valid
         down &= valid
@@ -985,6 +995,10 @@ def parse_args():
                    help="Bloquea ATR por debajo de esta fracción de su media (default 0.5).")
     p.add_argument("--entry-atr-max-ratio", type=float, default=d.entry_atr_max_ratio,
                    help="Bloquea ATR por encima de este múltiplo de su media (default 2.5).")
+    p.add_argument("--entry-price-ema-filter", action=argparse.BooleanOptionalAction,
+                   default=d.entry_price_ema_filter_enabled,
+                   help="Bloquea entradas si el precio queda en el lado contrario de ambas EMAs del cruce "
+                        "(activo por defecto).")
     p.add_argument("--entry-rsi-divergence-filter", action=argparse.BooleanOptionalAction,
                    default=d.entry_rsi_divergence_enabled,
                    help="Bloquea LONG con divergencia alcista y SHORT con bajista (activado por defecto).")
@@ -1127,6 +1141,7 @@ def config_from_args(a) -> Config:
         entry_atr_lookback=a.entry_atr_lookback,
         entry_atr_min_ratio=a.entry_atr_min_ratio,
         entry_atr_max_ratio=a.entry_atr_max_ratio,
+        entry_price_ema_filter_enabled=a.entry_price_ema_filter,
         entry_rsi_divergence_enabled=a.entry_rsi_divergence_filter,
         entry_rsi_divergence_lookback=a.entry_rsi_divergence_lookback,
         entry_mfi_risk_scaling_enabled=a.entry_mfi_risk_scaling,

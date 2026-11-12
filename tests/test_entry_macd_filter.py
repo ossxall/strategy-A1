@@ -44,6 +44,7 @@ def make_config():
         entry_adx_enabled=False,
         entry_mfi_risk_scaling_enabled=False,
         entry_er_risk_scaling_enabled=False,
+        entry_price_ema_filter_enabled=False,
         streak_trend_only=False,
     )
 

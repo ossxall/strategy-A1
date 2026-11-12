@@ -58,6 +58,7 @@ def test_entries_are_filtered_by_recent_divergence_in_the_same_direction(monkeyp
         entry_mfi_risk_scaling_enabled=False,
         entry_er_risk_scaling_enabled=False,
         entry_rsi_divergence_lookback=2,
+        entry_price_ema_filter_enabled=False,
         streak_trend_only=False,
     )
 

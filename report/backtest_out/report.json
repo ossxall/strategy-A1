@@ -1,6 +1,6 @@
 {
   "strategy": "strategy2_ema_cross",
-  "generated_at": "2026-11-12T05:02:53.683154+00:00",
+  "generated_at": "2026-11-12T14:37:17.217935+00:00",
   "dataset": {
     "source": "dataset/binance/BTCUSDT/merged/BTCUSDT-1m.parquet",
     "bars": 118320,
@@ -38,6 +38,7 @@
     "entry_atr_lookback": 50,
     "entry_atr_min_ratio": 0.5,
     "entry_atr_max_ratio": 2.5,
+    "entry_price_ema_filter_enabled": true,
     "entry_rsi_divergence_enabled": true,
     "entry_rsi_divergence_lookback": 20,
     "entry_mfi_risk_scaling_enabled": true,
@@ -113,50 +114,50 @@
   },
   "metrics": {
     "initial_capital": 10000.0,
-    "final_equity": 109529.17635758224,
-    "net_pnl": 99529.17635758237,
-    "return_pct": 995.2917635758224,
+    "final_equity": 111049.7056292952,
+    "net_pnl": 101049.70562929526,
+    "return_pct": 1010.4970562929519,
     "max_drawdown_pct": -10.445033740003796,
-    "max_dd_peak_equity": 26610.149633844027,
-    "max_dd_trough_equity": 23830.71052632352,
-    "max_dd_peak_vs_capital_pct": 166.10149633844026,
-    "max_dd_trough_vs_capital_pct": 138.3071052632352,
+    "max_dd_peak_equity": 26604.988652142954,
+    "max_dd_trough_equity": 23826.088610902443,
+    "max_dd_peak_vs_capital_pct": 166.04988652142953,
+    "max_dd_trough_vs_capital_pct": 138.26088610902443,
     "min_equity": 9982.187879749863,
     "min_equity_vs_capital_pct": -0.17812120250136898,
-    "return_over_maxdd": 95.2885158966907,
-    "sharpe_daily_365": 2.288050235532108,
-    "sortino_daily_365": 5.210483332137264,
-    "legs": 1102,
-    "positions": 391,
-    "wins": 230,
-    "losses": 161,
-    "win_rate_pct": 58.82352941176471,
-    "profit_factor": 2.5939773726227906,
-    "avg_pnl": 254.5503231651723,
-    "expectancy_r": 0.6605022922679046,
-    "max_consecutive_losses": 6
+    "return_over_maxdd": 96.74425965928806,
+    "sharpe_daily_365": 2.2994586977329954,
+    "sortino_daily_365": 5.244777134028758,
+    "legs": 1095,
+    "positions": 385,
+    "wins": 227,
+    "losses": 158,
+    "win_rate_pct": 58.96103896103896,
+    "profit_factor": 2.6183478648341074,
+    "avg_pnl": 262.46676786829937,
+    "expectancy_r": 0.6767203301233493,
+    "max_consecutive_losses": 5
   },
   "by_side": {
     "LONG": {
-      "positions": 212,
-      "wins": 119,
-      "losses": 93,
-      "win_rate_pct": 56.132075471698116,
-      "profit_factor": 2.9990702859940943,
-      "net_pnl": 69149.44544429315,
-      "avg_pnl": 326.17662945421296,
-      "expectancy_r": 0.8511860181547573,
-      "max_consecutive_losses": 6
+      "positions": 208,
+      "wins": 118,
+      "losses": 90,
+      "win_rate_pct": 56.730769230769226,
+      "profit_factor": 3.08184881652222,
+      "net_pnl": 70964.6277424159,
+      "avg_pnl": 341.1760949154611,
+      "expectancy_r": 0.8815224379066982,
+      "max_consecutive_losses": 5
     },
     "SHORT": {
-      "positions": 179,
-      "wins": 111,
+      "positions": 177,
+      "wins": 109,
       "losses": 68,
-      "win_rate_pct": 62.01117318435754,
-      "profit_factor": 2.0908353716083274,
-      "net_pnl": 30379.730913289237,
-      "avg_pnl": 169.71916711334768,
-      "expectancy_r": 0.434664583396325,
+      "win_rate_pct": 61.5819209039548,
+      "profit_factor": 2.061099888551316,
+      "net_pnl": 30085.07788687935,
+      "avg_pnl": 169.97219145129577,
+      "expectancy_r": 0.4360489266265325,
       "max_consecutive_losses": 8
     }
   },
@@ -164,82 +165,82 @@
     "PARTIAL_TP2_1.5R": {
       "legs": 130,
       "positions": 130,
-      "pnl_net": 8545.274939343346
+      "pnl_net": 8649.15728762675
     },
     "PARTIAL_TP5_3R": {
       "legs": 74,
       "positions": 74,
-      "pnl_net": 7311.4562036959815
+      "pnl_net": 7401.217551074152
     },
     "PARTIAL_TP4_2.5R": {
       "legs": 81,
       "positions": 81,
-      "pnl_net": 7477.121718049226
+      "pnl_net": 7572.7323744562345
     },
     "PARTIAL_TP3_2R": {
       "legs": 105,
       "positions": 105,
-      "pnl_net": 8161.408198811883
+      "pnl_net": 8266.23958215981
     },
     "PARTIAL_TP_1R": {
-      "legs": 204,
-      "positions": 204,
-      "pnl_net": 9597.405223593767
+      "legs": 203,
+      "positions": 203,
+      "pnl_net": 9700.40001379624
     },
     "PARTIAL_TP6_3.5R": {
       "legs": 58,
       "positions": 58,
-      "pnl_net": 6427.375311089791
+      "pnl_net": 6487.556904461929
     },
     "PARTIAL_TP7_4R": {
       "legs": 59,
       "positions": 59,
-      "pnl_net": 6263.478610896911
+      "pnl_net": 6316.659411075655
     },
     "BREAKEVEN": {
-      "legs": 140,
-      "positions": 140,
-      "pnl_net": -433.4514957655739
+      "legs": 139,
+      "positions": 139,
+      "pnl_net": -439.46884848470324
     },
     "STOP_LOSS_1.00%": {
-      "legs": 124,
-      "positions": 124,
-      "pnl_net": -55618.291342099765
+      "legs": 121,
+      "positions": 121,
+      "pnl_net": -55465.451733573645
     },
     "ADX_1440M_REVERSAL": {
-      "legs": 74,
-      "positions": 74,
-      "pnl_net": 45789.44434581434
+      "legs": 73,
+      "positions": 73,
+      "pnl_net": 46101.53476653216
     },
     "EMA_SLOW_TOUCH_SHORT_AFTER_TP3": {
       "legs": 14,
       "positions": 14,
-      "pnl_net": 28469.499936453696
+      "pnl_net": 28737.803615925004
     },
     "EMA_WEAKENING_4H_1D_EMA21/55": {
-      "legs": 17,
-      "positions": 17,
-      "pnl_net": 4932.516273938599
+      "legs": 16,
+      "positions": 16,
+      "pnl_net": 4780.411521708582
     },
     "EMA55_REPEATED_TOUCH_WEAKNESS": {
       "legs": 9,
       "positions": 9,
-      "pnl_net": -3482.321271911883
+      "pnl_net": -3519.4519284228554
     },
     "RSI_DIVERGENCE_BEAR": {
       "legs": 5,
       "positions": 5,
-      "pnl_net": 6415.558288613017
+      "pnl_net": 6527.623237237996
     },
     "EMA_CROSS_EXIT": {
       "legs": 5,
       "positions": 5,
-      "pnl_net": 19218.069326307283
+      "pnl_net": 19478.197957893426
     },
     "RSI_DIVERGENCE_BULL": {
       "legs": 3,
       "positions": 3,
-      "pnl_net": 454.63209075175746
+      "pnl_net": 454.5439158285283
     }
   }
 }
