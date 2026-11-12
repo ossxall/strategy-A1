@@ -287,6 +287,41 @@ def spread_flags(flags: np.ndarray, window: int) -> np.ndarray:
     return (cumulative[idx + 1] - cumulative[start]) > 0
 
 
+def volume_decline_flags(
+    volume: np.ndarray | pd.Series, bars: int = 10, min_drop_pct: float = 20.0
+) -> np.ndarray:
+    """Detecta volumen decreciente en la ventana de las últimas ``bars`` velas.
+
+    Divide la ventana en dos mitades (una antigua y otra reciente) y compara sus
+    medias: hay señal cuando la media reciente cae al menos ``min_drop_pct`` %
+    respecto de la antigua. Con ``bars`` impar, la mitad antigua recibe la vela
+    extra. Cada posición se evalúa usando sólo velas hasta esa barra, por lo que
+    no hay lookahead. Devuelve un array booleano alineado con ``volume``.
+    """
+    values = np.asarray(volume, dtype=float)
+    flags = np.zeros(len(values), dtype=bool)
+    if bars < 2 or min_drop_pct < 0 or len(values) < bars:
+        return flags
+    recent_len = bars // 2
+    older_len = bars - recent_len
+    series = pd.Series(values)
+    recent = series.rolling(recent_len, min_periods=recent_len).mean().to_numpy(float)
+    older = (
+        series.shift(recent_len)
+        .rolling(older_len, min_periods=older_len)
+        .mean()
+        .to_numpy(float)
+    )
+    with np.errstate(divide="ignore", invalid="ignore"):
+        decline = 1.0 - recent / older
+    return (
+        np.isfinite(decline)
+        & (older > 0)
+        & (decline > 0)
+        & (decline * 100.0 + 1e-9 >= min_drop_pct)
+    )
+
+
 def _adx_exit_flags(
     raw: pd.DataFrame, bars: pd.DataFrame, cfg: Config, timeframe: str
 ) -> np.ndarray | None:

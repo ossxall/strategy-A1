@@ -23,6 +23,8 @@ class Position:
     partial5_done: bool = False
     partial6_done: bool = False
     partial7_done: bool = False
+    # Salida parcial por volumen decreciente (una vez por posición).
+    volume_exit_done: bool = False
 
 
 @dataclass
@@ -51,6 +53,8 @@ MONTHLY_LIMIT_REASON = "MONTHLY_LOSS_LIMIT"
 #: un LONG (`RSI_DIVERGENCE_BEAR`) y la alcista cierra un SHORT.
 RSI_DIVERGENCE_BULL_REASON = "RSI_DIVERGENCE_BULL"
 RSI_DIVERGENCE_BEAR_REASON = "RSI_DIVERGENCE_BEAR"
+#: Salida parcial cuando el volumen cae en las últimas `volume_exit_bars` velas.
+VOLUME_DECLINE_REASON = "VOLUME_DECLINE"
 DEFAULT_OUTPUT_DIR = "report/backtest_out"
 
 

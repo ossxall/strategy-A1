@@ -291,6 +291,11 @@ _CONFIG_ENV = {
     "ema55_touch_breakout_buffer_pct": ("STRATEGY_EMA55_TOUCH_BREAKOUT_BUFFER_PCT", env_float),
     "ema55_touch_exit_loss_pct": ("STRATEGY_EMA55_TOUCH_EXIT_LOSS_PCT", env_float),
     "ema55_touch_short_exit_loss_pct": ("STRATEGY_EMA55_TOUCH_SHORT_EXIT_LOSS_PCT", env_float),
+    # Salida parcial por volumen decreciente en las últimas N velas.
+    "volume_exit_enabled": ("STRATEGY_VOLUME_EXIT", env_bool),
+    "volume_exit_bars": ("STRATEGY_VOLUME_EXIT_BARS", env_int),
+    "volume_exit_pct": ("STRATEGY_VOLUME_EXIT_PCT", env_float),
+    "volume_exit_min_drop_pct": ("STRATEGY_VOLUME_EXIT_MIN_DROP_PCT", env_float),
     "timestamp_is_close": ("STRATEGY_TIMESTAMP_IS_CLOSE", env_bool),
 }
 

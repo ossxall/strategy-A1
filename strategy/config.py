@@ -129,6 +129,17 @@ class Config:
     ema55_touch_exit_loss_pct: float = 0.7        # LONG
     ema55_touch_short_exit_loss_pct: float = 0.9  # SHORT, umbral más estricto
 
+    # --- Salida parcial por volumen decreciente ----------------------------
+    # Cierra `volume_exit_pct` % de la posición (una vez por posición) cuando la
+    # media de volumen de la mitad reciente de las últimas `volume_exit_bars`
+    # velas cae al menos `volume_exit_min_drop_pct` % respecto de la mitad
+    # anterior. Ej.: con 10 velas y 20 %, la media de las 5 últimas debe ser
+    # <= 80 % de la media de las 5 anteriores.
+    volume_exit_enabled: bool = True
+    volume_exit_bars: int = 10
+    volume_exit_pct: float = 25.0
+    volume_exit_min_drop_pct: float = 20.0
+
     # Gestión de salida orientada a reducir la racha de pérdidas en whipsaw:
     # al alcanzar `partial_tp_r` veces el riesgo inicial se asegura beneficio
     # cerrando `partial_tp_pct` de la posición y, opcionalmente, se mueve el
@@ -330,6 +341,13 @@ class Config:
         if min(self.ema55_touch_lookback_bars, self.ema55_touch_min_touches,
                self.ema55_touch_consecutive) < 1:
             raise ValueError("La ventana y los conteos de toques EMA55 deben ser >= 1.")
+        if self.volume_exit_enabled:
+            if self.volume_exit_bars < 2:
+                raise ValueError("volume_exit_bars debe ser >= 2.")
+            if not 0 < self.volume_exit_pct <= 100:
+                raise ValueError("volume_exit_pct debe estar en (0, 100].")
+            if not 0 <= self.volume_exit_min_drop_pct < 100:
+                raise ValueError("volume_exit_min_drop_pct debe estar en [0, 100).")
         if self.partial_tp_enabled:
             if self.partial_tp_r <= 0 or not 0 < self.partial_tp_pct <= 100:
                 raise ValueError("Configuración de take-profit parcial inválida.")

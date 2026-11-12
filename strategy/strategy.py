@@ -21,6 +21,11 @@ con máximos más altos, RSI con máximos más bajos) cierra un LONG y la alcist
 pivote de precio se confirma tras `rsi_divergence_pivot` velas y se compara con
 el pivote anterior del mismo tipo en `rsi_divergence_lookback` velas.
 
+Además, una **caída de volumen en las últimas `volume_exit_bars` velas** cierra
+`volume_exit_pct` % de la posición (una vez por posición): se compara la media
+de volumen de la mitad reciente del rango con la de la mitad anterior y se exige
+una caída mínima de `volume_exit_min_drop_pct` % (`volume_exit_enabled`).
+
 Archivo único con API reutilizable para backtesting y bots.
 
 Protecciones de riesgo (ver `Config`):
@@ -79,6 +84,7 @@ from strategy.models import (
     MONTHLY_LIMIT_REASON,
     RSI_DIVERGENCE_BULL_REASON,
     RSI_DIVERGENCE_BEAR_REASON,
+    VOLUME_DECLINE_REASON,
     DEFAULT_OUTPUT_DIR,
     empty_trades,
 )
@@ -95,6 +101,7 @@ from strategy.indicators import (
     build_rsi_divergence_flags,
     build_rsi_divergence_exit,
     spread_flags,
+    volume_decline_flags,
 )
 from strategy.utils import (
     load_parquet,
@@ -431,6 +438,15 @@ class Backtester:
         self.weak_exit = np.asarray(weak_exit, bool) if weak_exit is not None else np.zeros(len(bars), bool)
         # Divergencia RSI: +1 alcista (cierra SHORT), -1 bajista (cierra LONG), 0 sin señal.
         self.rsi_div = np.asarray(rsi_div_exit, int) if rsi_div_exit is not None else np.zeros(len(bars), int)
+        self.volume_exit = (
+            volume_decline_flags(
+                bars["volume"].to_numpy(float),
+                config.volume_exit_bars,
+                config.volume_exit_min_drop_pct,
+            )
+            if config.volume_exit_enabled and "volume" in bars
+            else np.zeros(len(bars), dtype=bool)
+        )
         self.ema55_touch_exit_active = (
             config.ema55_touch_exit_enabled
             and pd.Timedelta(config.timeframe) == pd.Timedelta("30min")
@@ -839,6 +855,11 @@ class Backtester:
         if (weak_fast, weak_slow) != (cfg.ema_fast, cfg.ema_slow):
             weak_base = f"{weak_base}_{weak_len}"
         weak_reason = weak_base if cfg.ema_weakening_exit_pct >= 100 else f"{weak_base}_{cfg.ema_weakening_exit_pct:g}%"
+        volume_base = f"{VOLUME_DECLINE_REASON}_{cfg.volume_exit_bars}B"
+        volume_reason = (
+            volume_base if cfg.volume_exit_pct >= 100
+            else f"{volume_base}_{cfg.volume_exit_pct:g}%"
+        )
         started = time.perf_counter()
         print(f"[BACKTEST] {n:,} velas {cfg.timeframe}", flush=True)
         month_key: Optional[tuple[int, int]] = None
@@ -932,6 +953,10 @@ class Backtester:
                         ema55_reason = self._ema55_touch_weakness_exit_reason(i)
                         if ema55_reason is not None:
                             self.pending_exit = (ema55_reason, 100.0)
+                        elif (cfg.volume_exit_enabled and not self.position.volume_exit_done
+                              and i < len(self.volume_exit) and self.volume_exit[i]):
+                            self.position.volume_exit_done = True
+                            self.pending_exit = (volume_reason, cfg.volume_exit_pct)
 
             self._mark(self.times[i] + pd.Timedelta(cfg.timeframe), self.c[i])
             if (i + 1) % max(1, n // 10) == 0 or i == n - 1:
@@ -1078,6 +1103,18 @@ def parse_args():
     p.add_argument("--ema55-touch-short-exit-loss-pct", type=float,
                    default=d.ema55_touch_short_exit_loss_pct,
                    help="Pérdida mínima para la salida SHORT (default 0.9%%).")
+    p.add_argument("--volume-exit", action=argparse.BooleanOptionalAction,
+                   default=d.volume_exit_enabled,
+                   help="Cierra un porcentaje de la posición cuando el volumen cae en las "
+                        "últimas N velas (activo por defecto).")
+    p.add_argument("--volume-exit-bars", type=int, default=d.volume_exit_bars,
+                   help="Nº de velas (N) del rango donde se mide la caída de volumen (default 10).")
+    p.add_argument("--volume-exit-pct", type=float, default=d.volume_exit_pct,
+                   help="Porcentaje de la posición que se cierra por volumen decreciente (default 25).")
+    p.add_argument("--volume-exit-min-drop-pct", type=float,
+                   default=d.volume_exit_min_drop_pct,
+                   help="Caída mínima de la media de volumen reciente frente a la anterior "
+                        "(default 20).")
     p.add_argument("--partial-tp", action=argparse.BooleanOptionalAction, default=d.partial_tp_enabled)
     p.add_argument("--partial-tp-r", type=float, default=d.partial_tp_r)
     p.add_argument("--partial-tp-pct", type=float, default=d.partial_tp_pct)
@@ -1176,6 +1213,10 @@ def config_from_args(a) -> Config:
         ema55_touch_breakout_buffer_pct=a.ema55_touch_breakout_buffer_pct,
         ema55_touch_exit_loss_pct=a.ema55_touch_exit_loss_pct,
         ema55_touch_short_exit_loss_pct=a.ema55_touch_short_exit_loss_pct,
+        volume_exit_enabled=a.volume_exit,
+        volume_exit_bars=a.volume_exit_bars,
+        volume_exit_pct=a.volume_exit_pct,
+        volume_exit_min_drop_pct=a.volume_exit_min_drop_pct,
         partial_tp_enabled=a.partial_tp, partial_tp_r=a.partial_tp_r, partial_tp_pct=a.partial_tp_pct,
         partial_tp2_r=a.partial_tp2_r, partial_tp2_pct=a.partial_tp2_pct,
         partial_tp3_r=a.partial_tp3_r, partial_tp3_pct=a.partial_tp3_pct,
