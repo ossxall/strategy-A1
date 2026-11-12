@@ -215,7 +215,6 @@ class Config:
     adaptive_risk_max: float = 1.5
 
     force_close_at_end: bool = True
-    timestamp_is_close: bool = False
 
     @property
     def adx_timeframes(self) -> tuple[str, ...]:

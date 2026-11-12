@@ -296,7 +296,6 @@ _CONFIG_ENV = {
     "volume_exit_bars": ("STRATEGY_VOLUME_EXIT_BARS", env_int),
     "volume_exit_pct": ("STRATEGY_VOLUME_EXIT_PCT", env_float),
     "volume_exit_min_drop_pct": ("STRATEGY_VOLUME_EXIT_MIN_DROP_PCT", env_float),
-    "timestamp_is_close": ("STRATEGY_TIMESTAMP_IS_CLOSE", env_bool),
 }
 
 
