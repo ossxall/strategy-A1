@@ -70,7 +70,7 @@
   "ema55_touch_exit_loss_pct": 0.7,
   "ema55_touch_short_exit_loss_pct": 0.9,
   "volume_exit_enabled": true,
-  "volume_exit_bars": 10,
+  "volume_exit_bars": 20,
   "volume_exit_pct": 20.0,
   "volume_exit_min_drop_pct": 20.0,
   "partial_tp_enabled": true,
