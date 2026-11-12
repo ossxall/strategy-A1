@@ -70,7 +70,7 @@
   "ema55_touch_short_exit_loss_pct": 0.9,
   "partial_tp_enabled": true,
   "partial_tp_r": 1.0,
-  "partial_tp_pct": 25.0,
+  "partial_tp_pct": 10.0,
   "partial_tp2_r": 1.75,
   "partial_tp2_pct": 10.0,
   "partial_tp3_r": 2.5,
