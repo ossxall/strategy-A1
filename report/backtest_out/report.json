@@ -1,6 +1,6 @@
 {
   "strategy": "strategy2_ema_cross",
-  "generated_at": "2026-11-12T22:15:23.636257+00:00",
+  "generated_at": "2026-11-12T22:17:24.696404+00:00",
   "dataset": {
     "source": "dataset/binance/BTCUSDT/merged/BTCUSDT-1m.parquet",
     "bars": 118320,
@@ -113,8 +113,7 @@
     "adaptive_risk_k": 2.0,
     "adaptive_risk_min": 0.5,
     "adaptive_risk_max": 1.5,
-    "force_close_at_end": true,
-    "timestamp_is_close": false
+    "force_close_at_end": true
   },
   "metrics": {
     "initial_capital": 10000.0,

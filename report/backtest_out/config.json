@@ -99,6 +99,5 @@
   "adaptive_risk_k": 2.0,
   "adaptive_risk_min": 0.5,
   "adaptive_risk_max": 1.5,
-  "force_close_at_end": true,
-  "timestamp_is_close": false
+  "force_close_at_end": true
 }
