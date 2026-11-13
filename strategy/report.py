@@ -200,6 +200,7 @@ def plot_equity(curve: pd.DataFrame, path: str | Path, capital: float, dpi: int 
 UP_COLOR, DOWN_COLOR = "#26a69a", "#ef5350"
 FAST_COLOR, SLOW_COLOR, NEUTRAL_COLOR = "#ff9800", "#2962ff", "#7e57c2"
 ADX_EXIT_COLOR, WEAK_EXIT_COLOR = "#ffeb3b", "#e040fb"
+VOLUME_EXIT_COLOR = "#ff7043"
 RSI_DIV_COLOR = "#00bcd4"
 STOP_COLOR, TARGET_COLOR, BREAKEVEN_COLOR = "#ff5252", "#00e676", "#b0bec5"
 EMA_SLOW_TOUCH_COLOR = "#00e5ff"
@@ -371,6 +372,7 @@ def build_backtest_figure(
     adx_exit: np.ndarray | None = None,
     weak_exit: np.ndarray | None = None,
     rsi_div_exit: np.ndarray | None = None,
+    volume_exit: np.ndarray | None = None,
     raw: pd.DataFrame | None = None,
     source: str = "",
     title: str | None = None,
@@ -436,6 +438,8 @@ def build_backtest_figure(
             weak_exit = np.asarray(weak_exit, bool)[keep]
         if rsi_div_exit is not None:
             rsi_div_exit = np.asarray(rsi_div_exit, int)[keep]
+        if volume_exit is not None:
+            volume_exit = np.asarray(volume_exit, bool)[keep]
         if trades is not None and not trades.empty:
             trades = trades[(trades["entry_time"] < win_end) & (trades["exit_time"] >= win_start)]
         if equity is not None and not equity.empty:
@@ -452,6 +456,13 @@ def build_backtest_figure(
     if len(div_flags) != n:
         div_flags = np.zeros(n, int)
     div_bull, div_bear = div_flags > 0, div_flags < 0
+    if volume_exit is None and cfg.volume_exit_enabled and "volume" in bars:
+        from strategy.indicators import volume_decline_flags
+        volume_exit = volume_decline_flags(
+            bars["volume"].to_numpy(float), cfg.volume_exit_bars, cfg.volume_exit_min_drop_pct)
+    volume_flags = np.asarray(volume_exit, bool) if volume_exit is not None else np.zeros(n, bool)
+    if len(volume_flags) != n:
+        volume_flags = np.zeros(n, bool)
 
     adx_tfs, weak_tfs = _higher_timeframes(raw, cfg)
     if window is not None:
@@ -590,9 +601,23 @@ def build_backtest_figure(
         (weak_flags, bars_high + 3 * pad, "diamond", WEAK_EXIT_COLOR, "salida weakening"),
         (div_bull, bars_low - 2 * pad, "star", RSI_DIV_COLOR, "divergencia RSI alcista"),
         (div_bear, bars_high + 4 * pad, "star", RSI_DIV_COLOR, "divergencia RSI bajista"),
+        (volume_flags, bars_high + 5 * pad, "circle", VOLUME_EXIT_COLOR, "salida volumen"),
     ):
         if mask.any():
             fig.add_trace(_marker_trace(bars_x[mask], y[mask], label, symbol, color, 8),
+                          row=r, col=1)
+    # Ayuda visual: línea horizontal que muestra el rango (volume_exit_bars) en el
+    # que opera la lógica de volume_exit para cada barra señalada.
+    if volume_flags.any() and cfg.volume_exit_enabled:
+        window = max(2, int(cfg.volume_exit_bars))
+        xs, ys = [], []
+        for i in np.where(volume_flags)[0]:
+            start = max(0, i - window + 1)
+            xs += [int(bars_x[start]), int(bars_x[i]), None]
+            ys += [float(bars_high[i] + 5 * pad), float(bars_high[i] + 5 * pad), None]
+        if xs:
+            fig.add_trace(go.Scatter(x=xs, y=_sig(ys), mode="lines", name="rango volume_exit",
+                                      showlegend=True, line=dict(color=VOLUME_EXIT_COLOR, width=2)),
                           row=r, col=1)
 
     # -- Trades (conectores y niveles fusionados) --------------------------
@@ -967,6 +992,7 @@ def build_monthly_backtest_htmls(
     adx_exit: np.ndarray | None = None,
     weak_exit: np.ndarray | None = None,
     rsi_div_exit: np.ndarray | None = None,
+    volume_exit: np.ndarray | None = None,
     raw: pd.DataFrame | None = None,
     source: str = "",
     output_dir: str | Path = DEFAULT_OUTPUT_DIR,
@@ -993,7 +1019,7 @@ def build_monthly_backtest_htmls(
             month_positions = int(overlap["position_id"].nunique())
         build_backtest_figure(
             bars, cfg, signals=signals, trades=trades, equity=equity,
-            adx_exit=adx_exit, weak_exit=weak_exit, rsi_div_exit=rsi_div_exit, raw=raw, source=source,
+            adx_exit=adx_exit, weak_exit=weak_exit, rsi_div_exit=rsi_div_exit, volume_exit=volume_exit, raw=raw, source=source,
             title=f"{source or 'backtest'} · {label} · {month_positions} posiciones",
             window=(start, end), html_path=target,
         )
@@ -1012,6 +1038,7 @@ def generate_report(trades: pd.DataFrame, equity: pd.DataFrame, cfg: Config, dat
                     signals: pd.DataFrame | None = None, adx_exit: np.ndarray | None = None,
                     weak_exit: np.ndarray | None = None,
                     rsi_div_exit: np.ndarray | None = None,
+                    volume_exit: np.ndarray | None = None,
                     plotly_path: str | Path | None = None) -> dict:
     """Calcula métricas, imprime el informe, guarda outputs y genera los gráficos.
 
@@ -1033,7 +1060,7 @@ def generate_report(trades: pd.DataFrame, equity: pd.DataFrame, cfg: Config, dat
                     cfg.initial_capital, plot_dpi)
         build_monthly_backtest_htmls(
             data, cfg, signals=signals, trades=trades, equity=equity,
-            adx_exit=adx_exit, weak_exit=weak_exit, rsi_div_exit=rsi_div_exit, raw=raw, source=source,
+            adx_exit=adx_exit, weak_exit=weak_exit, rsi_div_exit=rsi_div_exit, volume_exit=volume_exit, raw=raw, source=source,
             output_dir=output_dir, index_path=plotly_path,
         )
     return metrics
