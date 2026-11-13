@@ -463,7 +463,25 @@ def build_backtest_figure(
     volume_flags = np.asarray(volume_exit, bool) if volume_exit is not None else np.zeros(n, bool)
     if len(volume_flags) != n:
         volume_flags = np.zeros(n, bool)
-
+    # Conserva únicamente las señales de volumen que realmente dispararon una
+    # salida parcial VOLUME_DECLINE (una por posición), no todas las barras en
+    # las que el volumen declina. Se derivan de los trades cerrados por ese
+    # motivo: el trigger ocurrió en la vela anterior a `exit_time`.
+    if trades is not None and not trades.empty and volume_flags.any():
+        triggered = np.zeros(n, bool)
+        try:
+            vol_trades = trades[trades["reason"].astype(str).str.startswith("VOLUME_DECLINE")]
+        except Exception:
+            vol_trades = pd.DataFrame()
+        if not vol_trades.empty:
+            step = pd.Timedelta(cfg.timeframe)
+            for exit_time in vol_trades["exit_time"]:
+                trigger_ts = pd.Timestamp(exit_time) - step
+                pos = bars.index.get_indexer([trigger_ts])
+                if len(pos) and pos[0] >= 0:
+                    triggered[pos[0]] = True
+        if triggered.any():
+            volume_flags = triggered & (np.asarray(volume_exit, bool) if volume_exit is not None and len(volume_exit) == n else True)
     adx_tfs, weak_tfs = _higher_timeframes(raw, cfg)
     if window is not None:
         adx_tfs = [frame for frame in
