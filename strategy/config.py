@@ -4,10 +4,10 @@ import pandas as pd
 
 
 def timeframe_tuple(raw: str | list[str] | tuple[str, ...]) -> tuple[str, ...]:
-    """Normaliza uno o varios timeframes.
+    """Normalize one or several timeframes into a tuple.
 
-    Acepta un ``str`` separado por comas (``"1D,30min"``) o una secuencia
-    (``["1D", "30min"]``) y devuelve una tupla sin elementos vacíos.
+    Accepts a comma-separated ``str`` (``"1D,30min"``) or a sequence
+    (``["1D", "30min"]``) and returns a tuple with empty entries removed.
     """
     if isinstance(raw, (list, tuple)):
         parts = [str(item) for item in raw]
@@ -18,108 +18,180 @@ def timeframe_tuple(raw: str | list[str] | tuple[str, ...]) -> tuple[str, ...]:
 
 @dataclass
 class Config:
+    """Configuration for the EMA/MACD crossover strategy and its exits.
+
+    All timeframe strings follow pandas offset aliases (e.g. "30min", "1h", "1D").
+    Validation of ranges and consistency is performed in ``__post_init__``.
+    """
+    #
+    # Fast EMA period used for the entry crossover.
+    #
     ema_fast: int = 55
+    #
+    # Slow EMA period used for the entry crossover.
+    #
     ema_slow: int = 200
-    # Periodos del MACD de entrada: la señal usa la línea principal respecto a cero.
+    #
+    # MACD periods for entry signals: the signal line is compared against zero.
+    #
     macd_fast: int = 12
     macd_slow: int = 26
     macd_signal: int = 9
-    # None = usar el timeframe principal de la estrategia.
+    #
+    # None = use the strategy's main timeframe.
+    #
     macd_timeframe: str | None = "1h"
+    #
+    # Main strategy timeframe.
+    #
     timeframe: str = "30min"
+    #
+    # Whether long positions are allowed.
+    #
     allow_long: bool = True
+    #
+    # Whether short positions are allowed.
+    #
     allow_short: bool = True
-
+    #
+    # Initial account equity.
+    #
     initial_capital: float = 10_000.0
+    #
+    # Commission cost in basis points per trade.
+    #
     commission_bps: float = 0.0
+    #
+    # Slippage cost in basis points per trade.
+    #
     slippage_bps: float = 0.0
+    #
+    # Fraction of equity risked per trade.
+    #
     risk_pct: float = 0.01
+    #
+    # Maximum leverage applied to position sizing.
+    #
     max_leverage: float = 1.0
+    #
+    # Stop-loss distance as a fraction of entry price.
+    #
     stop_loss_pct: float = 0.01
-
+    #
+    # Bars required to confirm an EMA crossover before acting.
+    #
     confirm_bars: int = 4
-    # Bloquea cruces EMA si el ADX de entrada no supera el mínimo.
+    #
+    # Block EMA crossovers when the entry ADX is below the minimum.
+    #
     entry_adx_enabled: bool = True
     entry_adx_len: int = 14
     entry_adx_min: float = 20.0
-    # Todos los timeframes deben superar el umbral para permitir una entrada.
+    #
+    # All listed timeframes must clear the threshold to allow an entry.
+    #
     entry_adx_timeframe: str | list[str] | tuple[str, ...] = ("30min")
-    # Bloquea entradas cuando ATR(14) es anormalmente bajo/alto frente a su
-    # media de las velas anteriores. No afecta las salidas de posiciones abiertas.
+    #
+    # Block entries when ATR(14) is abnormally low/high versus its mean over the
+    # previous candles. Does not affect exits of open positions.
+    #
     entry_atr_enabled: bool = True
     entry_atr_len: int = 14
     entry_atr_lookback: int = 50
     entry_atr_min_ratio: float = 0.5
     entry_atr_max_ratio: float = 2.5
-    # Bloquea entradas cuando, al confirmarse el cruce, el precio queda en el
-    # lado contrario de ambas EMAs del cruce: un LONG no se abre si el cierre
-    # está por debajo de EMA rápida y lenta; un SHORT no se abre si el cierre
-    # está por encima de ambas. Usa `ema_fast`/`ema_slow` del timeframe de la
-    # estrategia (no afecta a las salidas de posiciones abiertas).
+    #
+    # Block entries when, at crossover confirmation, price sits on the wrong side
+    # of both EMAs of the crossover: a LONG is not opened if the close is below
+    # both fast and slow EMA; a SHORT is not opened if the close is above both.
+    # Uses `ema_fast`/`ema_slow` of the strategy timeframe (does not affect exits).
+    #
     entry_price_ema_filter_enabled: bool = True
-    # Bloquea entradas LONG tras divergencia alcista y SHORT tras bajista,
-    # dentro de las últimas N velas del timeframe de estrategia.
+    #
+    # Block LONG entries after a bullish RSI divergence and SHORT entries after a
+    # bearish one, within the last N bars of the strategy timeframe.
+    #
     entry_rsi_divergence_enabled: bool = True
     entry_rsi_divergence_lookback: int = 20
-    # MFI modula adicionalmente el tamaño según flujo de dinero a favor.
+    #
+    # MFI additionally scales position size according to money flow in favor.
+    #
     entry_mfi_risk_scaling_enabled: bool = True
     entry_mfi_len: int = 14
     entry_mfi_risk_base: float = 1.0
     entry_mfi_risk_spread_scale: float = 100.0
     entry_mfi_risk_min: float = 0.5
     entry_mfi_risk_max: float = 1.25
-    # Efficiency Ratio suaviza el tamaño entre regímenes laterales y direccionales.
+    #
+    # Efficiency Ratio smooths position size between ranging and trending regimes.
+    #
     entry_er_risk_scaling_enabled: bool = True
     entry_er_len: int = 20
     entry_er_risk_base: float = 0.75
     entry_er_risk_slope: float = 1.0
     entry_er_risk_min: float = 0.5
     entry_er_risk_max: float = 1.25
-
+    #
+    # ADX-based exit (reversal) configuration.
+    #
     adx_exit_enabled: bool = True
-    # Uno o varios timeframes (combinados con OR). Acepta "1D", "1D,30min" o
-    # ["1D", "30min"]; la salida ADX se dispara si hay reversión en cualquiera.
+    #
+    # One or several timeframes (combined with OR). Accepts "1D", "1D,30min" or
+    # ["1D", "30min"]; the ADX exit triggers if a reversal occurs in any of them.
+    #
     adx_timeframe: str | list[str] | tuple[str, ...] = ("1D")
-    # Ventana (en velas del timeframe de la estrategia) durante la cual una
-    # reversión ADX mantiene activada la salida.
+    #
+    # Window (in strategy-timeframe bars) during which an ADX reversal keeps the
+    # exit active.
+    #
     adx_exit_range: int = 9
     adx_dilen: int = 14
     adx_adxlen: int = 14
     adx_key_level: float = 23.0
     adx_exit_pct: float = 100.0
-
+    #
+    # EMA-weakening exit configuration.
+    #
     ema_weakening_exit_enabled: bool = True
-    # Uno o varios timeframes (combinados con OR). Acepta "1D", "1D,30min" o
-    # ["1D", "30min"]; la salida weakening se dispara si hay debilitamiento en
-    # cualquiera de ellos.
+    #
+    # One or several timeframes (combined with OR). Accepts "1D", "1D,30min" or
+    # ["1D", "30min"]; the weakening exit triggers if weakening occurs in any.
+    #
     ema_weakening_timeframe: str | list[str] | tuple[str, ...] = ("4h", "1D")
-    # Longitudes de las EMAs propias de la salida weakening. Si son > 0 se usan
-    # en lugar de `ema_fast`/`ema_slow` (permiten elegir el periodo sin tocar el
-    # cruce de entrada); con 0 se reutilizan los del cruce.
+    #
+    # Lengths of the EMAs used by the weakening exit. If > 0 they override
+    # `ema_fast`/`ema_slow` (allowing a different period without touching the
+    # entry crossover); with 0 the crossover EMAs are reused.
+    #
     ema_weakening_fast: int = 21
     ema_weakening_slow: int = 55
     ema_weakening_gap_pct: float = 0.0001
     ema_weakening_exit_pct: float = 100.0
-
-    # --- Salida por divergencia RSI ----------------------------------------
-    # Cierra el 100% de la posición cuando aparece una divergencia RSI en su
-    # contra: la **bajista** (precio con máximos más altos, RSI con máximos más
-    # bajos) cierra un LONG y la **alcista** (precio con mínimos más bajos, RSI
-    # con mínimos más altos) cierra un SHORT. Un pivote de precio se confirma
-    # tras `rsi_divergence_pivot` velas a cada lado y se compara con el pivote
-    # anterior del mismo tipo dentro de `rsi_divergence_lookback` velas; la
-    # señal se emite al confirmarse el pivote, sin lookahead.
+    #
+    # --- RSI divergence exit -----------------------------------------------
+    # Closes 100% of the position when an RSI divergence appears against it:
+    # a **bearish** one (price higher highs, RSI lower highs) closes a LONG and
+    # a **bullish** one (price lower lows, RSI higher lows) closes a SHORT. A
+    # price pivot is confirmed after `rsi_divergence_pivot` bars on each side
+    # and is compared with the previous pivot of the same type within
+    # `rsi_divergence_lookback` bars; the signal is emitted on pivot
+    # confirmation, without lookahead.
+    #
     rsi_divergence_exit_enabled: bool = True
-    rsi_divergence_exit_pct: float = 100.0  # % de la posición que se cierra
-    # Uno o varios timeframes (combinados con OR), como en las otras salidas.
+    rsi_divergence_exit_pct: float = 100.0  
+    #
+    # One or several timeframes (combined with OR), like the other exits.
+    #
     rsi_divergence_timeframe: str | list[str] | tuple[str, ...] = "1D"
-    rsi_divergence_len: int = 14       # Periodo del RSI (Wilder)
-    rsi_divergence_pivot: int = 5      # Velas a cada lado para confirmar un pivote
-    rsi_divergence_lookback: int = 60  # Ventana hacia atrás para el pivote previo
-
-    # --- Debilidad por toques repetidos a EMA55 (30m únicamente) ------------
-    # Un toque es el rango de la vela intersectando EMA55 ± tolerancia. Se sale
-    # tras 2 toques seguidos o 3 dentro de 5 velas, sin ruptura y con pérdida abierta.
+    rsi_divergence_len: int = 14       # RSI period (Wilder)
+    rsi_divergence_pivot: int = 5      # Bars on each side to confirm a pivot
+    rsi_divergence_lookback: int = 60  # Lookback window for the previous pivot
+    #
+    # --- EMA55 touch weakness exit (30m only) ------------------------------
+    # A touch is a candle range intersecting EMA55 ± tolerance. Exit triggers
+    # after 2 consecutive touches or 3 within 5 bars, without a breakout and
+    # with an open loss.
+    #
     ema55_touch_exit_enabled: bool = True
     ema55_touch_tolerance_pct: float = 0.1
     ema55_touch_lookback_bars: int = 5
@@ -127,88 +199,110 @@ class Config:
     ema55_touch_consecutive: int = 2
     ema55_touch_breakout_buffer_pct: float = 0.1
     ema55_touch_exit_loss_pct: float = 0.7        # LONG
-    ema55_touch_short_exit_loss_pct: float = 0.9  # SHORT, umbral más estricto
-
-    # --- Salida parcial por volumen decreciente ----------------------------
-    # Cierra `volume_exit_pct` % de la posición (una vez por posición) cuando la
-    # media de volumen de la mitad reciente de las últimas `volume_exit_bars`
-    # velas cae al menos `volume_exit_min_drop_pct` % respecto de la mitad
-    # anterior. Ej.: con 10 velas y 20 %, la media de las 5 últimas debe ser
-    # <= 80 % de la media de las 5 anteriores.
+    ema55_touch_short_exit_loss_pct: float = 0.9  # SHORT, stricter threshold
+    #
+    # --- Partial exit on decreasing volume ---------------------------------
+    # Closes `volume_exit_pct` % of the position (once per position) when the
+    # average volume of the recent half of the last `volume_exit_bars` candles
+    # drops by at least `volume_exit_min_drop_pct` % versus the earlier half.
+    # E.g. with 10 bars and 20%, the mean of the last 5 must be <= 80% of the
+    # mean of the previous 5.
+    #
     volume_exit_enabled: bool = True
     volume_exit_bars: int = 20
     volume_exit_pct: float = 20.0
     volume_exit_min_drop_pct: float = 20.0
-
-    # Gestión de salida orientada a reducir la racha de pérdidas en whipsaw:
-    # al alcanzar `partial_tp_r` veces el riesgo inicial se asegura beneficio
-    # cerrando `partial_tp_pct` de la posición y, opcionalmente, se mueve el
-    # stop del resto a breakeven. Sube el win rate real (rompe rachas de
-    # stop-loss consecutivos) a cambio de recortar parte del retorno.
+    #
+    # Exit management aimed at reducing whipsaw loss streaks: when price reaches
+    # `partial_tp_r` times the initial risk, profit is locked by closing
+    # `partial_tp_pct` of the position and, optionally, moving the stop of the
+    # remainder to breakeven. Raises the real win rate (breaks consecutive
+    # stop-loss streaks) at the cost of trimming part of the return.
+    #
     partial_tp_enabled: bool = True
     partial_tp_r: float = 1.0
     partial_tp_pct: float = 10.0
+    #
     # Second partial take-profit (optional). If enabled (>0), it triggers at
-    # partial_tp2_r (R-multiple of initial risk) closing partial_tp2_pct of
-    # the position. Partial 2 is intended to be at larger distance than TP1.
+    # partial_tp2_r (R-multiple of initial risk) closing partial_tp2_pct of the
+    # position. Partial 2 is intended to be at a larger distance than TP1.
+    #
     partial_tp2_r: float = 1.5
     partial_tp2_pct: float = 10.0
+    #
     # Third partial take-profit, at a larger distance than TP2.
+    #
     partial_tp3_r: float = 2.0
     partial_tp3_pct: float = 10.0
+    #
     # Fourth partial take-profit, at a larger distance than TP3.
+    #
     partial_tp4_r: float = 2.5
     partial_tp4_pct: float = 10.0
+    #
     # Fifth partial take-profit, at a larger distance than TP4.
+    #
     partial_tp5_r: float = 3.0
     partial_tp5_pct: float = 10.0
+    #
     # Sixth partial take-profit, at a larger distance than TP5.
+    #
     partial_tp6_r: float = 3.5
     partial_tp6_pct: float = 10.0
+    #
     # Seventh partial take-profit, at a larger distance than TP6.
+    #
     partial_tp7_r: float = 4.0
     partial_tp7_pct: float = 10.0
-    # Tras TP3, el SHORT restante sale si el precio supera EMA lenta por este %.
-    # 0 = basta con tocarla.
+    #
+    # After TP3, the remaining SHORT exits if price exceeds the slow EMA by
+    # this %. 0 = touching it is enough.
+    #
     tp3_ema_slow_penetration_pct: float = 1.75
+    #
+    # Whether to move the stop to breakeven after a partial take-profit.
+    #
     move_stop_to_breakeven: bool = True
-
-    # Sesgo de tendencia de timeframe superior, usado sólo después de una pérdida.
+    #
+    # Higher-timeframe trend bias, used only after a loss.
+    #
     trend_timeframe: str = "1D"
-
-    # --- Protección mensual ------------------------------------------------
-    # Si la equity cae más de `monthly_loss_limit_pct` % por debajo de la
-    # equity al inicio del mes calendario, se dejan de abrir posiciones (y, con
-    # monthly_loss_limit_close, se cierra la abierta) hasta el siguiente mes
-    # o, si `monthly_loss_limit_days` > 0, durante ese número de días.
-    # Red de seguridad para el peor mes. Con los defaults apenas llega a
-    # dispararse (1 vez en 82 meses), por eso arranca holgado en 5.0. El tamaño
-    # adaptativo también recorta meses rojos; bajar el límite (p. ej. 2) mejora
-    # el peor mes pero recorta el acumulado de meses negativos. 0 = desactivado.
+    #
+    # --- Monthly protection -----------------------------------------------
+    # If equity falls more than `monthly_loss_limit_pct` % below the equity at
+    # the start of the calendar month, new positions stop being opened (and, with
+    # monthly_loss_limit_close, the open one is closed) until the next month or,
+    # if `monthly_loss_limit_days` > 0, for that many days. Safety net for the
+    # worst month. With defaults it barely triggers (1 time in 82 months), so it
+    # starts loose at 5.0. Adaptive sizing also trims red months; lowering the
+    # limit (e.g. 2) improves the worst month but trims cumulative negative
+    # months. 0 = disabled.
+    #
     monthly_loss_limit_pct: float = 5.0
     monthly_loss_limit_close: bool = True
     monthly_loss_limit_days: int = 0
-
-    # Tras una posición cerrada en pérdida, la siguiente entrada sólo se abre
-    # si va en la dirección del sesgo de tendencia de `trend_timeframe` (vela
-    # superior ya cerrada, sin lookahead); una victoria reinicia el requisito.
-    # Ataca la racha de pérdidas: en whipsaw la señal de cruce suele ir contra
-    # la tendencia mayor. Sólo exige el sesgo tras perder, no siempre, para no
-    # recortar el retorno de los cruces en tendencia. En BTCUSDT 2020-2026
-    # baja la racha máxima de 7 a 5 (train y test), sube el PF de 1,76 a 2,07
-    # y recorta el peor mes de -4,75% a -2,65%, con el rendimiento total
-    # encima del baseline (328% -> 363%). False = desactivado.
+    #
+    # After a position closed at a loss, the next entry only opens if it aligns
+    # with the trend bias of `trend_timeframe` (already-closed higher bar, no
+    # lookahead); a win resets the requirement. Targets loss streaks: in
+    # whipsaw the crossover signal often runs against the larger trend. Only
+    # demands the bias after a loss, not always, to avoid trimming returns of
+    # crossovers in trend. On BTCUSDT 2020-2026 reduces the max streak from 7
+    # to 5 (train and test), raises PF from 1.76 to 2.07 and trims the worst
+    # month from -4.75% to -2.65%, with total return above baseline
+    # (328% -> 363%). False = disabled.
+    #
     streak_trend_only: bool = True
-
-    # --- Tamaño de posición adaptativo -------------------------------------
-    # `risk_pct` se multiplica por `clamp(1 + k * (win_rate últimas n posiciones
-    # - 0.5), min, max)`: en rachas de pérdidas se arriesga menos y en rachas
-    # ganadoras (mercado en tendencia) se arriesga más. Los meses rojos suelen
-    # ser rachas frías, así que recorta el riesgo justo cuando salen las
-    # pérdidas: con `adaptive_risk_window=20` y `k=2` el peor mes pasa de
-    # -3,15% a -2,49%, el acumulado de meses negativos de -28,6% a -26,1% y el
-    # PF de 2,43 a 2,50, a cambio de ~38 puntos de rendimiento total. 0 =
-    # desactivado (tamaño fijo).
+    #
+    # --- Adaptive position sizing ------------------------------------------
+    # `risk_pct` is multiplied by `clamp(1 + k * (win rate of last n positions
+    # - 0.5), min, max)`: less risk in loss streaks and more in winning streaks
+    # (trending market). Red months are usually cold streaks, so risk is trimmed
+    # exactly when losses occur: with `adaptive_risk_window=20` and `k=2` the
+    # worst month goes from -3.15% to -2.49%, cumulative negative months from
+    # -28.6% to -26.1% and PF from 2.43 to 2.50, at the cost of ~38 points of
+    # total return. 0 = disabled (fixed size).
+    #
     adaptive_risk_window: int = 20
     adaptive_risk_k: float = 2.0
     adaptive_risk_min: float = 0.5
@@ -218,25 +312,25 @@ class Config:
 
     @property
     def adx_timeframes(self) -> tuple[str, ...]:
-        """Timeframes ADX normalizados (uno o varios); la salida usa OR entre ellos."""
+        """ADX timeframes normalized (one or several); exit uses OR across them."""
         return timeframe_tuple(self.adx_timeframe)
 
     @property
     def entry_adx_timeframes(self) -> tuple[str, ...]:
-        """Timeframes ADX de entrada normalizados; todos deben pasar el umbral."""
+        """Entry ADX timeframes normalized; all of them must pass the threshold."""
         return timeframe_tuple(self.entry_adx_timeframe)
 
     @property
     def ema_weakening_timeframes(self) -> tuple[str, ...]:
-        """Timeframes de weakening normalizados (uno o varios); la salida usa OR entre ellos."""
+        """Weakening timeframes normalized (one or several); exit uses OR across them."""
         return timeframe_tuple(self.ema_weakening_timeframe)
 
     @property
     def ema_weakening_lengths(self) -> tuple[int, int]:
-        """Longitudes (fast, slow) de las EMAs de la salida weakening.
+        """Lengths (fast, slow) of the EMAs used by the weakening exit.
 
-        Usa `ema_weakening_fast`/`ema_weakening_slow` cuando están definidas
-        (> 0); si no, cae a las EMAs del cruce (`ema_fast`/`ema_slow`).
+        Uses `ema_weakening_fast`/`ema_weakening_slow` when defined (> 0);
+        otherwise falls back to the crossover EMAs (`ema_fast`/`ema_slow`).
         """
         fast = self.ema_weakening_fast if self.ema_weakening_fast > 0 else self.ema_fast
         slow = self.ema_weakening_slow if self.ema_weakening_slow > 0 else self.ema_slow
@@ -244,10 +338,11 @@ class Config:
 
     @property
     def rsi_divergence_timeframes(self) -> tuple[str, ...]:
-        """Timeframes de divergencia RSI normalizados; la salida usa OR entre ellos."""
+        """RSI divergence timeframes normalized; exit uses OR across them."""
         return timeframe_tuple(self.rsi_divergence_timeframe)
 
     def __post_init__(self):
+        """Validate ranges and internal consistency of the configuration."""
         if min(self.ema_fast, self.ema_slow) <= 0 or self.ema_fast >= self.ema_slow:
             raise ValueError("Se requiere 0 < ema_fast < ema_slow.")
         if min(self.macd_fast, self.macd_slow, self.macd_signal) <= 0 or self.macd_fast >= self.macd_slow:
