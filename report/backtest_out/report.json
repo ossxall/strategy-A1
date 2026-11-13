@@ -1,8 +1,8 @@
 {
   "strategy": "strategy2_ema_cross",
-  "generated_at": "2026-11-13T00:49:33.844858+00:00",
+  "generated_at": "2026-11-13T15:16:36.403933+00:00",
   "dataset": {
-    "source": "dataset/binance/BTCUSDT/merged/BTCUSDT-1m.parquet",
+    "source": "/home/debian/Documents/GitHub/strategy-A1/dataset/binance/BTCUSDT/merged/BTCUSDT-1m.parquet",
     "bars": 118320,
     "start": "2020-01-01T00:00:00+00:00",
     "end": "2026-09-30T23:30:00+00:00",

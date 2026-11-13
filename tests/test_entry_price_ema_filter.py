@@ -137,16 +137,8 @@ def test_filter_can_be_disabled(monkeypatch):
     assert signals.target.tolist() == [0, 1, 0, 0]
 
 
-def test_filter_defaults_to_enabled_and_cli_can_disable_it(monkeypatch):
-    import sys
-
-    from strategy.strategy import config_from_args, parse_args
-
+def test_filter_defaults_to_enabled_and_config_can_disable_it():
     assert Config().entry_price_ema_filter_enabled
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        ["strategy", "dataset.parquet", "--no-entry-price-ema-filter"],
-    )
 
-    assert config_from_args(parse_args()).entry_price_ema_filter_enabled is False
+    cfg = Config(entry_price_ema_filter_enabled=False)
+    assert cfg.entry_price_ema_filter_enabled is False

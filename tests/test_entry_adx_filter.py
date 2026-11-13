@@ -132,17 +132,7 @@ def test_multiple_entry_adx_timeframes_all_must_be_above_the_threshold(monkeypat
     assert signals.target.tolist() == [0, 0, 0, -1]
 
 
-def test_entry_adx_timeframes_accept_comma_separated_cli_values(monkeypatch):
-    import sys
-
-    from strategy.strategy import config_from_args, parse_args
-
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        ["strategy", "dataset.parquet", "--entry-adx-timeframe", "30min,1h"],
-    )
-
-    cfg = config_from_args(parse_args())
+def test_entry_adx_timeframes_accept_comma_separated_values():
+    cfg = Config(entry_adx_timeframe="30min,1h")
 
     assert cfg.entry_adx_timeframes == ("30min", "1h")

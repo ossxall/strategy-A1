@@ -58,9 +58,11 @@ realistas (comisión 4 bps + slippage 2 bps), donde el tamaño adaptativo tambi�
 mejora el drawdown (-10,1 % -> -8,2 %).
 
 Uso:
-    python -m strategy.strategy dataset/binance/BTCUSDT/merged/BTCUSDT-1m.parquet --output-dir report/backtest_out
-    python -m strategy.strategy dataset/binance/BTCUSDT/merged/BTCUSDT-1m.parquet --no-entry-adx-filter
-    python -m strategy.strategy dataset/binance/BTCUSDT/merged/BTCUSDT-1m.parquet --help
+    python run_backtest.py
+
+Los parámetros de la estrategia se toman de los defaults de
+`strategy.config.Config`; los de ejecución (dataset, salida, gráfico y logs)
+están hardcodeados como constantes al final de este módulo.
 
 API para bots:
     cfg = Config()
@@ -75,6 +77,7 @@ Dependencias:
 """
 from __future__ import annotations
 from dataclasses import asdict
+from pathlib import Path
 from typing import Optional
 from strategy.config import Config
 from strategy.models import (
@@ -85,7 +88,6 @@ from strategy.models import (
     RSI_DIVERGENCE_BULL_REASON,
     RSI_DIVERGENCE_BEAR_REASON,
     VOLUME_DECLINE_REASON,
-    DEFAULT_OUTPUT_DIR,
     empty_trades,
 )
 from strategy.indicators import (
@@ -110,7 +112,6 @@ from strategy.utils import (
     to_timeframe
 )
 from strategy.report import generate_report
-import argparse
 import time
 import talib
 import numpy as np
@@ -975,277 +976,44 @@ class Backtester:
 
 
 # ---------------------------------------------------------------------------
-# CLI
+# Ejecución
 # ---------------------------------------------------------------------------
 
-def parse_args():
-    d = Config()
-    p = argparse.ArgumentParser(description="Backtest EMA cross con salidas ADX y EMA weakening.")
-    p.add_argument("parquet", help="Dataset OHLCV en Parquet")
-    p.add_argument("--capital", type=float, default=d.initial_capital)
-    p.add_argument("--ema-fast", type=int, default=d.ema_fast)
-    p.add_argument("--ema-slow", type=int, default=d.ema_slow)
-    p.add_argument("--macd-fast", type=int, default=d.macd_fast,
-                   help="Periodo rápido del MACD (default 12).")
-    p.add_argument("--macd-slow", type=int, default=d.macd_slow,
-                   help="Periodo lento del MACD (default 26).")
-    p.add_argument("--macd-signal", type=int, default=d.macd_signal,
-                   help="Periodo de señal del MACD (default 9; sólo se usa para calcular el indicador).")
-    p.add_argument("--macd-timeframe", default=d.macd_timeframe,
-                   help="Timeframe del MACD (default: el de la estrategia).")
-    p.add_argument("--timeframe", default=d.timeframe)
-    p.add_argument("--commission-bps", type=float, default=d.commission_bps)
-    p.add_argument("--slippage-bps", type=float, default=d.slippage_bps)
-    p.add_argument("--risk-pct", type=float, default=d.risk_pct)
-    p.add_argument("--max-leverage", type=float, default=d.max_leverage)
-    p.add_argument("--stop-loss-pct", type=float, default=d.stop_loss_pct)
-    p.add_argument("--confirm-bars", type=int, default=d.confirm_bars)
-    p.add_argument("--entry-adx-filter", action=argparse.BooleanOptionalAction,
-                   default=d.entry_adx_enabled,
-                   help="Exige ADX de entrada por encima del mínimo (activo por defecto).")
-    p.add_argument("--entry-adx-len", type=int, default=d.entry_adx_len,
-                   help="Periodo ADX de entrada (default 14).")
-    p.add_argument("--entry-adx-timeframe", default=d.entry_adx_timeframe,
-                   help="Timeframe(s) ADX de entrada separados por coma; todos deben superar el mínimo "
-                        "(p. ej. 30min,1h).")
-    p.add_argument("--entry-adx-min", type=float, default=d.entry_adx_min,
-                   help="Umbral estricto del ADX: la señal requiere ADX > mínimo (default 20).")
-    p.add_argument("--entry-atr-filter", action=argparse.BooleanOptionalAction,
-                   default=d.entry_atr_enabled,
-                   help="Descarta entradas con ATR comprimido o anormalmente elevado.")
-    p.add_argument("--entry-atr-len", type=int, default=d.entry_atr_len,
-                   help="Periodo Wilder del ATR de entrada (default 14).")
-    p.add_argument("--entry-atr-lookback", type=int, default=d.entry_atr_lookback,
-                   help="Velas previas para la media ATR de referencia (default 50).")
-    p.add_argument("--entry-atr-min-ratio", type=float, default=d.entry_atr_min_ratio,
-                   help="Bloquea ATR por debajo de esta fracción de su media (default 0.5).")
-    p.add_argument("--entry-atr-max-ratio", type=float, default=d.entry_atr_max_ratio,
-                   help="Bloquea ATR por encima de este múltiplo de su media (default 2.5).")
-    p.add_argument("--entry-price-ema-filter", action=argparse.BooleanOptionalAction,
-                   default=d.entry_price_ema_filter_enabled,
-                   help="Bloquea entradas si el precio queda en el lado contrario de ambas EMAs del cruce "
-                        "(activo por defecto).")
-    p.add_argument("--entry-rsi-divergence-filter", action=argparse.BooleanOptionalAction,
-                   default=d.entry_rsi_divergence_enabled,
-                   help="Bloquea LONG con divergencia alcista y SHORT con bajista (activado por defecto).")
-    p.add_argument("--entry-rsi-divergence-lookback", type=int,
-                   default=d.entry_rsi_divergence_lookback,
-                   help="Velas hacia atrás durante las que se bloquean entradas (default 20).")
-    p.add_argument("--entry-mfi-risk-scaling", action=argparse.BooleanOptionalAction,
-                   default=d.entry_mfi_risk_scaling_enabled,
-                   help="Modula el tamaño con MFI (precio/volumen), sin bloquear entradas.")
-    p.add_argument("--entry-mfi-len", type=int, default=d.entry_mfi_len)
-    p.add_argument("--entry-mfi-risk-base", type=float, default=d.entry_mfi_risk_base)
-    p.add_argument("--entry-mfi-risk-spread-scale", type=float,
-                   default=d.entry_mfi_risk_spread_scale)
-    p.add_argument("--entry-mfi-risk-min", type=float, default=d.entry_mfi_risk_min)
-    p.add_argument("--entry-mfi-risk-max", type=float, default=d.entry_mfi_risk_max)
-    p.add_argument("--entry-er-risk-scaling", action=argparse.BooleanOptionalAction,
-                   default=d.entry_er_risk_scaling_enabled,
-                   help="Modula el tamaño según la eficiencia direccional, sin bloquear entradas.")
-    p.add_argument("--entry-er-len", type=int, default=d.entry_er_len)
-    p.add_argument("--entry-er-risk-base", type=float, default=d.entry_er_risk_base)
-    p.add_argument("--entry-er-risk-slope", type=float, default=d.entry_er_risk_slope)
-    p.add_argument("--entry-er-risk-min", type=float, default=d.entry_er_risk_min)
-    p.add_argument("--entry-er-risk-max", type=float, default=d.entry_er_risk_max)
-    p.add_argument("--adx-exit", action=argparse.BooleanOptionalAction, default=d.adx_exit_enabled)
-    p.add_argument("--adx-timeframe", default=d.adx_timeframe,
-                   help="Timeframe(s) ADX de salida separados por coma; se combinan con OR (p. ej. 1D,30min).")
-    p.add_argument("--adx-dilen", type=int, default=d.adx_dilen)
-    p.add_argument("--adx-adxlen", type=int, default=d.adx_adxlen)
-    p.add_argument("--adx-key-level", type=float, default=d.adx_key_level)
-    p.add_argument("--adx-exit-pct", type=float, default=d.adx_exit_pct)
-    p.add_argument("--adx-exit-range", type=int, default=d.adx_exit_range,
-                   help="Velas durante las que una reversión ADX mantiene activada la salida (default 4).")
-    p.add_argument("--ema-weakening-exit", action=argparse.BooleanOptionalAction, default=d.ema_weakening_exit_enabled)
-    p.add_argument("--ema-weakening-timeframe", default=d.ema_weakening_timeframe,
-                   help="Timeframe(s) EMA weakening de salida separados por coma; se combinan con OR (p. ej. 1D,30min).")
-    p.add_argument("--ema-weakening-gap-pct", type=float, default=d.ema_weakening_gap_pct)
-    p.add_argument("--ema-weakening-fast", type=int, default=d.ema_weakening_fast,
-                   help="Longitud de la EMA rápida de la salida weakening (0 = usar --ema-fast).")
-    p.add_argument("--ema-weakening-slow", type=int, default=d.ema_weakening_slow,
-                   help="Longitud de la EMA lenta de la salida weakening (0 = usar --ema-slow).")
-    p.add_argument("--ema-weakening-exit-pct", type=float, default=d.ema_weakening_exit_pct)
-    p.add_argument("--rsi-divergence-exit", action=argparse.BooleanOptionalAction,
-                   default=d.rsi_divergence_exit_enabled,
-                   help="Cierra el porcentaje configurado ante divergencia RSI en contra.")
-    p.add_argument("--rsi-divergence-exit-pct", type=float,
-                   default=d.rsi_divergence_exit_pct,
-                   help="Porcentaje de la posición que se cierra por divergencia RSI (default 100).")
-    p.add_argument("--rsi-divergence-timeframe", default=d.rsi_divergence_timeframe,
-                   help="Timeframe(s) de divergencia RSI separados por coma; se combinan con OR (p. ej. 1D,30min).")
-    p.add_argument("--rsi-divergence-len", type=int, default=d.rsi_divergence_len,
-                   help="Periodo del RSI (Wilder, default 14).")
-    p.add_argument("--rsi-divergence-pivot", type=int, default=d.rsi_divergence_pivot,
-                   help="Velas a cada lado para confirmar un pivote de precio (default 5).")
-    p.add_argument("--rsi-divergence-lookback", type=int, default=d.rsi_divergence_lookback,
-                   help="Velas hacia atrás para emparejar el pivote con el anterior (default 60).")
-    p.add_argument("--ema55-touch-exit", action=argparse.BooleanOptionalAction,
-                   default=d.ema55_touch_exit_enabled,
-                   help="Salida LONG en 30m por toques repetidos a EMA55 sin ruptura.")
-    p.add_argument("--ema55-touch-tolerance-pct", type=float,
-                   default=d.ema55_touch_tolerance_pct,
-                   help="Banda de proximidad para contar un toque a EMA55 (default 0.1%%).")
-    p.add_argument("--ema55-touch-lookback-bars", type=int,
-                   default=d.ema55_touch_lookback_bars,
-                   help="Ventana de conteo de toques (default 5 velas).")
-    p.add_argument("--ema55-touch-min-touches", type=int,
-                   default=d.ema55_touch_min_touches,
-                   help="Toques repetidos requeridos dentro de la ventana (default 3).")
-    p.add_argument("--ema55-touch-consecutive", type=int,
-                   default=d.ema55_touch_consecutive,
-                   help="Toques consecutivos suficientes para salir (default 2).")
-    p.add_argument("--ema55-touch-breakout-buffer-pct", type=float,
-                   default=d.ema55_touch_breakout_buffer_pct,
-                   help="Cierre por encima de EMA55 que invalida la debilidad (default 0.1%%).")
-    p.add_argument("--ema55-touch-exit-loss-pct", type=float,
-                   default=d.ema55_touch_exit_loss_pct,
-                   help="Pérdida abierta mínima para confirmar debilidad (default 0.7%%).")
-    p.add_argument("--ema55-touch-short-exit-loss-pct", type=float,
-                   default=d.ema55_touch_short_exit_loss_pct,
-                   help="Pérdida mínima para la salida SHORT (default 0.9%%).")
-    p.add_argument("--volume-exit", action=argparse.BooleanOptionalAction,
-                   default=d.volume_exit_enabled,
-                   help="Cierra un porcentaje de la posición cuando el volumen cae en las "
-                        "últimas N velas (activo por defecto).")
-    p.add_argument("--volume-exit-bars", type=int, default=d.volume_exit_bars,
-                   help="Nº de velas (N) del rango donde se mide la caída de volumen (default 10).")
-    p.add_argument("--volume-exit-pct", type=float, default=d.volume_exit_pct,
-                   help="Porcentaje de la posición que se cierra por volumen decreciente (default 25).")
-    p.add_argument("--volume-exit-min-drop-pct", type=float,
-                   default=d.volume_exit_min_drop_pct,
-                   help="Caída mínima de la media de volumen reciente frente a la anterior "
-                        "(default 20).")
-    p.add_argument("--partial-tp", action=argparse.BooleanOptionalAction, default=d.partial_tp_enabled)
-    p.add_argument("--partial-tp-r", type=float, default=d.partial_tp_r)
-    p.add_argument("--partial-tp-pct", type=float, default=d.partial_tp_pct)
-    p.add_argument("--partial-tp2-r", type=float, default=d.partial_tp2_r)
-    p.add_argument("--partial-tp2-pct", type=float, default=d.partial_tp2_pct)
-    p.add_argument("--partial-tp3-r", type=float, default=d.partial_tp3_r)
-    p.add_argument("--partial-tp3-pct", type=float, default=d.partial_tp3_pct)
-    p.add_argument("--partial-tp4-r", type=float, default=d.partial_tp4_r)
-    p.add_argument("--partial-tp4-pct", type=float, default=d.partial_tp4_pct)
-    p.add_argument("--partial-tp5-r", type=float, default=d.partial_tp5_r)
-    p.add_argument("--partial-tp5-pct", type=float, default=d.partial_tp5_pct)
-    p.add_argument("--partial-tp6-r", type=float, default=d.partial_tp6_r)
-    p.add_argument("--partial-tp6-pct", type=float, default=d.partial_tp6_pct)
-    p.add_argument("--partial-tp7-r", type=float, default=d.partial_tp7_r)
-    p.add_argument("--partial-tp7-pct", type=float, default=d.partial_tp7_pct)
-    p.add_argument("--tp3-ema-slow-penetration-pct", type=float,
-                   default=d.tp3_ema_slow_penetration_pct,
-                   help="Ruptura porcentual de EMA lenta requerida para cerrar SHORT tras TP3 (default 0.1%%).")
-    p.add_argument("--breakeven-stop", action=argparse.BooleanOptionalAction, default=d.move_stop_to_breakeven)
-    p.add_argument("--no-long", action="store_true")
-    p.add_argument("--no-short", action="store_true")
-    p.add_argument("--trend-timeframe", default=d.trend_timeframe,
-                   help="Timeframe superior para el filtro de tendencia tras pérdidas (default 1D).")
-    p.add_argument("--monthly-loss-limit-pct", type=float, default=d.monthly_loss_limit_pct,
-                   help="%% máxima de pérdida mensual antes de dejar de operar el resto del mes "
-                        "(0 = desactivado).")
-    p.add_argument("--monthly-loss-limit-close", action=argparse.BooleanOptionalAction,
-                   default=d.monthly_loss_limit_close,
-                   help="Cierra la posición abierta al alcanzar el límite mensual.")
-    p.add_argument("--monthly-loss-limit-days", type=int, default=d.monthly_loss_limit_days,
-                   help="Días sin entradas tras el límite mensual (0 = hasta el próximo mes).")
-    p.add_argument("--streak-trend-only", action=argparse.BooleanOptionalAction, default=d.streak_trend_only,
-                   help="Tras una pérdida, sólo entrar si la señal coincide con la tendencia mayor.")
-    p.add_argument("--adaptive-risk-window", type=int, default=d.adaptive_risk_window,
-                   help="Nº de últimas posiciones para escalar el riesgo (0 = tamaño fijo).")
-    p.add_argument("--adaptive-risk-k", type=float, default=d.adaptive_risk_k)
-    p.add_argument("--adaptive-risk-min", type=float, default=d.adaptive_risk_min)
-    p.add_argument("--adaptive-risk-max", type=float, default=d.adaptive_risk_max)
-    p.add_argument("--no-force-close", action="store_true")
-    p.add_argument("--verbose", action="store_true")
-    p.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR)
-    p.add_argument("--no-output", action="store_true")
-    p.add_argument("--equity-csv", action="store_true")
-    p.add_argument("--no-plot", action="store_true")
-    p.add_argument("--plot", default=None)
-    p.add_argument("--plot-dpi", type=int, default=150)
-    return p.parse_args()
+#: Dataset OHLCV en Parquet; las rutas relativas cuelgan de la raíz del proyecto.
+DATASET = "dataset/binance/BTCUSDT/merged/BTCUSDT-1m.parquet"
+#: Directorio donde se escriben los informes del backtest.
+OUTPUT_DIR = "report/backtest_out"
+#: Escribir los archivos del informe.
+WRITE_OUTPUTS = True
+#: Generar además el CSV con la curva de equity.
+EQUITY_CSV = False
+#: Generar el gráfico de equity.
+PLOT_ENABLED = True
+#: Ruta del gráfico; ``None`` usa la ruta por defecto del informe.
+PLOT_PATH: str | None = None
+#: Resolución del gráfico en puntos por pulgada.
+PLOT_DPI = 150
+#: Mostrar el log detallado del motor de backtest.
+VERBOSE = False
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
-def config_from_args(a) -> Config:
-    return Config(ema_fast=a.ema_fast, ema_slow=a.ema_slow,
-        macd_fast=a.macd_fast, macd_slow=a.macd_slow, macd_signal=a.macd_signal,
-        macd_timeframe=a.macd_timeframe,
-        timeframe=a.timeframe,
-        allow_long=not a.no_long, allow_short=not a.no_short, initial_capital=a.capital,
-        commission_bps=a.commission_bps, slippage_bps=a.slippage_bps, risk_pct=a.risk_pct,
-        max_leverage=a.max_leverage, stop_loss_pct=a.stop_loss_pct, confirm_bars=a.confirm_bars,
-        entry_adx_enabled=a.entry_adx_filter, entry_adx_len=a.entry_adx_len,
-        entry_adx_min=a.entry_adx_min, entry_adx_timeframe=a.entry_adx_timeframe,
-        entry_atr_enabled=a.entry_atr_filter, entry_atr_len=a.entry_atr_len,
-        entry_atr_lookback=a.entry_atr_lookback,
-        entry_atr_min_ratio=a.entry_atr_min_ratio,
-        entry_atr_max_ratio=a.entry_atr_max_ratio,
-        entry_price_ema_filter_enabled=a.entry_price_ema_filter,
-        entry_rsi_divergence_enabled=a.entry_rsi_divergence_filter,
-        entry_rsi_divergence_lookback=a.entry_rsi_divergence_lookback,
-        entry_mfi_risk_scaling_enabled=a.entry_mfi_risk_scaling,
-        entry_mfi_len=a.entry_mfi_len,
-        entry_mfi_risk_base=a.entry_mfi_risk_base,
-        entry_mfi_risk_spread_scale=a.entry_mfi_risk_spread_scale,
-        entry_mfi_risk_min=a.entry_mfi_risk_min,
-        entry_mfi_risk_max=a.entry_mfi_risk_max,
-        entry_er_risk_scaling_enabled=a.entry_er_risk_scaling,
-        entry_er_len=a.entry_er_len,
-        entry_er_risk_base=a.entry_er_risk_base,
-        entry_er_risk_slope=a.entry_er_risk_slope,
-        entry_er_risk_min=a.entry_er_risk_min,
-        entry_er_risk_max=a.entry_er_risk_max,
-        adx_exit_enabled=a.adx_exit, adx_timeframe=a.adx_timeframe, adx_dilen=a.adx_dilen,
-        adx_adxlen=a.adx_adxlen, adx_key_level=a.adx_key_level, adx_exit_pct=a.adx_exit_pct,
-        adx_exit_range=a.adx_exit_range,
-        ema_weakening_exit_enabled=a.ema_weakening_exit, ema_weakening_timeframe=a.ema_weakening_timeframe,
-        ema_weakening_fast=a.ema_weakening_fast, ema_weakening_slow=a.ema_weakening_slow,
-        ema_weakening_gap_pct=a.ema_weakening_gap_pct, ema_weakening_exit_pct=a.ema_weakening_exit_pct,
-        rsi_divergence_exit_enabled=a.rsi_divergence_exit,
-        rsi_divergence_exit_pct=a.rsi_divergence_exit_pct,
-        rsi_divergence_timeframe=a.rsi_divergence_timeframe,
-        rsi_divergence_len=a.rsi_divergence_len,
-        rsi_divergence_pivot=a.rsi_divergence_pivot,
-        rsi_divergence_lookback=a.rsi_divergence_lookback,
-        ema55_touch_exit_enabled=a.ema55_touch_exit,
-        ema55_touch_tolerance_pct=a.ema55_touch_tolerance_pct,
-        ema55_touch_lookback_bars=a.ema55_touch_lookback_bars,
-        ema55_touch_min_touches=a.ema55_touch_min_touches,
-        ema55_touch_consecutive=a.ema55_touch_consecutive,
-        ema55_touch_breakout_buffer_pct=a.ema55_touch_breakout_buffer_pct,
-        ema55_touch_exit_loss_pct=a.ema55_touch_exit_loss_pct,
-        ema55_touch_short_exit_loss_pct=a.ema55_touch_short_exit_loss_pct,
-        volume_exit_enabled=a.volume_exit,
-        volume_exit_bars=a.volume_exit_bars,
-        volume_exit_pct=a.volume_exit_pct,
-        volume_exit_min_drop_pct=a.volume_exit_min_drop_pct,
-        partial_tp_enabled=a.partial_tp, partial_tp_r=a.partial_tp_r, partial_tp_pct=a.partial_tp_pct,
-        partial_tp2_r=a.partial_tp2_r, partial_tp2_pct=a.partial_tp2_pct,
-        partial_tp3_r=a.partial_tp3_r, partial_tp3_pct=a.partial_tp3_pct,
-        partial_tp4_r=a.partial_tp4_r, partial_tp4_pct=a.partial_tp4_pct,
-        partial_tp5_r=a.partial_tp5_r, partial_tp5_pct=a.partial_tp5_pct,
-        partial_tp6_r=a.partial_tp6_r, partial_tp6_pct=a.partial_tp6_pct,
-        partial_tp7_r=a.partial_tp7_r, partial_tp7_pct=a.partial_tp7_pct,
-        tp3_ema_slow_penetration_pct=a.tp3_ema_slow_penetration_pct,
-        move_stop_to_breakeven=a.breakeven_stop,
-        trend_timeframe=a.trend_timeframe,
-        monthly_loss_limit_pct=a.monthly_loss_limit_pct,
-        monthly_loss_limit_close=a.monthly_loss_limit_close,
-        monthly_loss_limit_days=a.monthly_loss_limit_days,
-        streak_trend_only=a.streak_trend_only,
-        adaptive_risk_window=a.adaptive_risk_window,
-        adaptive_risk_k=a.adaptive_risk_k,
-        adaptive_risk_min=a.adaptive_risk_min,
-        adaptive_risk_max=a.adaptive_risk_max,
-        force_close_at_end=not a.no_force_close)
+def main() -> int:
+    """Ejecuta el backtest con ``Config()`` y las constantes de este módulo."""
+    cfg = Config()
 
+    dataset = Path(DATASET)
+    if not dataset.is_absolute():
+        dataset = PROJECT_ROOT / dataset
+    if not dataset.is_file():
+        raise FileNotFoundError(f"No se encontró el dataset del backtest: {dataset}")
 
-def main():
-    args = parse_args()
-    cfg = config_from_args(args)
-    raw = load_parquet(args.parquet)
+    raw = load_parquet(dataset)
     bars = to_timeframe(raw, cfg)
     if len(bars) < cfg.ema_slow + 2:
         raise ValueError(f"Dataset insuficiente para EMA{cfg.ema_slow}: {len(bars)} velas.")
+
     strategy = EMACrossStrategy(cfg)
     signals = strategy.generate_signals(bars, raw)
     adx_exit, weak_exit, rsi_div_exit = strategy.prepare_exits(raw, bars)
@@ -1255,23 +1023,26 @@ def main():
         print(f"[WEAKENING] {'disponible' if weak_exit is not None else 'sin datos suficientes'}", flush=True)
     if cfg.rsi_divergence_exit_enabled:
         print(f"[RSI DIV] {'disponible' if rsi_div_exit is not None else 'sin datos suficientes/timeframe incompatible'}", flush=True)
-    engine = Backtester(bars, cfg, signals, adx_exit, weak_exit, rsi_div_exit, verbose=args.verbose)
+
+    engine = Backtester(bars, cfg, signals, adx_exit, weak_exit, rsi_div_exit,
+                        verbose=VERBOSE)
     trades, equity = engine.run()
     generate_report(
-        trades, equity, cfg, bars, args.parquet,
-        output_dir=args.output_dir,
-        write_outputs_enabled=not args.no_output,
-        write_equity_csv=args.equity_csv,
-        plot_enabled=not args.no_plot,
-        plot_path=args.plot,
-        plot_dpi=args.plot_dpi,
+        trades, equity, cfg, bars, str(dataset),
+        output_dir=OUTPUT_DIR,
+        write_outputs_enabled=WRITE_OUTPUTS,
+        write_equity_csv=EQUITY_CSV,
+        plot_enabled=PLOT_ENABLED,
+        plot_path=PLOT_PATH,
+        plot_dpi=PLOT_DPI,
         raw=raw,
         signals=signals,
         adx_exit=adx_exit,
         weak_exit=weak_exit,
         rsi_div_exit=rsi_div_exit,
     )
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
