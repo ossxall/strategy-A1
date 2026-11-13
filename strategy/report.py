@@ -470,8 +470,19 @@ def build_backtest_figure(
     panels = ["price"]
     if signals is not None and "macd_line" in signals:
         panels.append("macd")
-    if signals is not None and "adx_entry" in signals:
-        panels.append("adx")
+    adx_entry_panels = []
+    if signals is not None:
+        for timeframe in cfg.entry_adx_timeframes:
+            column = f"adx_entry_{timeframe}"
+            if column in signals or (timeframe == cfg.entry_adx_timeframes[0] and "adx_entry" in signals):
+                adx_entry_panels.append(f"adx_entry_tf_{len(adx_entry_panels)}")
+    panels.extend(adx_entry_panels)
+    if signals is not None and "atr" in signals:
+        panels.append("atr")
+    if signals is not None and "entry_mfi" in signals:
+        panels.append("mfi")
+    if signals is not None and "entry_er" in signals:
+        panels.append("er")
     if signals is not None and "target" in signals:
         panels.append("target")
     panels.extend(adx_panels)
@@ -479,7 +490,10 @@ def build_backtest_figure(
     if equity is not None and not equity.empty:
         panels.append("equity")
 
-    weights = {"price": 1.0, "macd": 0.25, "adx": 0.25, "target": 0.2, "equity": 0.4}
+    weights = {"price": 1.0, "macd": 0.25, "atr": 0.25, "mfi": 0.2, "er": 0.2,
+               "target": 0.2, "equity": 0.4}
+    for name in adx_entry_panels:
+        weights[name] = 0.25
     for name in adx_panels:
         weights[name] = 0.35
     for name in weak_panels:
@@ -711,37 +725,67 @@ def build_backtest_figure(
             if cd.any():
                 fig.add_trace(_marker_trace(sig_x[cd], macd_values[cd], "cruce ↓ (MACD<0)",
                                             "triangle-down", DOWN_COLOR, 9), row=rr, col=1)
-        fig.update_yaxes(title_text="MACD", row=rr, col=1)
+        fig.update_yaxes(title_text=f"MACD ({cfg.macd_timeframe or cfg.timeframe})", row=rr, col=1)
 
-    # -- Panel ADX de entrada ----------------------------------------------
-    if "adx" in row:
-        rr = row["adx"]
-        entry_adx_series = [
-            (timeframe, f"adx_entry_{timeframe}")
-            for timeframe in cfg.entry_adx_timeframes
-            if f"adx_entry_{timeframe}" in signals
-        ]
-        if not entry_adx_series:
-            entry_adx_series = [(None, "adx_entry")]
-        adx_colors = (NEUTRAL_COLOR, "#ffca28", "#ab47bc", "#26a69a")
-        for idx, (timeframe, column) in enumerate(entry_adx_series):
-            label = "ADX entrada" if len(entry_adx_series) == 1 else f"ADX entrada {timeframe}"
-            higher_tf = timeframe is not None and pd.Timedelta(timeframe) > pd.Timedelta(cfg.timeframe)
-            fig.add_trace(
-                _line_trace(
-                    sig_x,
-                    signals[column].to_numpy(float),
-                    label,
-                    adx_colors[idx % len(adx_colors)],
-                    shape="hv" if higher_tf else None,
-                ),
-                row=rr,
-                col=1,
-            )
+    # -- Paneles ADX de entrada (uno por timeframe) -------------------------
+    adx_colors = (NEUTRAL_COLOR, "#ffca28", "#ab47bc", "#26a69a")
+    entry_adx_series = [
+        (timeframe, f"adx_entry_{timeframe}" if f"adx_entry_{timeframe}" in signals else "adx_entry")
+        for timeframe in cfg.entry_adx_timeframes
+    ]
+    if not entry_adx_series:
+        entry_adx_series = [(None, "adx_entry")]
+    for panel_idx, (timeframe, column) in enumerate(entry_adx_series):
+        panel_name = f"adx_entry_tf_{panel_idx}"
+        if panel_name not in row:
+            continue
+        rr = row[panel_name]
+        higher_tf = timeframe is not None and pd.Timedelta(timeframe) > pd.Timedelta(cfg.timeframe)
+        label = "ADX entrada" if len(entry_adx_series) == 1 else f"ADX entrada {timeframe}"
+        fig.add_trace(
+            _line_trace(
+                sig_x,
+                signals[column].to_numpy(float),
+                label,
+                adx_colors[panel_idx % len(adx_colors)],
+                shape="hv" if higher_tf else None,
+            ),
+            row=rr,
+            col=1,
+        )
         if cfg.entry_adx_enabled and cfg.entry_adx_min:
             fig.add_hline(y=cfg.entry_adx_min, line=dict(color="#90a4ae", width=0.9, dash="dash"),
                           row=rr, col=1)
-        fig.update_yaxes(title_text="ADX", row=rr, col=1)
+        title = "ADX" if timeframe is None else f"ADX {timeframe}"
+        fig.update_yaxes(title_text=title, row=rr, col=1)
+
+    # -- Panel ATR ---------------------------------------------------------
+    if "atr" in row:
+        rr = row["atr"]
+        fig.add_trace(_line_trace(sig_x, signals["atr"].to_numpy(float), "ATR", "#ffca28", width=1.3),
+                      row=rr, col=1)
+        if "atr_mean" in signals:
+            fig.add_trace(_line_trace(sig_x, signals["atr_mean"].to_numpy(float), "ATR media", "#90a4ae",
+                                      width=1.0, dash="dash"), row=rr, col=1)
+        if cfg.entry_atr_enabled and cfg.entry_atr_min_ratio is not None:
+            # Banda visual del umbral mínimo/máximo sobre el ATR medio.
+            pass
+        fig.update_yaxes(title_text="ATR", row=rr, col=1)
+
+    # -- Panel MFI ---------------------------------------------------------
+    if "mfi" in row:
+        rr = row["mfi"]
+        fig.add_trace(_line_trace(sig_x, signals["entry_mfi"].to_numpy(float), "MFI", "#26a69a", width=1.3),
+                      row=rr, col=1)
+        fig.add_hline(y=50, line=dict(color="#90a4ae", width=0.9, dash="dash"), row=rr, col=1)
+        fig.update_yaxes(title_text="MFI", range=[0, 100], row=rr, col=1)
+
+    # -- Panel Efficiency Ratio -------------------------------------------
+    if "er" in row:
+        rr = row["er"]
+        fig.add_trace(_line_trace(sig_x, signals["entry_er"].to_numpy(float), "Efficiency Ratio", "#ab47bc",
+                                  width=1.3), row=rr, col=1)
+        fig.update_yaxes(title_text="ER", range=[0, 1], row=rr, col=1)
 
     # -- Panel target ------------------------------------------------------
     if "target" in row:
@@ -829,7 +873,7 @@ def build_backtest_figure(
         fig.update_yaxes(title_text="equity", row=rr, col=1)
 
     # -- Layout ------------------------------------------------------------
-    for name in ("macd", "adx", "target"):
+    for name in (["macd", "atr", "mfi", "er", "target"] + adx_entry_panels):
         if name in row:
             fig.update_xaxes(matches="x", row=row[name], col=1)
     fig.update_xaxes(rangeslider_visible=False, type="date")
