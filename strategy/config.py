@@ -344,146 +344,146 @@ class Config:
     def __post_init__(self):
         """Validate ranges and internal consistency of the configuration."""
         if min(self.ema_fast, self.ema_slow) <= 0 or self.ema_fast >= self.ema_slow:
-            raise ValueError("Se requiere 0 < ema_fast < ema_slow.")
+            raise ValueError("Requires 0 < ema_fast < ema_slow.")
         if min(self.macd_fast, self.macd_slow, self.macd_signal) <= 0 or self.macd_fast >= self.macd_slow:
-            raise ValueError("Se requiere 0 < macd_fast < macd_slow y macd_signal > 0.")
+            raise ValueError("Requires 0 < macd_fast < macd_slow and macd_signal > 0.")
         if self.macd_timeframe is not None and pd.Timedelta(self.macd_timeframe) <= pd.Timedelta(0):
-            raise ValueError("macd_timeframe debe ser positivo o None para usar timeframe.")
+            raise ValueError("macd_timeframe must be positive or None to use timeframe.")
         if pd.Timedelta(self.timeframe) <= pd.Timedelta(0):
-            raise ValueError("timeframe debe ser positivo.")
+            raise ValueError("timeframe must be positive.")
         for timeframe in self.adx_timeframes:
             if pd.Timedelta(timeframe) <= pd.Timedelta(0):
-                raise ValueError(f"adx_timeframe inválido: {timeframe!r}.")
+                raise ValueError(f"invalid adx_timeframe: {timeframe!r}.")
         if self.adx_exit_enabled and not self.adx_timeframes:
-            raise ValueError("adx_timeframe no puede estar vacío.")
+            raise ValueError("adx_timeframe cannot be empty.")
         for timeframe in self.entry_adx_timeframes:
             if pd.Timedelta(timeframe) <= pd.Timedelta(0):
-                raise ValueError(f"entry_adx_timeframe inválido: {timeframe!r}.")
+                raise ValueError(f"invalid entry_adx_timeframe: {timeframe!r}.")
         if self.entry_adx_enabled and not self.entry_adx_timeframes:
-            raise ValueError("entry_adx_timeframe no puede estar vacío.")
+            raise ValueError("entry_adx_timeframe cannot be empty.")
         if self.ema_weakening_exit_enabled and not self.ema_weakening_timeframes:
-            raise ValueError("ema_weakening_timeframe no puede estar vacío.")
+            raise ValueError("ema_weakening_timeframe cannot be empty.")
         for timeframe in self.ema_weakening_timeframes:
             if pd.Timedelta(timeframe) <= pd.Timedelta(0):
-                raise ValueError(f"ema_weakening_timeframe inválido: {timeframe!r}.")
+                raise ValueError(f"invalid ema_weakening_timeframe: {timeframe!r}.")
         if (self.rsi_divergence_exit_enabled or self.entry_rsi_divergence_enabled) \
                 and not self.rsi_divergence_timeframes:
-            raise ValueError("rsi_divergence_timeframe no puede estar vacío.")
+            raise ValueError("rsi_divergence_timeframe cannot be empty.")
         for timeframe in self.rsi_divergence_timeframes:
             if pd.Timedelta(timeframe) <= pd.Timedelta(0):
-                raise ValueError(f"rsi_divergence_timeframe inválido: {timeframe!r}.")
+                raise ValueError(f"invalid rsi_divergence_timeframe: {timeframe!r}.")
         if self.initial_capital <= 0 or self.max_leverage <= 0:
-            raise ValueError("Capital y leverage deben ser positivos.")
+            raise ValueError("Capital and leverage must be positive.")
         if not 0 < self.risk_pct <= 0.2:
-            raise ValueError("risk_pct debe estar en (0, 0.2].")
+            raise ValueError("risk_pct must be in (0, 0.2].")
         if min(self.commission_bps, self.slippage_bps, self.stop_loss_pct) < 0:
-            raise ValueError("Comisiones, slippage y stop no pueden ser negativos.")
+            raise ValueError("Commissions, slippage and stop cannot be negative.")
         if self.confirm_bars < 0:
-            raise ValueError("confirm_bars no puede ser negativo.")
+            raise ValueError("confirm_bars cannot be negative.")
         if self.entry_adx_enabled and (self.entry_adx_len <= 0 or self.entry_adx_min < 0):
-            raise ValueError("Configuración de ADX de entrada inválida.")
+            raise ValueError("Invalid entry ADX configuration.")
         if self.entry_atr_enabled and (
             self.entry_atr_len <= 0 or self.entry_atr_lookback <= 0
             or self.entry_atr_min_ratio < 0
             or self.entry_atr_max_ratio <= self.entry_atr_min_ratio
         ):
-            raise ValueError("Configuración del filtro ATR de entrada inválida.")
+            raise ValueError("Invalid entry ATR filter configuration.")
         if self.entry_rsi_divergence_enabled and self.entry_rsi_divergence_lookback < 1:
-            raise ValueError("entry_rsi_divergence_lookback debe ser >= 1.")
+            raise ValueError("entry_rsi_divergence_lookback must be >= 1.")
         if self.entry_mfi_risk_scaling_enabled and (
             self.entry_mfi_len <= 0 or self.entry_mfi_risk_spread_scale <= 0
             or self.entry_mfi_risk_min <= 0
             or self.entry_mfi_risk_max < self.entry_mfi_risk_min
         ):
-            raise ValueError("Configuración de escalado MFI de riesgo inválida.")
+            raise ValueError("Invalid MFI risk scaling configuration.")
         if self.entry_er_risk_scaling_enabled and (
             self.entry_er_len <= 0 or self.entry_er_risk_slope < 0
             or self.entry_er_risk_min <= 0
             or self.entry_er_risk_max < self.entry_er_risk_min
         ):
-            raise ValueError("Configuración de escalado Efficiency Ratio inválida.")
+            raise ValueError("Invalid Efficiency Ratio scaling configuration.")
         if self.adx_exit_enabled:
             if min(self.adx_dilen, self.adx_adxlen) <= 0 or self.adx_key_level < 0:
-                raise ValueError("Configuración de ADX de salida inválida.")
+                raise ValueError("Invalid exit ADX configuration.")
             if not 0 < self.adx_exit_pct <= 100:
-                raise ValueError("adx_exit_pct debe estar en (0, 100].")
+                raise ValueError("adx_exit_pct must be in (0, 100].")
             if self.adx_exit_range < 1:
-                raise ValueError("adx_exit_range debe ser >= 1.")
+                raise ValueError("adx_exit_range must be >= 1.")
         if self.ema_weakening_exit_enabled:
             if self.ema_weakening_gap_pct <= 0 or not 0 < self.ema_weakening_exit_pct <= 100:
-                raise ValueError("Configuración de weakening inválida.")
+                raise ValueError("Invalid weakening configuration.")
             if min(self.ema_weakening_fast, self.ema_weakening_slow) < 0:
-                raise ValueError("ema_weakening_fast/ema_weakening_slow no pueden ser negativas.")
+                raise ValueError("ema_weakening_fast/ema_weakening_slow cannot be negative.")
             if self.ema_weakening_slow > 0 and self.ema_weakening_fast > 0 \
                     and self.ema_weakening_fast >= self.ema_weakening_slow:
-                raise ValueError("Se requiere ema_weakening_fast < ema_weakening_slow (o 0 para usar las del cruce).")
+                raise ValueError("Requires ema_weakening_fast < ema_weakening_slow (or 0 to use crossover ones).")
         if self.rsi_divergence_exit_enabled or self.entry_rsi_divergence_enabled:
             if self.rsi_divergence_len <= 0:
-                raise ValueError("rsi_divergence_len debe ser positivo.")
+                raise ValueError("rsi_divergence_len must be positive.")
             if self.rsi_divergence_pivot < 1:
-                raise ValueError("rsi_divergence_pivot debe ser >= 1.")
+                raise ValueError("rsi_divergence_pivot must be >= 1.")
             if self.rsi_divergence_lookback < 1:
-                raise ValueError("rsi_divergence_lookback debe ser >= 1.")
+                raise ValueError("rsi_divergence_lookback must be >= 1.")
         if self.rsi_divergence_exit_enabled and not 0 < self.rsi_divergence_exit_pct <= 100:
-            raise ValueError("rsi_divergence_exit_pct debe estar en (0, 100].")
+            raise ValueError("rsi_divergence_exit_pct must be in (0, 100].")
         if (self.ema55_touch_tolerance_pct < 0 or self.ema55_touch_breakout_buffer_pct < 0
                 or self.ema55_touch_exit_loss_pct < 0
                 or self.ema55_touch_short_exit_loss_pct < 0):
-            raise ValueError("Tolerancias y pérdida mínima de EMA55 no pueden ser negativas.")
+            raise ValueError("EMA55 tolerances and minimum loss cannot be negative.")
         if self.tp3_ema_slow_penetration_pct < 0:
-            raise ValueError("tp3_ema_slow_penetration_pct no puede ser negativo.")
+            raise ValueError("tp3_ema_slow_penetration_pct cannot be negative.")
         if min(self.ema55_touch_lookback_bars, self.ema55_touch_min_touches,
                self.ema55_touch_consecutive) < 1:
-            raise ValueError("La ventana y los conteos de toques EMA55 deben ser >= 1.")
+            raise ValueError("EMA55 touch window and counts must be >= 1.")
         if self.volume_exit_enabled:
             if self.volume_exit_bars < 2:
-                raise ValueError("volume_exit_bars debe ser >= 2.")
+                raise ValueError("volume_exit_bars must be >= 2.")
             if not 0 < self.volume_exit_pct <= 100:
-                raise ValueError("volume_exit_pct debe estar en (0, 100].")
+                raise ValueError("volume_exit_pct must be in (0, 100].")
             if not 0 <= self.volume_exit_min_drop_pct < 100:
-                raise ValueError("volume_exit_min_drop_pct debe estar en [0, 100).")
+                raise ValueError("volume_exit_min_drop_pct must be in [0, 100).")
         if self.partial_tp_enabled:
             if self.partial_tp_r <= 0 or not 0 < self.partial_tp_pct <= 100:
-                raise ValueError("Configuración de take-profit parcial inválida.")
+                raise ValueError("Invalid partial take-profit configuration.")
         if self.partial_tp2_r > 0 or self.partial_tp2_pct > 0:
             if self.partial_tp2_r <= 0 or not 0 < self.partial_tp2_pct <= 100:
-                raise ValueError("Configuración de take-profit parcial 2 inválida.")
+                raise ValueError("Invalid partial take-profit 2 configuration.")
             if self.partial_tp2_r <= self.partial_tp_r:
-                raise ValueError("partial_tp2_r debe ser mayor que partial_tp_r.")
+                raise ValueError("partial_tp2_r must be greater than partial_tp_r.")
         if self.partial_tp3_r > 0 or self.partial_tp3_pct > 0:
             if self.partial_tp3_r <= 0 or not 0 < self.partial_tp3_pct <= 100:
-                raise ValueError("Configuración de take-profit parcial 3 inválida.")
+                raise ValueError("Invalid partial take-profit 3 configuration.")
             if self.partial_tp3_r <= self.partial_tp2_r:
-                raise ValueError("partial_tp3_r debe ser mayor que TP2.")
+                raise ValueError("partial_tp3_r must be greater than TP2.")
         if self.partial_tp4_r > 0 or self.partial_tp4_pct > 0:
             if self.partial_tp4_r <= 0 or not 0 < self.partial_tp4_pct <= 100:
-                raise ValueError("Configuración de take-profit parcial 4 inválida.")
+                raise ValueError("Invalid partial take-profit 4 configuration.")
             if self.partial_tp4_r <= self.partial_tp3_r:
-                raise ValueError("partial_tp4_r debe ser mayor que TP3.")
+                raise ValueError("partial_tp4_r must be greater than TP3.")
         if self.partial_tp5_r > 0 or self.partial_tp5_pct > 0:
             if self.partial_tp5_r <= 0 or not 0 < self.partial_tp5_pct <= 100:
-                raise ValueError("Configuración de take-profit parcial 5 inválida.")
+                raise ValueError("Invalid partial take-profit 5 configuration.")
             if self.partial_tp5_r <= self.partial_tp4_r:
-                raise ValueError("partial_tp5_r debe ser mayor que TP4.")
+                raise ValueError("partial_tp5_r must be greater than TP4.")
         if self.partial_tp6_r > 0 or self.partial_tp6_pct > 0:
             if self.partial_tp6_r <= 0 or not 0 < self.partial_tp6_pct <= 100:
-                raise ValueError("Configuración de take-profit parcial 6 inválida.")
+                raise ValueError("Invalid partial take-profit 6 configuration.")
             if self.partial_tp6_r <= self.partial_tp5_r:
-                raise ValueError("partial_tp6_r debe ser mayor que TP5.")
+                raise ValueError("partial_tp6_r must be greater than TP5.")
         if self.partial_tp7_r > 0 or self.partial_tp7_pct > 0:
             if self.partial_tp7_r <= 0 or not 0 < self.partial_tp7_pct <= 100:
-                raise ValueError("Configuración de take-profit parcial 7 inválida.")
+                raise ValueError("Invalid partial take-profit 7 configuration.")
             if self.partial_tp7_r <= self.partial_tp6_r:
-                raise ValueError("partial_tp7_r debe ser mayor que TP6.")
+                raise ValueError("partial_tp7_r must be greater than TP6.")
         if not (self.allow_long or self.allow_short):
-            raise ValueError("Debe habilitarse LONG, SHORT o ambos.")
+            raise ValueError("LONG, SHORT or both must be enabled.")
         if self.streak_trend_only and pd.Timedelta(self.trend_timeframe) <= pd.Timedelta(0):
-            raise ValueError("trend_timeframe debe ser positivo.")
+            raise ValueError("trend_timeframe must be positive.")
         if self.monthly_loss_limit_pct < 0:
-            raise ValueError("monthly_loss_limit_pct no puede ser negativo.")
+            raise ValueError("monthly_loss_limit_pct cannot be negative.")
         if self.monthly_loss_limit_days < 0:
-            raise ValueError("monthly_loss_limit_days no puede ser negativo.")
+            raise ValueError("monthly_loss_limit_days cannot be negative.")
         if self.adaptive_risk_window < 0:
-            raise ValueError("adaptive_risk_window no puede ser negativo.")
+            raise ValueError("adaptive_risk_window cannot be negative.")
         if self.adaptive_risk_window and not (0 < self.adaptive_risk_min <= self.adaptive_risk_max):
-            raise ValueError("Se requiere 0 < adaptive_risk_min <= adaptive_risk_max.")
+            raise ValueError("Requires 0 < adaptive_risk_min <= adaptive_risk_max.")
