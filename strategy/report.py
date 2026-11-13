@@ -468,6 +468,8 @@ def build_backtest_figure(
     weak_panels = [f"weak_tf_{i}" for i in range(len(weak_tfs))]
 
     panels = ["price"]
+    if signals is not None and "macd_line" in signals:
+        panels.append("macd")
     if signals is not None and "adx_entry" in signals:
         panels.append("adx")
     if signals is not None and "target" in signals:
@@ -477,7 +479,7 @@ def build_backtest_figure(
     if equity is not None and not equity.empty:
         panels.append("equity")
 
-    weights = {"price": 1.0, "adx": 0.25, "target": 0.2, "equity": 0.4}
+    weights = {"price": 1.0, "macd": 0.25, "adx": 0.25, "target": 0.2, "equity": 0.4}
     for name in adx_panels:
         weights[name] = 0.35
     for name in weak_panels:
@@ -679,6 +681,38 @@ def build_backtest_figure(
         if cfg.move_stop_to_breakeven:
             _level_trace("breakeven", BREAKEVEN_COLOR, "dot", lambda s, sign: s["entry_price"])
 
+    # -- Panel MACD --------------------------------------------------------
+    if "macd" in row:
+        rr = row["macd"]
+        macd_values = signals["macd_line"].to_numpy(float)
+        fig.add_trace(_line_trace(sig_x, macd_values, "MACD", NEUTRAL_COLOR, width=1.5),
+                      row=rr, col=1)
+        # Sombreado del signo: positivo en verde, negativo en rojo (zonas).
+        pos_mask = np.isfinite(macd_values) & (macd_values > 0)
+        neg_mask = np.isfinite(macd_values) & (macd_values < 0)
+        if pos_mask.any():
+            fig.add_trace(go.Scatter(
+                x=sig_x[pos_mask], y=_sig(macd_values[pos_mask]),
+                mode="markers", name="MACD > 0", showlegend=False,
+                marker=dict(size=3, color=UP_COLOR, opacity=0.35)), row=rr, col=1)
+        if neg_mask.any():
+            fig.add_trace(go.Scatter(
+                x=sig_x[neg_mask], y=_sig(macd_values[neg_mask]),
+                mode="markers", name="MACD < 0", showlegend=False,
+                marker=dict(size=3, color=DOWN_COLOR, opacity=0.35)), row=rr, col=1)
+        fig.add_hline(y=0, line=dict(color="#90a4ae", width=0.9, dash="dash"), row=rr, col=1)
+        # Marcadores de cruces filtrados por el MACD (sólo los aceptados).
+        if signals is not None and "cross_up" in signals:
+            cu = _flag(signals["cross_up"])
+            cd = _flag(signals["cross_down"])
+            if cu.any():
+                fig.add_trace(_marker_trace(sig_x[cu], macd_values[cu], "cruce ↑ (MACD>0)",
+                                            "triangle-up", UP_COLOR, 9), row=rr, col=1)
+            if cd.any():
+                fig.add_trace(_marker_trace(sig_x[cd], macd_values[cd], "cruce ↓ (MACD<0)",
+                                            "triangle-down", DOWN_COLOR, 9), row=rr, col=1)
+        fig.update_yaxes(title_text="MACD", row=rr, col=1)
+
     # -- Panel ADX de entrada ----------------------------------------------
     if "adx" in row:
         rr = row["adx"]
@@ -795,7 +829,7 @@ def build_backtest_figure(
         fig.update_yaxes(title_text="equity", row=rr, col=1)
 
     # -- Layout ------------------------------------------------------------
-    for name in ("adx", "target"):
+    for name in ("macd", "adx", "target"):
         if name in row:
             fig.update_xaxes(matches="x", row=row[name], col=1)
     fig.update_xaxes(rangeslider_visible=False, type="date")
