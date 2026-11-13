@@ -552,11 +552,21 @@ def build_backtest_figure(
                 fig.add_trace(_line_trace(bars_x, signals[column].to_numpy(float), label, color),
                               row=r, col=1, secondary_y=False)
     if "volume" in bars:
-        fig.add_trace(_line_trace(bars_x, bars["volume"].to_numpy(float), "volumen", "#607d8b",
-                                  width=0.6, fill="tozeroy", fillcolor="rgba(96,125,139,0.28)",
-                                  showlegend=False), row=r, col=1, secondary_y=True)
+        vol = bars["volume"].to_numpy(float)
+        # Barras de volumen tradicionales: color según la dirección de la vela.
+        vol_colors = np.where(bars["close"].to_numpy(float) >= bars["open"].to_numpy(float),
+                              UP_COLOR, DOWN_COLOR)
+        fig.add_trace(go.Bar(
+            x=bars_x, y=_sig(vol), name="volumen", showlegend=False,
+            marker=dict(color=vol_colors, opacity=0.55, line=dict(width=0)),
+            hovertemplate="vol %{y:,.0f}<extra></extra>"),
+            row=r, col=1, secondary_y=True)
+        vol_max = float(np.nanmax(vol)) if len(vol) else 1.0
+        fig.update_yaxes(title_text="vol", showgrid=False, range=[0, vol_max * 4 if vol_max > 0 else 1],
+                         row=r, col=1, secondary_y=True)
     fig.update_yaxes(title_text="precio", row=r, col=1, secondary_y=False)
-    fig.update_yaxes(title_text="vol", showgrid=False, row=r, col=1, secondary_y=True)
+    if "volume" not in bars:
+        fig.update_yaxes(title_text="vol", showgrid=False, row=r, col=1, secondary_y=True)
 
     # -- Señales de la estrategia (marcadores, pocos puntos -> SVG) ---------
     span_y = float(np.nanmax(bars_high) - np.nanmin(bars_low)) or 1.0
