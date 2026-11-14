@@ -46,6 +46,8 @@ def make_engine(*, touches_ema_before_tp3=False, slow_touch_high=82.0,
         partial_tp2_pct=10.0,
         partial_tp3_r=2.5,
         partial_tp3_pct=10.0,
+        partial_tp4_r=0.0,
+        partial_tp4_pct=0.0,
         tp3_ema_slow_penetration_pct=penetration_pct,
         entry_adx_enabled=False,
         entry_atr_enabled=False,
@@ -124,5 +126,5 @@ def test_slow_ema_touch_before_tp3_does_not_exit_short():
 
 
 def test_ema_penetration_parameter_must_be_nonnegative():
-    with pytest.raises(ValueError, match="no puede ser negativo"):
+    with pytest.raises(ValueError, match="cannot be negative"):
         Config(tp3_ema_slow_penetration_pct=-0.01)

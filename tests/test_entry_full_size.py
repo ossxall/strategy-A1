@@ -81,6 +81,9 @@ def test_tp1_on_entry_candle_keeps_exit_partial_without_entry_add():
     config.partial_tp_enabled = True
     config.partial_tp_r = 1.0
     config.partial_tp_pct = 50.0
+    for stage in range(2, 8):
+        setattr(config, f"partial_tp{stage}_r", 0.0)
+        setattr(config, f"partial_tp{stage}_pct", 0.0)
 
     events = build_events(
         bars, signals, None, None, None, config, "BTCUSDT", "30m"
@@ -88,5 +91,8 @@ def test_tp1_on_entry_candle_keeps_exit_partial_without_entry_add():
     exit_event = next(event for event in events if event["event"] == "EXIT")
 
     assert '"close_pct": 50.0' in exit_event["payload"]
-    assert exit_event["signal_time"] == ts_ms(index[1])
+    assert exit_event["bar_time"] == ts_ms(index[1])
+    assert exit_event["signal_time"] == ts_ms(index[2])
+    assert exit_event["price"] == bars.loc[index[1], "close"]
+    assert '"fill_price_is_simulated": true' in exit_event["payload"]
     assert not any(event["event"] == "ENTRY_ADD" for event in events)

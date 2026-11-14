@@ -177,6 +177,7 @@ def test_monthly_loss_limit_closes_position_and_blocks_reentry_until_month_end()
 
     assert trades.reason.tolist() == ["MONTHLY_LOSS_LIMIT_5%"]
     assert trades.pnl_net.iloc[0] == pytest.approx(-1000.0)
+    assert trades.exit_time.iloc[0] == bars.index[1] + pd.Timedelta("30min")
     assert engine.position is None
     assert engine.halt_until is not None
 

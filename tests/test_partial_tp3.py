@@ -34,6 +34,14 @@ def make_engine(side):
         rsi_divergence_exit_enabled=False,
         ema55_touch_exit_enabled=False,
         streak_trend_only=False,
+        partial_tp4_r=0,
+        partial_tp4_pct=0,
+        partial_tp5_r=0,
+        partial_tp5_pct=0,
+        partial_tp6_r=0,
+        partial_tp6_pct=0,
+        partial_tp7_r=0,
+        partial_tp7_pct=0,
     )
     engine = Backtester(bars, config, signals=signals)
     engine.position = Position(
@@ -51,14 +59,14 @@ def make_engine(side):
 
 
 @pytest.mark.parametrize("side", [1, -1])
-def test_tp3_closes_configured_percent_at_2_5r_for_both_sides(side):
+def test_tp3_closes_configured_percent_at_2r_for_both_sides(side):
     engine = make_engine(side)
 
     engine._manage(1)
 
     trade = engine.trades[0]
-    assert trade.reason == "PARTIAL_TP3_2.5R"
-    assert trade.exit_price == (125.0 if side == 1 else 75.0)
+    assert trade.reason == "PARTIAL_TP3_2R"
+    assert trade.exit_price == (120.0 if side == 1 else 80.0)
     assert trade.quantity == pytest.approx(0.1)
     assert engine.position is not None
     assert engine.position.partial3_done
@@ -67,11 +75,11 @@ def test_tp3_closes_configured_percent_at_2_5r_for_both_sides(side):
 
 def test_tp3_defaults_and_ordering_validation():
     config = Config()
-    assert config.partial_tp3_r == 2.5
+    assert config.partial_tp3_r == 2.0
     assert config.partial_tp3_pct == 10.0
-    assert Config(partial_tp2_r=0, partial_tp2_pct=0).partial_tp3_r == 2.5
+    assert Config(partial_tp2_r=0, partial_tp2_pct=0).partial_tp3_r == 2.0
 
-    with pytest.raises(ValueError, match="take-profit parcial 3"):
+    with pytest.raises(ValueError, match="partial take-profit 3"):
         Config(partial_tp3_r=0, partial_tp3_pct=10)
-    with pytest.raises(ValueError, match="mayor que TP2"):
-        Config(partial_tp3_r=1.75)
+    with pytest.raises(ValueError, match="greater than TP2"):
+        Config(partial_tp3_r=1.5)

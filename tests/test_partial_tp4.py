@@ -73,9 +73,9 @@ def test_tp4_defaults_and_ordering_validation():
     assert config.partial_tp4_pct == 10.0
     assert Config(partial_tp4_r=0, partial_tp4_pct=0).partial_tp4_r == 0
 
-    with pytest.raises(ValueError, match="take-profit parcial 4"):
+    with pytest.raises(ValueError, match="partial take-profit 4"):
         Config(partial_tp4_r=0, partial_tp4_pct=10)
-    with pytest.raises(ValueError, match="mayor que TP3"):
+    with pytest.raises(ValueError, match="greater than TP3"):
         Config(partial_tp4_r=2.0)
 
 
@@ -100,9 +100,9 @@ def test_tp5_defaults_and_ordering_validation():
     assert config.partial_tp5_pct == 10.0
     assert Config(partial_tp5_r=0, partial_tp5_pct=0).partial_tp5_r == 0
 
-    with pytest.raises(ValueError, match="take-profit parcial 5"):
+    with pytest.raises(ValueError, match="partial take-profit 5"):
         Config(partial_tp5_r=0, partial_tp5_pct=10)
-    with pytest.raises(ValueError, match="mayor que TP4"):
+    with pytest.raises(ValueError, match="greater than TP4"):
         Config(partial_tp5_r=2.5)
 
 
@@ -127,9 +127,9 @@ def test_tp6_defaults_and_ordering_validation():
     assert config.partial_tp6_pct == 10.0
     assert Config(partial_tp6_r=0, partial_tp6_pct=0).partial_tp6_r == 0
 
-    with pytest.raises(ValueError, match="take-profit parcial 6"):
+    with pytest.raises(ValueError, match="partial take-profit 6"):
         Config(partial_tp6_r=0, partial_tp6_pct=10)
-    with pytest.raises(ValueError, match="mayor que TP5"):
+    with pytest.raises(ValueError, match="greater than TP5"):
         Config(partial_tp6_r=3.0)
 
 
@@ -154,7 +154,7 @@ def test_tp7_defaults_and_ordering_validation():
     assert config.partial_tp7_pct == 10.0
     assert Config(partial_tp7_r=0, partial_tp7_pct=0).partial_tp7_r == 0
 
-    with pytest.raises(ValueError, match="take-profit parcial 7"):
+    with pytest.raises(ValueError, match="partial take-profit 7"):
         Config(partial_tp7_r=0, partial_tp7_pct=10)
-    with pytest.raises(ValueError, match="mayor que TP6"):
+    with pytest.raises(ValueError, match="greater than TP6"):
         Config(partial_tp7_r=3.5)

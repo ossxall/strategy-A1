@@ -124,8 +124,8 @@ def test_volume_decline_exit_is_ignored_when_disabled():
 
 
 def test_volume_exit_validation():
-    assert Config().volume_exit_bars == 10
-    assert Config().volume_exit_pct == 25.0
+    assert Config().volume_exit_bars == 20
+    assert Config().volume_exit_pct == 20.0
     assert Config(volume_exit_enabled=False, volume_exit_bars=1).volume_exit_bars == 1
 
     with pytest.raises(ValueError, match="volume_exit_bars"):

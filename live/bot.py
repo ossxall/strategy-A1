@@ -20,18 +20,21 @@ Reglas de diseño
 - Cada evento es idempotente: se deduplica por
   (symbol, interval, timeframe, event, signal, reason, bar_time).
 - Las decisiones se conocen al cierre de la vela y se ejecutan en la apertura
-  siguiente (igual que el backtest); por eso se guardan `bar_time` (vela de la
-  señal) y `signal_time` (momento de ejecución). Las salidas por stop,
-  breakeven, parcial, toque a la EMA slow o movimiento adverso desde la
-  confirmación se disparan dentro de la vela, por lo que `bar_time == signal_time`.
+  siguiente; por eso se guardan `bar_time` (vela de la señal) y `signal_time`
+  (apertura accionable). La intención de la última vela cerrada se publica sin
+  esperar al cierre de la vela siguiente. Las salidas intrabar reconstruidas
+  desde OHLC se publican al cierre de esa vela: `price`/`exit_price` usan el
+  cierre observado, mientras `simulated_exit_price`, `pnl_net` y `r_multiple`
+  son estimaciones del backtest, no fills reales.
 - `force_close_at_end` se desactiva: en vivo una posición abierta no debe
   cerrarse artificialmente al final de los datos disponibles.
 
 Orden de los eventos (para el consumidor)
 -----------------------------------------
 Cada posición genera un `ENTRY` y uno o más `EXIT` (partial TP, weakening,
-breakeven, stop, reversal o cierre completo). Para reproducir el backtest,
-ordena por `(signal_time, bar_time, event)` con `EXIT` antes que `ENTRY`:
+breakeven, stop, reversal o cierre completo). Ordena por
+`(signal_time, bar_time, event)`: una entrada de la vela anterior precede una
+salida intrabar; en una reversal de la misma vela, `EXIT` precede `ENTRY`.
 
 - `ENTRY`: `signal_time = bar_time + timeframe` (se ejecuta en la apertura
   siguiente a la vela de la señal).
@@ -39,13 +42,14 @@ ordena por `(signal_time, bar_time, event)` con `EXIT` antes que `ENTRY`:
   `signal_time = bar_time + timeframe` (se decide al cierre y se ejecuta en la
   apertura siguiente).
 - `EXIT` por STOP_LOSS / BREAKEVEN / PARTIAL_TP / EMA_SLOW_TOUCH /
-  CONFIRM_MOVE_AGAINST: ocurre dentro de la vela, por eso `signal_time ==
-  bar_time`. Si coincide con una apertura, la apertura va primero (bar_time
-  menor).
+  CONFIRM_MOVE_AGAINST: se reconstruye desde OHLC y se publica al cierre de la
+  vela que lo activó (`signal_time = bar_time + timeframe`). El fill informado
+  es una estimación; no debe confundirse con un precio ejecutable garantizado.
 
 El `payload` de cada `EXIT` incluye `action` (`CLOSE`/`PARTIAL_CLOSE`),
 `close_pct` (porcentaje de la posición *restante* a cerrar, igual que el
-backtest), `exit_price`, `pnl_net` y `r_multiple`.
+backtest), `exit_price`, `pnl_net` y `r_multiple`. En salidas intrabar,
+`fill_price_is_simulated` identifica explícitamente las métricas estimadas.
 
 Uso
 ---
@@ -56,7 +60,7 @@ Uso
 Modo live-only
 --------------
 Con `--live-only` (o `LIVE_ONLY=true`) el bot ignora el histórico y publica
-solo las señales cuya vela (`bar_time`) es igual o posterior al arranque; así
+solo las señales cuyo momento accionable (`signal_time`) es igual o posterior al arranque; así
 no vuelca de golpe todas las señales pasadas al ponerse en marcha. La marca de
 arranque se guarda en `signal.db` (`bot_state.live_since_ms`) para no perder
 señales entre reinicios. Para reanudar desde una fecha concreta:
@@ -99,12 +103,28 @@ _LEGACY_DIR = _BASE_DIR.parent                       # .../bin/legacy
 for _path in (_LEGACY_DIR, _BASE_DIR):               # bot1/ queda primero
     sys.path.insert(0, str(_path))
 
-from server import SeriesSnapshot, start_server
+try:
+    from server import SeriesSnapshot, start_server
+except ModuleNotFoundError as exc:
+    if exc.name != "server":
+        raise
+
+    # El endpoint de diagnóstico es opcional; el bot de señales debe poder
+    # arrancar aunque el módulo HTTP no esté instalado en este checkout.
+    class SeriesSnapshot:
+        def __init__(self, *args, **kwargs):
+            raise RuntimeError("El endpoint HTTP requiere el módulo server.")
+
+    start_server = None
+    HTTP_SERVER_AVAILABLE = False
+else:
+    HTTP_SERVER_AVAILABLE = True
 from strategy.strategy import (
     Backtester,
     Config,
     EMACrossStrategy,
 )
+from strategy.models import CROSS_REASON
 from strategy.utils import resample_ohlcv, source_minutes
 
 try:
@@ -547,16 +567,22 @@ def build_series_frames(
 def events_to_trades(events: list[dict]) -> list[dict]:
     """Eventos ENTRY/EXIT -> trades planos para graficar (tiempos en epoch ms).
 
-    Se ordenan como el backtest: por tiempo de ejecución, EXIT antes que ENTRY.
+    Se ordenan por tiempo y vela de origen. Si una salida intrabar coincide con
+    una entrada en la apertura, la entrada (vela anterior) aparece primero;
+    para reversals en la misma vela, EXIT aparece antes que ENTRY.
     """
     trades = [
         {
             "event": e["event"], "side": e["side"], "reason": e["reason"],
-            "time": e["signal_time"], "price": e["price"], **json.loads(e["payload"]),
+            "time": e["signal_time"], "bar_time": e["bar_time"],
+            "price": e["price"], **json.loads(e["payload"]),
         }
         for e in events
     ]
-    return sorted(trades, key=lambda t: (t["time"], t["event"] != "EXIT"))
+    return sorted(
+        trades,
+        key=lambda t: (t["time"], t["bar_time"], t["event"] != "EXIT"),
+    )
 
 
 def _reason_is_intrabar(reason: str) -> bool:
@@ -578,8 +604,8 @@ def build_events(
     """Ejecuta el backtest y traduce cada acción real a un evento.
 
     Reutiliza el motor `Backtester` de `strategy/strategy.py` sobre las velas
-    cerradas, de modo que el bot publica exactamente las acciones que tomaría
-    el backtest: aperturas (incluidas reversals), cierres por EMA_CROSS,
+    cerradas, publica las acciones ya ejecutadas y las intenciones pendientes
+    de la última vela para la próxima apertura: aperturas (incluidas reversals), cierres por EMA_CROSS,
     ADX_REVERSAL, EMA_WEAKENING, RSI_DIVERGENCE y
     EMA55_REPEATED_TOUCH_WEAKNESS(_SHORT), además de STOP_LOSS, BREAKEVEN,
     PARTIAL_TP y EMA_SLOW_TOUCH. La posición abierta al final no se
@@ -604,6 +630,12 @@ def build_events(
         zip(
             bars.index.as_unit("ms").asi8.tolist(),  # epoch ms, sea cual sea la unidad
             zip(*(signals[c].to_numpy(float) for c in ("ema_fast", "ema_slow", "adx_entry"))),
+        )
+    )
+    closes = dict(
+        zip(
+            bars.index.as_unit("ms").asi8.tolist(),
+            bars["close"].to_numpy(float),
         )
     )
 
@@ -673,8 +705,12 @@ def build_events(
         )
         prior_closed_quantity = 0.0
         for leg in sorted(legs[position_id], key=lambda item: item.trade_id):
-            signal_time = ts_ms(leg.exit_time)
-            bar_time = signal_time if _reason_is_intrabar(leg.reason) else signal_time - tf_ms
+            intrabar = _reason_is_intrabar(leg.reason)
+            bar_time = ts_ms(leg.exit_time) if intrabar else ts_ms(leg.exit_time) - tf_ms
+            # El bot solo recibe velas cerradas. Por tanto, un trigger
+            # intrabar reconstruido desde OHLC se conoce/publica al cierre,
+            # no en la apertura histórica que usa el backtester como proxy.
+            signal_time = bar_time + tf_ms if intrabar else ts_ms(leg.exit_time)
             # El consumidor cierra un porcentaje de la cantidad restante.
             quantity_before_close = initial_quantity - prior_closed_quantity
             close_pct = (
@@ -682,22 +718,96 @@ def build_events(
                 if quantity_before_close > 0 else 100.0
             )
             r_multiple = leg.pnl_net / leg.position_risk if leg.position_risk else None
+            event_price = leg.exit_price
+            payload = {
+                "action": "CLOSE" if close_pct >= 99.999 else "PARTIAL_CLOSE",
+                "position_id": position_id,
+                "close_pct": close_pct,
+                "exit_price": opt_float(leg.exit_price),
+                "pnl_net": opt_float(leg.pnl_net),
+                "r_multiple": opt_float(r_multiple),
+            }
+            if intrabar:
+                # Es una referencia del backtest, no una garantía de fill real:
+                # el proceso solo la observó al cierre de la vela.
+                payload["fill_price_is_simulated"] = True
+                payload["simulated_exit_price"] = opt_float(leg.exit_price)
+                payload["pnl_is_simulated"] = True
+                event_price = closes.get(bar_time, leg.exit_price)
+                payload["observed_close"] = opt_float(event_price)
+                payload["exit_price"] = opt_float(event_price)
             events.append(
                 make_event(
-                    "EXIT", leg.side, leg.reason, bar_time, signal_time, leg.exit_price,
-                    {
-                        "action": "CLOSE" if close_pct >= 99.999 else "PARTIAL_CLOSE",
-                        "position_id": position_id,
-                        "close_pct": close_pct,
-                        "exit_price": opt_float(leg.exit_price),
-                        "pnl_net": opt_float(leg.pnl_net),
-                        "r_multiple": opt_float(r_multiple),
-                    },
+                    "EXIT", leg.side, leg.reason, bar_time, signal_time, event_price,
+                    payload,
                 )
             )
             prior_closed_quantity += leg.quantity
 
-    return events
+    # Un backtest necesita la siguiente vela para simular una orden en su
+    # apertura. El bot live no debe esperar a que esa vela también cierre:
+    # publica al cierre actual la intención pendiente para la próxima apertura.
+    if len(bars):
+        last_bar_time = ts_ms(bars.index[-1])
+        next_open_time = last_bar_time + tf_ms
+        if engine.pending_target is not None:
+            target = int(engine.pending_target)
+            position = engine.position
+            if position is not None and position.side != target:
+                old_side = "LONG" if position.side == 1 else "SHORT"
+                events.append(
+                    make_event(
+                        "EXIT", old_side, CROSS_REASON, last_bar_time,
+                        next_open_time, None,
+                        {
+                            "action": "CLOSE",
+                            "position_id": position.position_id,
+                            "close_pct": 100.0,
+                            "exit_price": None,
+                            "pnl_net": None,
+                            "r_multiple": None,
+                            "pending": True,
+                        },
+                    )
+                )
+            if position is None or position.side != target:
+                new_side = "LONG" if target == 1 else "SHORT"
+                events.append(
+                    make_event(
+                        "ENTRY", new_side, "EMA_CROSS", last_bar_time,
+                        next_open_time, None,
+                        {
+                            "action": "OPEN",
+                            "position_id": engine.position_id + 1,
+                            "entry_pct": 100.0,
+                            "pending": True,
+                        },
+                    )
+                )
+        elif engine.pending_exit is not None and engine.position is not None:
+            reason, close_pct = engine.pending_exit
+            side = "LONG" if engine.position.side == 1 else "SHORT"
+            events.append(
+                make_event(
+                    "EXIT", side, reason, last_bar_time, next_open_time, None,
+                    {
+                        "action": "CLOSE" if close_pct >= 99.999 else "PARTIAL_CLOSE",
+                        "position_id": engine.position.position_id,
+                        "close_pct": close_pct,
+                        "exit_price": None,
+                        "pnl_net": None,
+                        "r_multiple": None,
+                        "pending": True,
+                    },
+                )
+            )
+
+    return sorted(
+        events,
+        key=lambda event: (
+            event["signal_time"], event["bar_time"], event["event"] != "EXIT"
+        ),
+    )
 
 
 # ===========================================================================
@@ -796,8 +906,9 @@ class SignalBot:
             raw, bars, (signals, adx_exit, weak_exit, rsi_div_exit), events
         )
         if self.live_since_ms is not None:
-            # live-only: descarta las señales anteriores al arranque.
-            events = [e for e in events if e["bar_time"] >= self.live_since_ms]
+            # Filtrar por tiempo accionable: la vela de señal puede haber
+            # empezado antes del arranque y cerrarse justo al entrar en live.
+            events = [e for e in events if e["signal_time"] >= self.live_since_ms]
         inserted = self.store.insert(events)
         if inserted:
             logger.info(
@@ -901,10 +1012,17 @@ def main() -> int:
 
     feed = FeedReader(feed_path, symbol, interval)
     store = SignalStore(signal_path)
-    snapshot = SeriesSnapshot(symbol, interval) if args.http_port > 0 else None
+    snapshot = (
+        SeriesSnapshot(symbol, interval)
+        if args.http_port > 0 and HTTP_SERVER_AVAILABLE else None
+    )
     http_server = None
     try:
         store.connect()
+        if args.http_port > 0 and not HTTP_SERVER_AVAILABLE:
+            logger.warning(
+                "Módulo server no disponible; el endpoint HTTP de debug queda desactivado."
+            )
         if snapshot is not None:
             try:
                 http_server = start_server(snapshot, args.http_host, args.http_port)

@@ -923,7 +923,12 @@ class Backtester:
                         scope = "resto del mes"
                     if cfg.monthly_loss_limit_close and self.position is not None:
                         reason = f"{MONTHLY_LIMIT_REASON}_{cfg.monthly_loss_limit_pct:g}%"
-                        self.close_position(100, self.c[i], self.times[i], reason)
+                        self.close_position(
+                            100,
+                            self.c[i],
+                            self.times[i] + pd.Timedelta(cfg.timeframe),
+                            reason,
+                        )
                     print(f"[GUARD] {self.times[i]:%Y-%m-%d} límite "
                           f"-{cfg.monthly_loss_limit_pct:g}% alcanzado; sin entradas hasta "
                           f"{scope}", flush=True)
