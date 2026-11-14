@@ -3,19 +3,22 @@
 from __future__ import annotations
 
 import json
+import mimetypes
 import os
+import shutil
 import sqlite3
 import threading
 import time
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from .config import logger
 
 HEALTH_ROUTE = "/live/bot/health"
 STATUS_ROUTE = "/live/bot/status"
+BACKTEST_ROUTE = "/live/bot/backtest"
 LEGACY_ROUTES = ("/health", "/status")
 HEALTH_ROUTES = (HEALTH_ROUTE, STATUS_ROUTE, *LEGACY_ROUTES)
 _INTERVAL_SECONDS = {"s": 1, "m": 60, "h": 3600, "d": 86_400, "w": 604_800}
@@ -417,6 +420,7 @@ def _make_handler(
     host: str,
     configured_port: int,
     request_timeout: float,
+    backtest_dir: Path | None = None,
 ):
     class _BotHealthHandler(BaseHTTPRequestHandler):
         server_version = "bot-health/1.0"
@@ -440,15 +444,66 @@ def _make_handler(
             self.end_headers()
             self.wfile.write(body)
 
+        def serve_backtest_file(self, request_path: str):
+            if backtest_dir is None:
+                self.send_error(404, "visor live no disponible")
+                return
+            if request_path == BACKTEST_ROUTE:
+                self.send_response(308)
+                self.send_header("Location", f"{BACKTEST_ROUTE}/")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+
+            root = backtest_dir.resolve()
+            relative = unquote(request_path[len(BACKTEST_ROUTE):]).lstrip("/")
+            if not relative:
+                relative = "backtest.html"
+            try:
+                target = (root / relative).resolve()
+                target.relative_to(root)
+                if not target.is_file():
+                    self.send_error(404, "archivo no encontrado")
+                    return
+                with target.open("rb") as content:
+                    size = os.fstat(content.fileno()).st_size
+                    content_type, _ = mimetypes.guess_type(target.name)
+                    content_type = content_type or "application/octet-stream"
+                    if content_type.startswith("text/") or content_type in {
+                        "application/json",
+                        "application/javascript",
+                    }:
+                        content_type += "; charset=utf-8"
+                    self.send_response(200)
+                    self.send_header("Content-Type", content_type)
+                    self.send_header("Content-Length", str(size))
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("X-Content-Type-Options", "nosniff")
+                    self.send_header("Connection", "close")
+                    self.end_headers()
+                    shutil.copyfileobj(content, self.wfile)
+            except (OSError, RuntimeError, ValueError):
+                self.send_error(404, "archivo no encontrado")
+
         def do_GET(self):
             path = urlparse(self.path).path
+            if path == BACKTEST_ROUTE or path.startswith(f"{BACKTEST_ROUTE}/"):
+                try:
+                    self.serve_backtest_file(path)
+                except OSError:
+                    pass
+                return
             if path not in HEALTH_ROUTES:
                 try:
                     self.send_json(
                         404,
                         {
                             "error": "ruta no encontrada",
-                            "routes": [HEALTH_ROUTE, STATUS_ROUTE],
+                            "routes": [
+                                HEALTH_ROUTE,
+                                STATUS_ROUTE,
+                                f"{BACKTEST_ROUTE}/",
+                            ],
                         },
                     )
                 except OSError:
@@ -496,8 +551,9 @@ def start_health_server(
     request_timeout: float = 1.0,
     probe_interval: float = 5.0,
     probe_timeout: float = 0.2,
+    backtest_dir: Path | None = None,
 ):
-    handler = _make_handler(health, host, port, request_timeout)
+    handler = _make_handler(health, host, port, request_timeout, backtest_dir)
     server = _BotHealthHTTPServer(
         (host, port), handler, max_clients=max(1, max_clients)
     )
@@ -524,9 +580,10 @@ def start_health_server(
     http_thread.start()
     probe_thread.start()
     logger.info(
-        "Salud JSON del bot disponible en http://%s:%s%s (alias %s)",
+        "HTTP del bot disponible en http://%s:%s%s (salud: %s, alias: %s)",
         host,
         server.server_address[1],
+        f"{BACKTEST_ROUTE}/",
         HEALTH_ROUTE,
         STATUS_ROUTE,
     )

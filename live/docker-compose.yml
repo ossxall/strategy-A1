@@ -65,6 +65,9 @@ services:
   bot:
     <<: *common
     command: ["python", "-m", "bot"]
+    volumes:
+      - bot_data:/data
+      - bot_reports:/app/legacy/bot1/bot/data
     ports:
       - "127.0.0.1:8080:8080"
     depends_on:
@@ -74,7 +77,7 @@ services:
     environment:
       DB_PATH: /data/feed.db
       SIGNAL_DB: /data/signal.db
-      BACKTEST_REPORT_DIR: /data/backtest_out
+      BACKTEST_REPORT_DIR: /app/legacy/bot1/bot/data/backtest_out
       BOT_HEARTBEAT: /data/bot1.heartbeat
       HTTP_HOST: 0.0.0.0
       HTTP_PORT: "8080"
@@ -89,3 +92,5 @@ services:
 volumes:
   bot_data:
     name: blacker-bot1-data
+  bot_reports:
+    name: blacker-bot1-reports

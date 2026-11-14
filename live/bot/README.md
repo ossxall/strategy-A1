@@ -19,17 +19,17 @@ entorno del contenedor. No se admiten argumentos de terminal.
 
 ## Visor de backtest live
 
-El bot actualiza el visor mensual al cambiar una vela de estrategia. Por defecto
-escribe `data/backtest_out/html/backtest.html` y los datos JSON en
-`data/backtest_out/html/data/`. En Docker Compose, `BACKTEST_REPORT_DIR` apunta
-a `/data/backtest_out`, dentro del volumen persistente. Se puede cambiar con esa
-misma variable de entorno.
+El bot actualiza el visor mensual al cambiar una vela de estrategia. Escribe
+`live/bot/data/backtest_out/html/backtest.html` y los datos JSON en
+`live/bot/data/backtest_out/html/data/`. En Docker Compose, `BACKTEST_REPORT_DIR`
+apunta a `/app/legacy/bot1/bot/data/backtest_out`, persistido en el volumen
+`blacker-bot1-reports`. Se puede cambiar con esa misma variable de entorno.
 
 `backtest.html` es una plantilla estática compartida con `strategy/report.py`;
 no contiene resultados. Consume `data/manifest.json` y los JSON mensuales. Para
-verlo, hay que servir la carpeta por HTTP (por ejemplo, `python -m http.server`
-desde el directorio `html`); abrir el archivo directamente con `file://` bloquea
-la carga de esos datos en algunos navegadores.
+verlo, usa `http://127.0.0.1:8080/live/bot/backtest/`; el endpoint también sirve
+los archivos JSON solicitados por la página. Abrir el HTML directamente con
+`file://` bloquea la carga de esos datos en algunos navegadores.
 
 ## Salud HTTP
 
@@ -38,6 +38,9 @@ del proceso, los ciclos recientes, la frescura de las velas, la disponibilidad
 de `signal.db`, los umbrales y los checks calculados. También se conservan
 `/health` y `/status` como alias cortos. La respuesta es JSON; devuelve HTTP
 200 cuando está sano y 503 cuando está degradado o no sano.
+
+`GET /live/bot/backtest/` sirve el visor estático live y los archivos de datos
+bajo el directorio generado del reporte.
 
 El servidor usa concurrencia limitada y solo lee una instantánea en memoria.
 El sondeo de SQLite ocurre en un hilo aparte con timeout, por lo que las

@@ -1,4 +1,5 @@
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -350,7 +351,7 @@ def test_live_only_includes_event_actionable_at_start_even_if_signal_bar_started
     assert store.inserted == [event]
 
 
-def test_live_backtest_files_refresh_only_when_strategy_bars_change(
+def test_live_backtest_files_refresh_when_bars_change_or_output_is_removed(
     tmp_path, monkeypatch
 ):
     bars = make_bars(2)
@@ -363,10 +364,20 @@ def test_live_backtest_files_refresh_only_when_strategy_bars_change(
         backtest_report_dir=tmp_path,
     )
     calls = []
-    monkeypatch.setattr(
-        "strategy.report.build_monthly_backtest_htmls",
-        lambda *args, **kwargs: calls.append((args, kwargs)),
-    )
+
+    def write_report(*args, **kwargs):
+        calls.append((args, kwargs))
+        html_dir = kwargs["output_dir"] / "html"
+        page_dir = html_dir / "data" / "pages"
+        page_dir.mkdir(parents=True, exist_ok=True)
+        (html_dir / "backtest.html").write_text("visor", encoding="utf-8")
+        (page_dir / "2026-01.json").write_text("{}", encoding="utf-8")
+        (html_dir / "data" / "manifest.json").write_text(
+            '{"pages":[{"file":"pages/2026-01.json"}]}',
+            encoding="utf-8",
+        )
+
+    monkeypatch.setattr("strategy.report.build_monthly_backtest_htmls", write_report)
 
     bot._publish_backtest_files(
         bars, bars, make_signals(bars, [0, 0]), None, None, None,
@@ -379,10 +390,18 @@ def test_live_backtest_files_refresh_only_when_strategy_bars_change(
     assert len(calls) == 1
     assert calls[0][1]["output_dir"] == tmp_path
 
+    shutil.rmtree(tmp_path / "html")
+    bot._publish_backtest_files(
+        bars, bars, make_signals(bars, [0, 0]), None, None, None,
+        pd.DataFrame(), pd.DataFrame(),
+    )
+    assert len(calls) == 2
+    assert (tmp_path / "html" / "backtest.html").is_file()
+
     updated = bars.copy()
     updated.iloc[-1, updated.columns.get_loc("close")] += 1
     bot._publish_backtest_files(
         updated, updated, make_signals(updated, [0, 0]), None, None, None,
         pd.DataFrame(), pd.DataFrame(),
     )
-    assert len(calls) == 2
+    assert len(calls) == 3

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import time
 
@@ -145,7 +146,10 @@ class SignalBot:
             bars.index[-1].value,
             tuple(bars.iloc[-1].to_list()),
         )
-        if signature == self._last_report_signature:
+        if (
+            signature == self._last_report_signature
+            and self._backtest_files_available()
+        ):
             return
         try:
             from strategy.report import build_monthly_backtest_htmls
@@ -167,6 +171,25 @@ class SignalBot:
             logger.exception("No se pudieron actualizar los archivos del backtest live")
             return
         self._last_report_signature = signature
+
+    def _backtest_files_available(self) -> bool:
+        """Comprueba que el último reporte publicado siga completo en disco."""
+        html_dir = Path(self.backtest_report_dir) / "html"
+        manifest_path = html_dir / "data" / "manifest.json"
+        if not (html_dir / "backtest.html").is_file() or not manifest_path.is_file():
+            return False
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            pages = manifest["pages"]
+            data_dir = manifest_path.parent.resolve()
+            for page in pages:
+                page_path = (data_dir / page["file"]).resolve()
+                page_path.relative_to(data_dir)
+                if not page_path.is_file():
+                    return False
+        except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+            return False
+        return True
 
     def process_once(self) -> int:
         """Lee datos cerrados, calcula acciones y persiste los eventos nuevos."""
@@ -337,6 +360,7 @@ def main() -> int:
                     request_timeout=http_request_timeout,
                     probe_interval=health_probe_interval,
                     probe_timeout=health_probe_timeout,
+                    backtest_dir=backtest_report_dir / "html",
                 )
             except OSError:
                 logger.exception(

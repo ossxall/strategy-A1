@@ -84,6 +84,47 @@ def test_health_and_status_routes_return_nonblocking_json(tmp_path):
         probe_thread.join(timeout=1)
 
 
+def test_backtest_route_serves_html_and_data_without_escaping_report_dir(tmp_path):
+    html_dir = tmp_path / "backtest" / "html"
+    (html_dir / "data" / "pages").mkdir(parents=True)
+    (html_dir / "backtest.html").write_text("<h1>visor live</h1>", encoding="utf-8")
+    (html_dir / "data" / "manifest.json").write_text('{"pages":[]}', encoding="utf-8")
+    secret = tmp_path / "secret.txt"
+    secret.write_text("no publicar", encoding="utf-8")
+
+    health = _make_health(tmp_path)
+    server, http_thread, probe_thread = start_health_server(
+        health,
+        "127.0.0.1",
+        0,
+        tmp_path / "signal.db",
+        backtest_dir=html_dir,
+    )
+    base_url = f"http://127.0.0.1:{server.server_address[1]}/live/bot/backtest"
+    try:
+        with urlopen(base_url + "/", timeout=1) as response:
+            assert response.status == 200
+            assert response.headers["Content-Type"].startswith("text/html")
+            assert response.read() == b"<h1>visor live</h1>"
+
+        with urlopen(base_url + "/data/manifest.json", timeout=1) as response:
+            assert response.headers["Content-Type"].startswith("application/json")
+            assert json.load(response) == {"pages": []}
+
+        try:
+            urlopen(base_url + "/%2e%2e/secret.txt", timeout=1)
+        except HTTPError as response:
+            assert response.code == 404
+        else:
+            raise AssertionError("El endpoint no debe servir fuera de html/")
+    finally:
+        health.stop()
+        server.shutdown()
+        server.server_close()
+        http_thread.join(timeout=1)
+        probe_thread.join(timeout=1)
+
+
 def test_health_endpoint_returns_promptly_if_snapshot_lock_is_held(tmp_path):
     health = _make_health(tmp_path)
     server, http_thread, probe_thread = start_health_server(
