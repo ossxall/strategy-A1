@@ -88,7 +88,8 @@ El executor fija un corte inicial por cuenta con un margen corto de recuperació
 al 1%. Interpreta el límite de 10 USDT como margen estimado por orden (hasta
 110 USDT de notional a 10x), no como notional ni como límite de pérdidas o
 comisiones. Alterna ciclos LONG/SHORT de entrada, cierre parcial del 50%,
-movimiento del stop a breakeven y cierre total; espera 10 s entre ciclos. Usa
+movimiento del stop a breakeven y cierre total; espera 10 s entre ciclos y se
+detiene tras completar un LONG y un SHORT, antes de repetir el patrón. Usa
 una base de señales y un ledger separados. Se niega a empezar si BTCUSDT no está
 flat o tiene órdenes abiertas, y se detiene ante cualquier error. Los filtros
 del exchange deben permitir un cierre parcial dentro del tope; si no, no envía

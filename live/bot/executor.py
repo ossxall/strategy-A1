@@ -1893,6 +1893,62 @@ class ExecutionWorker:
             "partial_completed": True,
         }
 
+    def _resolve_finished_test_breakeven(
+        self, position_id: int, side: str
+    ) -> bool:
+        """Reconciles a BE stop that finished between placement and verification."""
+        snapshot = self._reconcile_protective_stops(
+            self._account_snapshot(force=True)
+        )
+        if snapshot.get("reconciliation_error"):
+            raise RuntimeError(str(snapshot["reconciliation_error"]))
+        active = self.store.get_active_execution_positions(
+            self.settings.account_id, self.settings.symbol
+        )
+        position = self._position_for_symbol(snapshot)
+        if position is None:
+            if len(active) == 1 and active[0]["position_id"] == position_id:
+                recovery = self._recover_test_active_position(
+                    active[0], snapshot
+                )
+                if not recovery.get("already_flat"):
+                    raise RuntimeError(
+                        "El stop a breakeven terminó, pero el ledger no quedó flat."
+                    )
+                active = self.store.get_active_execution_positions(
+                    self.settings.account_id, self.settings.symbol
+                )
+            if not active:
+                LOG.warning(
+                    "EXECUTOR_TEST_MODE: stop a breakeven cerró la posición; "
+                    "ciclo completado."
+                )
+                return True
+            raise RuntimeError(
+                "El stop terminó pero queda una posición lógica sin fill "
+                "reconciliado."
+            )
+        if len(active) != 1 or active[0]["position_id"] != position_id:
+            raise RuntimeError(
+                "Stop a breakeven terminó con una posición no correlacionada."
+            )
+        actual_side = "LONG" if position["position_amt"] > 0 else "SHORT"
+        expected_qty = _decimal(active[0]["open_qty"], "open_qty")
+        actual_qty = abs(_decimal(position["position_amt"], "positionAmt"))
+        tolerance = self._rules_cache[self.settings.symbol]["step_size"] / 2
+        if actual_side != side or abs(actual_qty - expected_qty) > tolerance:
+            raise RuntimeError(
+                "Posición Binance difiere del ledger tras finalizar breakeven."
+            )
+        entry_signal = self._test_entry_signal(position_id)
+        sl_id = self._ensure_protective_stop(entry_signal, snapshot)
+        self._verify_protective_stop(sl_id)
+        LOG.warning(
+            "EXECUTOR_TEST_MODE: BE terminó con remanente; SL original "
+            "confirmado para cerrar el ciclo."
+        )
+        return False
+
     def _recover_test_inflight(self) -> dict | None:
         """Recupera un ENTRY test solo tras verificarlo con Binance."""
         inflight = self.store.list_inflight_executions(
@@ -2156,7 +2212,18 @@ class ExecutionWorker:
             recovered.get("stop_variant", "sl") if recovered else "sl"
         )
         stop_id = self._algo_order_id(position_id, stop_variant)
-        self._verify_protective_stop(stop_id)
+        try:
+            self._verify_protective_stop(stop_id)
+        except RuntimeError:
+            if stop_variant != "be":
+                raise
+            if self._resolve_finished_test_breakeven(position_id, side):
+                self._test_next_side = (
+                    "SHORT" if side == "LONG" else "LONG"
+                )
+                return
+            stop_id = self._algo_order_id(position_id, "sl")
+            self._verify_protective_stop(stop_id)
 
         partial_completed = bool(
             recovered and recovered.get("partial_completed")
@@ -2174,11 +2241,26 @@ class ExecutionWorker:
             stop_id = partial_result.get(
                 "protective_stop_client_algo_id"
             ) or self._algo_order_id(position_id, "sl")
-        else:
-            stop_id = self._algo_order_id(
-                position_id, recovered.get("stop_variant", "sl")
+            stop_variant = (
+                "be"
+                if stop_id == self._algo_order_id(position_id, "be")
+                else "sl"
             )
-        self._verify_protective_stop(stop_id)
+        else:
+            stop_variant = recovered.get("stop_variant", "sl")
+            stop_id = self._algo_order_id(position_id, stop_variant)
+        try:
+            self._verify_protective_stop(stop_id)
+        except RuntimeError:
+            if stop_variant != "be":
+                raise
+            if self._resolve_finished_test_breakeven(position_id, side):
+                self._test_next_side = (
+                    "SHORT" if side == "LONG" else "LONG"
+                )
+                return
+            stop_id = self._algo_order_id(position_id, "sl")
+            self._verify_protective_stop(stop_id)
 
         self._run_test_signal(
             event="EXIT",
@@ -2479,13 +2561,22 @@ def main() -> int:
             LOG.warning(
                 "EXECUTOR_TEST_MODE activo: BTCUSDT, tope de margen %s USDT "
                 "por orden a un máximo de %sx, stop-loss %s%%. "
-                "El flujo alterna LONG/SHORT y se detiene ante cualquier "
-                "inconsistencia.",
+                "El flujo alterna LONG/SHORT y se detiene antes de repetir "
+                "el patrón.",
                 TEST_MODE_MAX_MARGIN_USDT,
                 TEST_MODE_MAX_LEVERAGE,
                 TEST_MODE_STOP_LOSS_PCT * 100,
             )
+            completed_sides: set[str] = set()
             while not STOP_EVENT.is_set():
+                side = worker._test_next_side
+                if side in completed_sides:
+                    LOG.warning(
+                        "EXECUTOR_TEST_MODE: el siguiente ciclo repetiría %s; "
+                        "modo detenido.",
+                        side,
+                    )
+                    break
                 try:
                     worker.run_test_sequence()
                 except Exception:
@@ -2493,6 +2584,16 @@ def main() -> int:
                         "EXECUTOR_TEST_MODE detenido; no se inicia otra secuencia"
                     )
                     return 1
+                if STOP_EVENT.is_set():
+                    break
+                completed_sides.add(side)
+                if worker._test_next_side in completed_sides:
+                    LOG.warning(
+                        "EXECUTOR_TEST_MODE: ciclo LONG/SHORT completado; "
+                        "detenido antes de repetir %s.",
+                        worker._test_next_side,
+                    )
+                    break
                 STOP_EVENT.wait(TEST_MODE_PAUSE_SECONDS)
         else:
             while not STOP_EVENT.is_set():
