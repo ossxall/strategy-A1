@@ -506,7 +506,13 @@ def build_backtest_figure(
             if column in signals or (timeframe == cfg.entry_adx_timeframes[0] and "adx_entry" in signals):
                 adx_entry_panels.append(f"adx_entry_tf_{len(adx_entry_panels)}")
     panels.extend(adx_entry_panels)
-    if signals is not None and "atr" in signals:
+    atr_filter_enabled = (
+        cfg.entry_atr_enabled
+        and signals is not None
+        and {"atr", "atr_mean", "atr_ratio", "atr_filter_ready", "atr_filter_allowed"}
+        .issubset(signals.columns)
+    )
+    if atr_filter_enabled:
         panels.append("atr")
     if signals is not None and "entry_mfi" in signals:
         panels.append("mfi")
@@ -528,7 +534,8 @@ def build_backtest_figure(
     for name in weak_panels:
         weights[name] = 0.35
     total_weight = sum(weights[name] for name in panels)
-    specs = [[{"secondary_y": name == "price" or name in adx_panels}] for name in panels]
+    specs = [[{"secondary_y": name == "price" or name == "atr" or name in adx_panels}]
+             for name in panels]
     fig = make_subplots(
         rows=len(panels), cols=1, shared_xaxes=False, vertical_spacing=0.035,
         row_heights=[weights[name] / total_weight for name in panels], specs=specs,
@@ -812,18 +819,108 @@ def build_backtest_figure(
         title = "ADX" if timeframe is None else f"ADX {timeframe}"
         fig.update_yaxes(title_text=title, row=rr, col=1)
 
-    # -- Panel ATR ---------------------------------------------------------
+    # -- Panel del filtro ATR ----------------------------------------------
     if "atr" in row:
         rr = row["atr"]
-        fig.add_trace(_line_trace(sig_x, signals["atr"].to_numpy(float), "ATR", "#ffca28", width=1.3),
-                      row=rr, col=1)
-        if "atr_mean" in signals:
-            fig.add_trace(_line_trace(sig_x, signals["atr_mean"].to_numpy(float), "ATR media", "#90a4ae",
-                                      width=1.0, dash="dash"), row=rr, col=1)
-        if cfg.entry_atr_enabled and cfg.entry_atr_min_ratio is not None:
-            # Banda visual del umbral mínimo/máximo sobre el ATR medio.
-            pass
-        fig.update_yaxes(title_text="ATR", row=rr, col=1)
+        atr_values = signals["atr"].to_numpy(float)
+        atr_mean = signals["atr_mean"].to_numpy(float)
+        ratio = signals["atr_ratio"].to_numpy(float)
+        ready = _flag(signals["atr_filter_ready"])
+        allowed = _flag(signals["atr_filter_allowed"])
+
+        fig.add_trace(_line_trace(sig_x, atr_values, "ATR", "#ffca28", width=1.3),
+                      row=rr, col=1, secondary_y=False)
+        fig.add_trace(_line_trace(sig_x, atr_mean, "ATR media previa", "#90a4ae",
+                                  width=1.0, dash="dash"),
+                      row=rr, col=1, secondary_y=False)
+
+        # Acota valores extremos para que el rango permitido siga siendo legible;
+        # el hover conserva el ratio real, incluso si se dibuja en el borde.
+        finite_ratio = ratio[np.isfinite(ratio) & (ratio >= 0)]
+        percentile = float(np.percentile(finite_ratio, 99)) if len(finite_ratio) else 0.0
+        ratio_top = max(cfg.entry_atr_max_ratio * 1.2, percentile * 1.05, 0.1)
+        ratio_draw = ratio.copy()
+        ratio_draw[np.isposinf(ratio_draw)] = ratio_top
+        ratio_draw[np.isneginf(ratio_draw)] = 0.0
+        ratio_draw = np.where(np.isfinite(ratio_draw),
+                              np.clip(ratio_draw, 0.0, ratio_top), np.nan)
+        ratio_label = np.array([
+            f"{value:.4g}" if np.isfinite(value) else "∞" if value > 0 else "—"
+            for value in ratio
+        ], dtype=object)
+        customdata = np.column_stack((atr_values, atr_mean, ratio_label))
+        trace_builder = go.Scattergl if len(sig_x) >= _GL_THRESHOLD else go.Scatter
+        pass_mask = ready & allowed & np.isfinite(ratio)
+        blocked_mask = ready & ~allowed
+
+        pass_values = np.where(pass_mask, ratio_draw, np.nan)
+        fig.add_trace(trace_builder(
+            x=sig_x, y=_sig(pass_values), customdata=customdata, mode="lines+markers",
+            name="ATR ratio · permitido", connectgaps=False,
+            line=dict(color=UP_COLOR, width=1.5),
+            marker=dict(size=3, color=UP_COLOR),
+            hovertemplate=(
+                "ATR/media: %{customdata[2]}<br>"
+                "ATR: %{customdata[0]:,.6g}<br>"
+                "Media previa: %{customdata[1]:,.6g}<extra></extra>"
+            ),
+        ), row=rr, col=1, secondary_y=True)
+
+        if blocked_mask.any():
+            blocked_builder = (
+                go.Scattergl if int(blocked_mask.sum()) >= _GL_THRESHOLD else go.Scatter
+            )
+            fig.add_trace(blocked_builder(
+                x=sig_x[blocked_mask], y=_sig(ratio_draw[blocked_mask]),
+                customdata=customdata[blocked_mask], mode="markers",
+                name="ATR ratio · bloquea entrada",
+                marker=dict(symbol="x", size=8, color=DOWN_COLOR,
+                            line=dict(width=1.2, color="white")),
+                hovertemplate=(
+                    "<b>Filtro ATR: bloquea entrada</b><br>"
+                    "ATR/media: %{customdata[2]}<br>"
+                    "ATR: %{customdata[0]:,.6g}<br>"
+                    "Media previa: %{customdata[1]:,.6g}<extra></extra>"
+                ),
+            ), row=rr, col=1, secondary_y=True)
+
+        warmup_mask = ~ready
+        if warmup_mask.any():
+            warmup_builder = (
+                go.Scattergl if int(warmup_mask.sum()) >= _GL_THRESHOLD else go.Scatter
+            )
+            fig.add_trace(warmup_builder(
+                x=sig_x[warmup_mask],
+                y=np.full(int(warmup_mask.sum()), ratio_top * 0.015),
+                mode="markers", name="ATR warm-up · permitido",
+                marker=dict(symbol="circle-open", size=6, color="#90a4ae"),
+                text=np.full(int(warmup_mask.sum()),
+                             "Filtro permitido: aún no hay media ATR de referencia"),
+                hovertemplate="%{text}<extra></extra>",
+            ), row=rr, col=1, secondary_y=True)
+
+        fig.add_hrect(
+            y0=cfg.entry_atr_min_ratio, y1=cfg.entry_atr_max_ratio,
+            fillcolor="rgba(38,166,154,0.12)", line_width=0, layer="below",
+            row=rr, col=1, secondary_y=True,
+        )
+        fig.add_hline(
+            y=cfg.entry_atr_min_ratio,
+            line=dict(color=UP_COLOR, width=1, dash="dash"),
+            annotation_text=f"mín {cfg.entry_atr_min_ratio:g}",
+            annotation_position="bottom right",
+            row=rr, col=1, secondary_y=True,
+        )
+        fig.add_hline(
+            y=cfg.entry_atr_max_ratio,
+            line=dict(color=UP_COLOR, width=1, dash="dash"),
+            annotation_text=f"máx {cfg.entry_atr_max_ratio:g}",
+            annotation_position="top right",
+            row=rr, col=1, secondary_y=True,
+        )
+        fig.update_yaxes(title_text="ATR", row=rr, col=1, secondary_y=False)
+        fig.update_yaxes(title_text="ATR / media previa", range=[0, ratio_top],
+                         row=rr, col=1, secondary_y=True)
 
     # -- Panel MFI ---------------------------------------------------------
     if "mfi" in row:
