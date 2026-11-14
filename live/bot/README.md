@@ -29,6 +29,41 @@ procesados desde esa marca; la base de datos evita duplicados. `LIVE_ONLY` no es
 un filtro de antigüedad para el ejecutor: cualquier worker que actúe sobre las
 señales debe validar su vigencia e idempotencia antes de operar.
 
+## Contrato de señales para consumidores
+
+`signals` es un outbox inmutable de intenciones de estrategia, no un registro de
+órdenes ni de posiciones reales. Cada fila incluye `schema_version`, `signal_id`,
+`event`, `action`, `side`, `position_id`, `scheduled`, `signal_time` y el
+`payload` detallado. `signal_id` es un SHA-256 determinista v2; `position_id`
+solo correlaciona eventos del backtest y no identifica una posición de Binance.
+`signal` y `side` se conservan iguales por compatibilidad; en un `EXIT`, `side`
+indica la posición que se cierra, no el lado de la orden de Binance.
+
+`scheduled=1` significa que el evento se publicó antes de `signal_time` para la
+siguiente apertura; no es el estado de consumo. La fila conserva el contenido
+original aunque el bot vuelva a calcular ese evento cuando la vela siguiente
+cierra. `signal_time` es el instante de acción, `bar_time` la vela que la originó.
+Consúmase en orden por `signal_time`, `bar_time` e `id`; el productor inserta
+primero las salidas cuando una reversión produce `EXIT` y `ENTRY` simultáneos.
+Los precios son referencias del backtest; los precios y PnL de salidas intrabar
+marcados como simulados no son fills de Binance. El consumidor debe validar
+frescura, cuenta, tamaño y posición real; no debe ejecutar eventos atrasados a
+ciegas.
+
+`signal_execution` prepara estado separado por `(account_id, signal_id)` con
+reclamo/lease, intentos y referencias de orden. El productor nunca crea ni
+reinicia ese estado. El futuro consumidor debe registrar `READY` por cuenta al
+descubrir una señal y reclamarla en una transacción,
+usar un `client_order_id` determinista compatible con Binance (no el `signal_id`
+completo) y reconciliar órdenes/posiciones con la cuenta antes de reintentar.
+La ausencia de una fila en `signal_execution` significa que esa cuenta aún no
+registró la señal.
+La columna `executed` se conserva por compatibilidad, pero no es el acuse
+autoritativo. Este paquete todavía no incluye ese consumidor.
+Al migrar a v2 se recalculan los `signal_id` existentes para incorporar la acción
+y `position_id`; se conservan las filas, pero no se deben mantener referencias
+externas a los IDs de la versión anterior.
+
 ## Visor de backtest live
 
 El bot actualiza el visor mensual al cambiar una vela de estrategia. Escribe

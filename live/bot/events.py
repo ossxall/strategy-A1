@@ -14,6 +14,7 @@ from strategy.models import CROSS_REASON, empty_trades
 from strategy.strategy import Backtester, Config
 
 from .config import opt_float, ts_ms, utc_iso
+from .storage import build_signal_id
 
 
 def events_to_trades(events: list[dict]) -> list[dict]:
@@ -112,15 +113,19 @@ def build_events_and_result(
         payload: dict,
     ) -> dict:
         fast, slow, adx_entry = indicators.get(bar_time, (np.nan,) * 3)
-        return {
+        normalized = {
+            "schema_version": 2,
             "symbol": symbol,
             "interval": interval,
             "timeframe": cfg.timeframe,
             "bar_time": bar_time,
             "signal_time": signal_time,
             "event": event,
+            "action": payload["action"],
             "signal": side,
             "side": side,
+            "position_id": payload["position_id"],
+            "scheduled": bool(payload.get("pending", False)),
             "reason": reason,
             "price": opt_float(price),
             "ema_fast": opt_float(fast),
@@ -130,6 +135,8 @@ def build_events_and_result(
             "created_at": created_at,
             "payload": json.dumps(payload),
         }
+        normalized["signal_id"] = build_signal_id(normalized)
+        return normalized
 
     open_position = engine.position
     entries: dict[int, tuple[str, pd.Timestamp, float]] = {}

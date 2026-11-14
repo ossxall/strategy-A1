@@ -117,6 +117,11 @@ def test_last_closed_bar_entry_is_published_for_next_open_without_waiting_next_c
     assert entry["bar_time"] == ts_ms(bars.index[-1])
     assert entry["signal_time"] == ts_ms(bars.index[-1] + pd.Timedelta("30min"))
     assert entry["price"] is None
+    assert entry["schema_version"] == 2
+    assert entry["action"] == "OPEN"
+    assert entry["position_id"] == payload["position_id"]
+    assert entry["scheduled"] is True
+    assert entry["signal_id"].startswith("sig_v2_")
     assert payload["pending"] is True
     assert payload["action"] == "OPEN"
 
@@ -207,6 +212,7 @@ def test_signal_store_deduplicates_pending_events_across_restarts(tmp_path):
         "event": "ENTRY",
         "signal": "LONG",
         "side": "LONG",
+        "position_id": 1,
         "reason": "EMA_CROSS",
         "price": None,
         "ema_fast": 100.0,
@@ -214,7 +220,7 @@ def test_signal_store_deduplicates_pending_events_across_restarts(tmp_path):
         "adx_entry": 30.0,
         "executed": 0,
         "created_at": "2026-01-01T00:00:00+00:00",
-        "payload": '{"action":"OPEN","pending":true}',
+        "payload": '{"action":"OPEN","position_id":1,"pending":true}',
     }
     path = tmp_path / "signal.db"
     store = SignalStore(path)
@@ -225,11 +231,43 @@ def test_signal_store_deduplicates_pending_events_across_restarts(tmp_path):
     assert store.conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
     assert store.conn.execute("PRAGMA wal_autocheckpoint").fetchone()[0] == 1_000
     assert store.conn.execute("PRAGMA journal_size_limit").fetchone()[0] == 67_108_864
+    assert store.conn.execute("PRAGMA user_version").fetchone()[0] == 2
     assert store.insert([event]) == 1
-    signal_id = store.conn.execute(
-        "SELECT signal_id FROM signals"
-    ).fetchone()[0]
+    signal_id, action, position_id, scheduled = store.conn.execute(
+        "SELECT signal_id, action, position_id, scheduled FROM signals"
+    ).fetchone()
     assert signal_id == build_signal_id(event)
+    assert (action, position_id, scheduled) == ("OPEN", 1, 1)
+    assert store.conn.execute(
+        "SELECT COUNT(*) FROM signal_execution"
+    ).fetchone()[0] == 0
+    for account_id in ("paper-a", "paper-b"):
+        store.conn.execute(
+            """
+            INSERT INTO signal_execution(account_id, signal_id)
+            VALUES (?, ?)
+            """,
+            (account_id, signal_id),
+        )
+    store.conn.commit()
+    assert store.conn.execute(
+        "SELECT COUNT(*) FROM signal_execution WHERE signal_id = ?",
+        (signal_id,),
+    ).fetchone()[0] == 2
+    resolved = {
+        **event,
+        "scheduled": False,
+        "price": 100.25,
+        "payload": '{"action":"OPEN","position_id":1}',
+    }
+    assert store.insert([resolved]) == 0
+    stored_price, stored_schedule, stored_payload = store.conn.execute(
+        "SELECT price, scheduled, payload FROM signals WHERE signal_id = ?",
+        (signal_id,),
+    ).fetchone()
+    assert stored_price is None
+    assert stored_schedule == 1
+    assert json.loads(stored_payload)["pending"] is True
     store.close()
 
     restarted = SignalStore(path)
@@ -255,6 +293,7 @@ def test_signal_store_migrates_existing_rows_to_signal_id(tmp_path):
         "event": "ENTRY",
         "signal": "LONG",
         "side": "LONG",
+        "position_id": 1,
         "reason": "EMA_CROSS",
         "price": None,
         "ema_fast": 100.0,
@@ -262,7 +301,7 @@ def test_signal_store_migrates_existing_rows_to_signal_id(tmp_path):
         "adx_entry": 30.0,
         "executed": 0,
         "created_at": "2026-01-01T00:00:00+00:00",
-        "payload": '{"action":"OPEN","pending":true}',
+        "payload": '{"action":"OPEN","position_id":1,"pending":true}',
     }
     path = tmp_path / "legacy-signal.db"
     connection = sqlite3.connect(path)
@@ -289,10 +328,17 @@ def test_signal_store_migrates_existing_rows_to_signal_id(tmp_path):
         )
         """
     )
-    columns = ", ".join(event)
-    placeholders = ", ".join(f":{column}" for column in event)
     connection.execute(
-        f"INSERT INTO signals ({columns}) VALUES ({placeholders})", event
+        """
+        CREATE UNIQUE INDEX ux_signals_event
+        ON signals(symbol, interval, timeframe, event, signal, reason, bar_time)
+        """
+    )
+    legacy_event = {key: value for key, value in event.items() if key != "position_id"}
+    columns = ", ".join(legacy_event)
+    placeholders = ", ".join(f":{column}" for column in legacy_event)
+    connection.execute(
+        f"INSERT INTO signals ({columns}) VALUES ({placeholders})", legacy_event
     )
     connection.commit()
     connection.close()
@@ -301,10 +347,93 @@ def test_signal_store_migrates_existing_rows_to_signal_id(tmp_path):
     store.connect()
     try:
         row = store.conn.execute(
-            "SELECT signal_id FROM signals"
+            "SELECT signal_id, action, position_id, scheduled FROM signals"
         ).fetchone()
-        assert row[0] == build_signal_id(event)
+        assert row == (build_signal_id(event), "OPEN", 1, 1)
         assert store.insert([event]) == 0
+        another_position = {
+            **event,
+            "position_id": 2,
+            "payload": '{"action":"OPEN","position_id":2,"pending":true}',
+        }
+        assert store.insert([another_position]) == 1
+    finally:
+        store.close()
+
+
+def test_signal_store_rekeys_previous_signal_id_schema(tmp_path):
+    event = {
+        "symbol": "BTCUSDT",
+        "interval": "1m",
+        "timeframe": "30min",
+        "bar_time": 1_767_225_600_000,
+        "signal_time": 1_767_227_400_000,
+        "event": "ENTRY",
+        "signal": "LONG",
+        "side": "LONG",
+        "reason": "EMA_CROSS",
+        "price": None,
+        "ema_fast": 100.0,
+        "ema_slow": 99.0,
+        "adx_entry": 30.0,
+        "executed": 0,
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "payload": '{"action":"OPEN","position_id":3,"pending":true}',
+    }
+    path = tmp_path / "previous-signal.db"
+    connection = sqlite3.connect(path)
+    connection.execute(
+        """
+        CREATE TABLE signals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            signal_id TEXT NOT NULL,
+            symbol TEXT NOT NULL,
+            interval TEXT NOT NULL,
+            timeframe TEXT NOT NULL,
+            bar_time INTEGER NOT NULL,
+            signal_time INTEGER NOT NULL,
+            event TEXT NOT NULL,
+            signal TEXT NOT NULL,
+            side TEXT,
+            reason TEXT NOT NULL,
+            price REAL,
+            ema_fast REAL,
+            ema_slow REAL,
+            adx_entry REAL,
+            executed INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            payload TEXT NOT NULL DEFAULT '{}'
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE UNIQUE INDEX ux_signals_event
+        ON signals(symbol, interval, timeframe, event, signal, reason, bar_time)
+        """
+    )
+    connection.execute(
+        "CREATE UNIQUE INDEX ux_signals_signal_id ON signals(signal_id)"
+    )
+    old_event = {"signal_id": "sig_legacy", **event}
+    columns = ", ".join(old_event)
+    placeholders = ", ".join(f":{column}" for column in old_event)
+    connection.execute(
+        f"INSERT INTO signals ({columns}) VALUES ({placeholders})", old_event
+    )
+    connection.commit()
+    connection.close()
+
+    store = SignalStore(path)
+    store.connect()
+    try:
+        row = store.conn.execute(
+            """
+            SELECT signal_id, schema_version, action, position_id, scheduled
+            FROM signals
+            """
+        ).fetchone()
+        assert row == (build_signal_id(event), 2, "OPEN", 3, 1)
     finally:
         store.close()
 
