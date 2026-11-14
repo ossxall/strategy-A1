@@ -820,10 +820,19 @@ class Backtester:
         if self.verbose: print(f"[STOP] {self.times[i]} fill={fill:.8f}", flush=True)
         return True
 
-    def _execute_target(self, i: int, target: int):
+    def _execute_target(self, i: int, target: int, signal_bias: int = 0):
         if self.position is not None and self.position.side != target:
             self.close_position(100, self.o[i], self.times[i], CROSS_REASON)
         if self.position is None:
+            # Cerrar la posición revertida puede convertir esta señal en la
+            # primera entrada tras una pérdida. En ese caso el filtro debe
+            # aplicarse con el sesgo conocido al cierre que generó la señal.
+            if (self.cfg.streak_trend_only and self.streak_in_loss
+                    and signal_bias != target):
+                if self.verbose:
+                    print(f"[RACHA] {self.times[i]} reversión {target:+d} "
+                          f"contra tendencia {signal_bias:+d}: ignorada", flush=True)
+                return
             self.open_position(target, self.o[i], self.times[i])
 
     def _equity_value(self, close: float) -> float:
@@ -876,7 +885,10 @@ class Backtester:
                 month_start_equity = self._equity_value(self.c[i - 1]) if i else cfg.initial_capital
             # 1) Ejecutar target/exit pendientes (decididos al cierre anterior)
             if self.pending_target is not None:
-                self._execute_target(i, self.pending_target)
+                signal_bias = (
+                    int(self.signals["trend_bias"].iloc[i - 1]) if i > 0 else 0
+                )
+                self._execute_target(i, self.pending_target, signal_bias)
                 self.pending_target = None
                 self.pending_exit = None
             elif self.pending_exit is not None:

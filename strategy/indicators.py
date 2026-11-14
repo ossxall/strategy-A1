@@ -215,6 +215,40 @@ def align_closed_flags(
     return out
 
 
+def align_closed_events(
+    source_index: pd.DatetimeIndex,
+    events: np.ndarray,
+    target_index: pd.DatetimeIndex,
+    source_tf: str,
+    target_tf: str,
+) -> np.ndarray:
+    """Alinea cada evento fuente a una única vela destino ya cerrada.
+
+    Cada evento se asigna a la primera vela destino cuyo cierre ocurre en o
+    después del cierre de la vela fuente. A diferencia de
+    :func:`align_closed_values`, un evento no se mantiene activo en las velas
+    destino posteriores. Si varios eventos coinciden en una vela destino,
+    prevalece el último evento fuente.
+    """
+    events = np.asarray(events)
+    if len(events) != len(source_index):
+        raise ValueError("events debe tener la misma longitud que source_index.")
+    out = np.zeros(len(target_index), dtype=events.dtype)
+    if not len(target_index) or not len(source_index):
+        return out
+
+    source_end = (source_index + pd.Timedelta(source_tf)).asi8
+    target_end = (target_index + pd.Timedelta(target_tf)).asi8
+    loc = np.searchsorted(target_end, source_end, side="left")
+    active = np.flatnonzero(events != 0)
+    target_loc = loc[active]
+    valid = target_loc < len(target_index)
+    # Los eventos fuente están ordenados temporalmente; asignar en orden hace
+    # que el último evento prevalezca si varios caen en la misma vela destino.
+    out[target_loc[valid]] = events[active[valid]]
+    return out
+
+
 def align_closed_values(
     source_index: pd.DatetimeIndex,
     values: np.ndarray,
@@ -302,7 +336,7 @@ def _adx_exit_flags(
     flags = adx_reversal_flags(
         adx(low, cfg.adx_dilen, cfg.adx_adxlen)["adx"].to_numpy(), cfg.adx_key_level
     )
-    return align_closed_flags(low.index, flags, bars.index, timeframe, cfg.timeframe)
+    return align_closed_events(low.index, flags, bars.index, timeframe, cfg.timeframe)
 
 
 def build_adx_exit(
@@ -350,7 +384,7 @@ def _weakening_exit_flags(
     )
     if source_bars.index.equals(bars.index):
         return flags
-    return align_closed_flags(
+    return align_closed_events(
         source_bars.index, flags, bars.index, source_tf, cfg.timeframe
     )
 
@@ -461,10 +495,10 @@ def _rsi_divergence_flags(
     )
     if source_bars.index.equals(bars.index):
         return flags
-    aligned = align_closed_values(
+    aligned = align_closed_events(
         source_bars.index, flags, bars.index, source_tf, cfg.timeframe
     )
-    return np.nan_to_num(aligned, nan=0.0).astype(int)
+    return aligned.astype(int)
 
 
 def build_rsi_divergence_flags(
