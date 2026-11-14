@@ -912,7 +912,16 @@ class ExecutionWorker:
         status = str(_get(existing, "algoStatus", "status", default="")).upper()
         if status in {"CANCELED", "EXPIRED", "REJECTED", "FINISHED"}:
             return
-        self.gateway.cancel_protective_stop(algo_id)
+        try:
+            self.gateway.cancel_protective_stop(algo_id)
+        except BinanceOrderNotFound:
+            if self._find_open_protective_stop(algo_id) is None:
+                LOG.debug(
+                    "Stop %s ya no figura abierto tras solicitar cancelación",
+                    algo_id,
+                )
+                return
+            raise
 
     def _cancel_position_stops(self, position_id: int) -> None:
         for variant in ("sl", "be"):
@@ -1063,27 +1072,54 @@ class ExecutionWorker:
                         )
                     else:
                         try:
-                            be_id = self._protective_stop(
-                                signal, snapshot, breakeven=True
+                            self._cancel_position_stop(
+                                int(signal["position_id"]), "sl"
                             )
-                            self._verify_protective_stop(be_id)
-                        except Exception as exc:  # noqa: BLE001 - conserva SL ante fallo de BE
+                        except Exception as exc:  # noqa: BLE001 - conserva SL ante fallo de cancelación
+                            self._verify_protective_stop(sl_id)
                             result_record["breakeven_stop_skipped"] = str(exc)
                             result_record[
                                 "protective_stop_client_algo_id"
                             ] = sl_id
                             LOG.warning(
-                                "No se pudo mover el stop a breakeven; "
-                                "se conserva el SL original: %s",
+                                "No se pudo cancelar el SL para moverlo a "
+                                "breakeven; se conserva el SL: %s",
                                 exc,
                             )
                         else:
-                            self._cancel_position_stop(
-                                int(signal["position_id"]), "sl"
-                            )
-                            result_record[
-                                "protective_stop_client_algo_id"
-                            ] = be_id
+                            try:
+                                be_id = self._protective_stop(
+                                    signal, snapshot, breakeven=True
+                                )
+                                self._verify_protective_stop(be_id)
+                            except Exception as exc:  # noqa: BLE001 - repone protección primaria
+                                try:
+                                    restore_snapshot = self._account_snapshot(
+                                        force=True
+                                    )
+                                    self._ensure_protective_stop(
+                                        signal, restore_snapshot
+                                    )
+                                except Exception as restore_exc:  # noqa: BLE001
+                                    raise RuntimeError(
+                                        "Falló el stop a breakeven y no se "
+                                        f"pudo restaurar el SL: {restore_exc}"
+                                    ) from exc
+                                result_record["breakeven_stop_skipped"] = str(
+                                    exc
+                                )
+                                result_record[
+                                    "protective_stop_client_algo_id"
+                                ] = sl_id
+                                LOG.warning(
+                                    "No se pudo mover el stop a breakeven; "
+                                    "se restauró el SL original: %s",
+                                    exc,
+                                )
+                            else:
+                                result_record[
+                                    "protective_stop_client_algo_id"
+                                ] = be_id
                 except Exception as exc:
                     LOG.exception("No se pudo mover el stop a breakeven")
                     self._update_state(
@@ -1789,6 +1825,74 @@ class ExecutionWorker:
             "partial_completed": True,
         }
 
+    def _recover_test_close_inflight(self, execution: dict) -> dict:
+        if (
+            execution["action"] != "CLOSE"
+            or execution["reason"] != "EXECUTOR_TEST_CLOSE"
+            or execution["order_status"] != "FILLED"
+            or not execution["client_order_id"]
+            or float(execution["filled_qty"] or 0) <= 0
+        ):
+            raise RuntimeError(
+                "EXECUTOR_TEST_MODE: cierre previo no verificable; "
+                "requiere reconciliación manual."
+            )
+        order = self.gateway.query_order(
+            self.settings.symbol, execution["client_order_id"]
+        )
+        order_status = str(_get(order, "status", "orderStatus", default="")).upper()
+        order_qty = _decimal(
+            _get(order, "executedQty", "executed_qty", default="0"),
+            "executedQty",
+        )
+        expected_qty = _decimal(execution["filled_qty"], "filled_qty")
+        tolerance = self._rules_cache[self.settings.symbol]["step_size"] / 2
+        if order_status != "FILLED" or abs(order_qty - expected_qty) > tolerance:
+            raise RuntimeError(
+                "EXECUTOR_TEST_MODE: el cierre confirmado por Binance no "
+                "coincide con el ledger."
+            )
+
+        snapshot = self._account_snapshot(force=True)
+        if (
+            self._position_for_symbol(snapshot) is not None
+            or snapshot.get("open_orders")
+            or snapshot.get("open_algo_orders")
+            or self.store.get_active_execution_positions(
+                self.settings.account_id, self.settings.symbol
+            )
+        ):
+            raise RuntimeError(
+                "EXECUTOR_TEST_MODE: el cierre previo no dejó la cuenta "
+                "flat y sin órdenes; requiere reconciliación manual."
+            )
+        average_price = _float(
+            _get(order, "avgPrice", "averagePrice", "avg_price")
+        )
+        self.store.update_execution(
+            self.settings.account_id,
+            execution["signal_id"],
+            "FILLED",
+            order_status="FILLED",
+            client_order_id=execution["client_order_id"],
+            exchange_order_id=str(_get(order, "orderId", "order_id", default="")),
+            filled_qty=float(order_qty),
+            average_fill_price=average_price,
+            result={"order": order, "recovered_close": True},
+            error=None,
+            reconciled_at_ms=self.clock_ms(),
+        )
+        LOG.warning(
+            "EXECUTOR_TEST_MODE: cierre previo %s confirmado; cuenta flat.",
+            execution["signal_id"],
+        )
+        return {
+            "position_id": int(execution["position_id"]),
+            "side": execution["side"],
+            "already_flat": True,
+            "partial_completed": True,
+        }
+
     def _recover_test_inflight(self) -> dict | None:
         """Recupera un ENTRY test solo tras verificarlo con Binance."""
         inflight = self.store.list_inflight_executions(
@@ -1808,7 +1912,13 @@ class ExecutionWorker:
                 "requiere reconciliación manual."
             )
         if execution["event"] == "EXIT":
-            return self._recover_test_partial_inflight(execution)
+            if execution["action"] == "PARTIAL_CLOSE":
+                return self._recover_test_partial_inflight(execution)
+            if execution["action"] == "CLOSE":
+                return self._recover_test_close_inflight(execution)
+            raise RuntimeError(
+                "EXECUTOR_TEST_MODE: acción EXIT previa no recuperable."
+            )
         if (
             execution["event"] != "ENTRY"
             or execution["reason"] != "EXECUTOR_TEST_ENTRY"

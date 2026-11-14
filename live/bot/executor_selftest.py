@@ -12,6 +12,10 @@ from .executor import ExecutionWorker, ExecutorSettings
 from .storage import SignalStore
 
 
+class _ScenarioAPIError(RuntimeError):
+    pass
+
+
 class _ScenarioFuturesGateway:
     """Deterministic USDⓈ-M simulator; never makes network requests."""
 
@@ -26,6 +30,7 @@ class _ScenarioFuturesGateway:
         self.orders_by_id: dict[int, dict] = {}
         self.stops: dict[str, dict] = {}
         self.next_order_id = 1
+        self.fail_next_breakeven = False
 
     def position_mode(self):
         return {"dualSidePosition": self.dual_side}
@@ -146,6 +151,18 @@ class _ScenarioFuturesGateway:
     def place_protective_stop(
         self, *, symbol, side, trigger_price, client_algo_id
     ):
+        if client_algo_id.startswith("b1be_") and self.fail_next_breakeven:
+            self.fail_next_breakeven = False
+            raise _ScenarioAPIError(
+                "(-2021, 'Order would immediately trigger.')"
+            )
+        if any(
+            stop["side"] == side and stop["algoStatus"] == "NEW"
+            for stop in self.stops.values()
+        ):
+            raise _ScenarioAPIError(
+                "(-4130, 'An open closePosition order already exists.')"
+            )
         stop = {
             "symbol": symbol,
             "side": side,

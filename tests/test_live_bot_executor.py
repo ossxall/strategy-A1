@@ -84,6 +84,7 @@ class FakeFuturesGateway:
         self.order_results = {}
         self.stops = {}
         self.stop_placements = []
+        self.fail_next_breakeven = False
         self.next_order_id = 1
 
     def position_mode(self):
@@ -181,11 +182,22 @@ class FakeFuturesGateway:
     def place_protective_stop(
         self, *, symbol, side, trigger_price, client_algo_id
     ):
+        if client_algo_id.startswith("b1be_") and self.fail_next_breakeven:
+            self.fail_next_breakeven = False
+            raise RuntimeError("(-2021, 'Order would immediately trigger.')")
+        if any(
+            stop["side"] == side and stop.get("status", "NEW") == "NEW"
+            for stop in self.stops.values()
+        ):
+            raise RuntimeError(
+                "(-4130, 'An open closePosition order already exists.')"
+            )
         stop = {
             "symbol": symbol,
             "side": side,
             "trigger_price": trigger_price,
             "closePosition": "true",
+            "status": "NEW",
         }
         self.stop_placements.append((client_algo_id, dict(stop)))
         self.stops[client_algo_id] = stop
@@ -814,6 +826,48 @@ def test_test_mode_keeps_original_stop_if_breakeven_would_trigger(tmp_path):
         store.close()
 
 
+def test_test_mode_restores_original_stop_if_breakeven_order_is_rejected(tmp_path):
+    store = SignalStore(tmp_path / "test-signal.db")
+    store.connect()
+    gateway = FakeFuturesGateway()
+    gateway.mark_price_value = 101.0
+    gateway.fail_next_breakeven = True
+    try:
+        worker = ExecutionWorker(
+            _settings(
+                tmp_path,
+                enabled=True,
+                test_mode=True,
+                api_key="test-key",
+                api_secret="test-secret",
+                max_leverage=10,
+                set_leverage=True,
+            ),
+            store,
+            gateway=gateway,
+            clock_ms=lambda: 1_000_000,
+        )
+
+        worker.run_test_sequence()
+
+        assert gateway.position_amt == pytest.approx(0.0)
+        assert [client_id[2:4] for client_id, _ in gateway.stop_placements] == [
+            "sl", "sl",
+        ]
+        partial = store.conn.execute(
+            """
+            SELECT x.status, x.result_json
+            FROM signal_execution AS x
+            JOIN signals AS s USING(signal_id)
+            WHERE s.reason = 'PARTIAL_TP_1R'
+            """
+        ).fetchone()
+        assert partial[0] == "FILLED"
+        assert "breakeven_stop_skipped" in partial[1]
+    finally:
+        store.close()
+
+
 def test_test_mode_refuses_minimum_quantity_over_margin_cap(tmp_path):
     store = SignalStore(tmp_path / "test-signal.db")
     store.connect()
@@ -1241,6 +1295,130 @@ def test_test_mode_recovers_filled_partial_without_resubmitting_it(tmp_path):
         )
         assert state["status"] == "FILLED"
         assert state["error"] is None
+    finally:
+        store.close()
+
+
+def test_test_mode_recovers_filled_full_close_after_stop_was_already_removed(
+    tmp_path,
+):
+    store = SignalStore(tmp_path / "test-signal.db")
+    store.connect()
+    gateway = FakeFuturesGateway()
+    close_client_id = "b1_confirmed-test-close"
+    gateway.order_results[close_client_id] = {
+        "status": "FILLED",
+        "orderId": 126,
+        "executedQty": "0.05",
+        "avgPrice": "100",
+    }
+    try:
+        entry = _entry_event()
+        entry["reason"] = "EXECUTOR_TEST_ENTRY"
+        entry_normalized = store._normalize_event(entry)
+        store.insert([entry])
+        store.conn.execute(
+            "INSERT INTO signal_execution(account_id, signal_id) VALUES (?, ?)",
+            ("test-account", entry_normalized["signal_id"]),
+        )
+        store.conn.commit()
+        store.update_execution(
+            "test-account",
+            entry_normalized["signal_id"],
+            "FILLED",
+            order_status="FILLED",
+            filled_qty=0.1,
+            client_order_id="b1_test-close-entry",
+        )
+
+        partial = {
+            **entry,
+            "event": "EXIT",
+            "action": "PARTIAL_CLOSE",
+            "reason": "PARTIAL_TP_1R",
+            "payload": json.dumps(
+                {
+                    "action": "PARTIAL_CLOSE",
+                    "position_id": entry["position_id"],
+                    "close_pct": 50.0,
+                    "sizing": json.loads(entry["payload"])["sizing"],
+                }
+            ),
+        }
+        partial_normalized = store._normalize_event(partial)
+        store.insert([partial])
+        store.conn.execute(
+            "INSERT INTO signal_execution(account_id, signal_id) VALUES (?, ?)",
+            ("test-account", partial_normalized["signal_id"]),
+        )
+        store.conn.commit()
+        store.update_execution(
+            "test-account",
+            partial_normalized["signal_id"],
+            "FILLED",
+            order_status="FILLED",
+            filled_qty=0.05,
+            client_order_id="b1_test-close-partial",
+        )
+
+        close = {
+            **entry,
+            "event": "EXIT",
+            "action": "CLOSE",
+            "reason": "EXECUTOR_TEST_CLOSE",
+            "payload": json.dumps(
+                {
+                    "action": "CLOSE",
+                    "position_id": entry["position_id"],
+                    "close_pct": 100.0,
+                }
+            ),
+        }
+        close_normalized = store._normalize_event(close)
+        store.insert([close])
+        store.conn.execute(
+            "INSERT INTO signal_execution(account_id, signal_id) VALUES (?, ?)",
+            ("test-account", close_normalized["signal_id"]),
+        )
+        store.conn.commit()
+        store.update_execution(
+            "test-account",
+            close_normalized["signal_id"],
+            "RECONCILIATION_REQUIRED",
+            order_status="FILLED",
+            client_order_id=close_client_id,
+            exchange_order_id="126",
+            filled_qty=0.05,
+            error="stop was already removed",
+        )
+        worker = ExecutionWorker(
+            _settings(
+                tmp_path,
+                enabled=True,
+                test_mode=True,
+                api_key="test-key",
+                api_secret="test-secret",
+            ),
+            store,
+            gateway=gateway,
+            clock_ms=lambda: 1_000_000,
+        )
+        worker._rules_cache["BTCUSDT"] = {
+            "step_size": Decimal("0.01"),
+            "min_qty": Decimal("0.01"),
+            "max_qty": Decimal(1000),
+            "min_notional": Decimal(5),
+            "tick_size": Decimal("0.1"),
+        }
+
+        recovered = worker._recover_test_inflight()
+
+        assert recovered["already_flat"] is True
+        assert recovered["partial_completed"] is True
+        assert gateway.orders == []
+        assert store.get_execution_state(
+            "test-account", close_normalized["signal_id"]
+        )["status"] == "FILLED"
     finally:
         store.close()
 

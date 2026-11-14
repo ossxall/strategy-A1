@@ -12,8 +12,8 @@ class BinanceOrderNotFound(LookupError):
 def _is_order_not_found(exc: Exception) -> bool:
     if (
         exc.__class__.__name__ == "NotFoundError"
-        or getattr(exc, "code", None) == -2013
-        or getattr(exc, "error_code", None) == -2013
+        or getattr(exc, "code", None) in {-2013, -2011}
+        or getattr(exc, "error_code", None) in {-2013, -2011}
     ):
         return True
 
@@ -26,7 +26,10 @@ def _is_order_not_found(exc: Exception) -> bool:
         except (TypeError, ValueError):
             code = None
         message = str(args[1]).lower()
-        if code == -2013 and "order does not exist" in message:
+        if (
+            (code == -2013 and "order does not exist" in message)
+            or (code == -2011 and "unknown order" in message)
+        ):
             return True
     return False
 
@@ -190,9 +193,17 @@ class BinanceUsdmClient:
         )
 
     def cancel_protective_stop(self, client_algo_id: str) -> Any:
-        return response_data(
-            self.rest.cancel_algo_order(client_algo_id=client_algo_id)
-        )
+        try:
+            response = self.rest.cancel_algo_order(
+                client_algo_id=client_algo_id
+            )
+        except Exception as exc:
+            if _is_order_not_found(exc):
+                raise BinanceOrderNotFound(
+                    f"Stop Binance ya no está abierto: {client_algo_id}"
+                ) from exc
+            raise
+        return response_data(response)
 
     def query_protective_stop(self, client_algo_id: str) -> Any:
         try:
