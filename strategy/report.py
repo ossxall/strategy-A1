@@ -156,6 +156,7 @@ def write_outputs(out_dir: str | Path, trades: pd.DataFrame, equity: pd.DataFram
         "previous_available": previous is not None, "delta": delta}, indent=2, allow_nan=False), encoding="utf-8")
     metrics_path.write_text(json.dumps(current, indent=2, allow_nan=False), encoding="utf-8")
     (out / "config.json").write_text(json.dumps(report["config"], indent=2, allow_nan=False), encoding="utf-8")
+    _write_static_report_html(out.parent / "index.html")
     print(f"[OUT] Archivos guardados en {out.resolve()}", flush=True)
 
 
@@ -1345,6 +1346,19 @@ def _write_json_atomic(path: Path, payload: dict) -> None:
     temporary = path.with_name(f".{path.name}.tmp")
     temporary.write_text(serialized, encoding="utf-8")
     temporary.replace(path)
+
+
+def _write_static_report_html(path: Path) -> None:
+    """Copia el dashboard al directorio del reporte sin mover su plantilla."""
+    template = Path(__file__).with_name("report.html")
+    if not template.is_file():
+        raise FileNotFoundError(f"No se encontró la plantilla del reporte: {template}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    content = template.read_bytes()
+    if not path.is_file() or path.read_bytes() != content:
+        temporary = path.with_name(f".{path.name}.tmp")
+        temporary.write_bytes(content)
+        temporary.replace(path)
 
 
 def _write_static_backtest_html(path: Path) -> None:
