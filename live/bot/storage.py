@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import sqlite3
 from pathlib import Path
 
@@ -12,6 +14,7 @@ from .config import logger
 SIGNALS_DDL = """
 CREATE TABLE IF NOT EXISTS signals (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    signal_id   TEXT    NOT NULL,
     symbol      TEXT    NOT NULL,
     interval    TEXT    NOT NULL,
     timeframe   TEXT    NOT NULL,
@@ -31,11 +34,31 @@ CREATE TABLE IF NOT EXISTS signals (
 )
 """
 
+SIGNAL_ID_FIELDS = (
+    "symbol",
+    "interval",
+    "timeframe",
+    "event",
+    "signal",
+    "reason",
+    "bar_time",
+)
+
+
+def build_signal_id(event: dict) -> str:
+    """Construye un ID estable a partir de la identidad lógica del evento."""
+    identity = [event[field] for field in SIGNAL_ID_FIELDS]
+    canonical = json.dumps(identity, ensure_ascii=False, separators=(",", ":"))
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    return f"sig_{digest}"
+
+
 SIGNALS_INDEXES = (
     """
     CREATE UNIQUE INDEX IF NOT EXISTS ux_signals_event
     ON signals(symbol, interval, timeframe, event, signal, reason, bar_time)
     """,
+    "CREATE UNIQUE INDEX IF NOT EXISTS ux_signals_signal_id ON signals(signal_id)",
     "CREATE INDEX IF NOT EXISTS idx_signals_bar_time ON signals(bar_time)",
     "CREATE INDEX IF NOT EXISTS idx_signals_signal_time ON signals(signal_time)",
     "CREATE INDEX IF NOT EXISTS idx_signals_executed ON signals(executed)",
@@ -50,13 +73,13 @@ CREATE TABLE IF NOT EXISTS bot_state (
 
 INSERT_SQL = """
 INSERT OR IGNORE INTO signals (
-    symbol, interval, timeframe, bar_time, signal_time, event, signal,
-    side, reason, price, ema_fast, ema_slow, adx_entry, executed,
+    signal_id, symbol, interval, timeframe, bar_time, signal_time, event,
+    signal, side, reason, price, ema_fast, ema_slow, adx_entry, executed,
     created_at, payload
 ) VALUES (
-    :symbol, :interval, :timeframe, :bar_time, :signal_time, :event, :signal,
-    :side, :reason, :price, :ema_fast, :ema_slow, :adx_entry, :executed,
-    :created_at, :payload
+    :signal_id, :symbol, :interval, :timeframe, :bar_time, :signal_time,
+    :event, :signal, :side, :reason, :price, :ema_fast, :ema_slow,
+    :adx_entry, :executed, :created_at, :payload
 )
 """
 
@@ -74,16 +97,44 @@ class SignalStore:
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA synchronous=NORMAL")
         self.conn.execute(SIGNALS_DDL)
+        self._migrate_signal_ids()
         self.conn.execute(BOT_STATE_DDL)
         for ddl in SIGNALS_INDEXES:
             self.conn.execute(ddl)
         self.conn.commit()
         logger.info("signal.db listo en %s", self.path)
 
+    def _migrate_signal_ids(self) -> None:
+        """Añade y rellena signal_id en bases existentes sin cambiar sus filas."""
+        columns = {
+            row[1] for row in self.conn.execute("PRAGMA table_info(signals)")
+        }
+        if "signal_id" not in columns:
+            self.conn.execute("ALTER TABLE signals ADD COLUMN signal_id TEXT")
+
+        rows = self.conn.execute(
+            """
+            SELECT id, symbol, interval, timeframe, event, signal, reason, bar_time
+            FROM signals
+            WHERE signal_id IS NULL OR signal_id = ''
+            """
+        ).fetchall()
+        for row in rows:
+            row_id, *identity = row
+            event = dict(zip(SIGNAL_ID_FIELDS, identity))
+            self.conn.execute(
+                "UPDATE signals SET signal_id = ? WHERE id = ?",
+                (build_signal_id(event), row_id),
+            )
+
     def insert(self, events: list[dict]) -> int:
         if not events or self.conn is None:
             return 0
-        cursor = self.conn.executemany(INSERT_SQL, events)
+        rows = [
+            {**event, "signal_id": build_signal_id(event)}
+            for event in events
+        ]
+        cursor = self.conn.executemany(INSERT_SQL, rows)
         self.conn.commit()
         return max(cursor.rowcount, 0)
 

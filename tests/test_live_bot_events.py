@@ -1,5 +1,6 @@
 import json
 import shutil
+import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -16,6 +17,7 @@ from live.bot import (
     events_to_trades,
     ts_ms,
 )
+from live.bot.storage import build_signal_id
 from strategy.config import Config
 
 
@@ -218,18 +220,87 @@ def test_signal_store_deduplicates_pending_events_across_restarts(tmp_path):
     store = SignalStore(path)
     store.connect()
     assert store.insert([event]) == 1
+    signal_id = store.conn.execute(
+        "SELECT signal_id FROM signals"
+    ).fetchone()[0]
+    assert signal_id == build_signal_id(event)
     store.close()
 
     restarted = SignalStore(path)
     restarted.connect()
     try:
         assert restarted.insert([event]) == 0
-        row_count = restarted.conn.execute(
-            "SELECT COUNT(*) FROM signals"
-        ).fetchone()[0]
+        row_count, restarted_signal_id = restarted.conn.execute(
+            "SELECT COUNT(*), MIN(signal_id) FROM signals"
+        ).fetchone()
         assert row_count == 1
+        assert restarted_signal_id == signal_id
     finally:
         restarted.close()
+
+
+def test_signal_store_migrates_existing_rows_to_signal_id(tmp_path):
+    event = {
+        "symbol": "BTCUSDT",
+        "interval": "1m",
+        "timeframe": "30min",
+        "bar_time": 1_767_225_600_000,
+        "signal_time": 1_767_227_400_000,
+        "event": "ENTRY",
+        "signal": "LONG",
+        "side": "LONG",
+        "reason": "EMA_CROSS",
+        "price": None,
+        "ema_fast": 100.0,
+        "ema_slow": 99.0,
+        "adx_entry": 30.0,
+        "executed": 0,
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "payload": '{"action":"OPEN","pending":true}',
+    }
+    path = tmp_path / "legacy-signal.db"
+    connection = sqlite3.connect(path)
+    connection.execute(
+        """
+        CREATE TABLE signals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol TEXT NOT NULL,
+            interval TEXT NOT NULL,
+            timeframe TEXT NOT NULL,
+            bar_time INTEGER NOT NULL,
+            signal_time INTEGER NOT NULL,
+            event TEXT NOT NULL,
+            signal TEXT NOT NULL,
+            side TEXT,
+            reason TEXT NOT NULL,
+            price REAL,
+            ema_fast REAL,
+            ema_slow REAL,
+            adx_entry REAL,
+            executed INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            payload TEXT NOT NULL DEFAULT '{}'
+        )
+        """
+    )
+    columns = ", ".join(event)
+    placeholders = ", ".join(f":{column}" for column in event)
+    connection.execute(
+        f"INSERT INTO signals ({columns}) VALUES ({placeholders})", event
+    )
+    connection.commit()
+    connection.close()
+
+    store = SignalStore(path)
+    store.connect()
+    try:
+        row = store.conn.execute(
+            "SELECT signal_id FROM signals"
+        ).fetchone()
+        assert row[0] == build_signal_id(event)
+        assert store.insert([event]) == 0
+    finally:
+        store.close()
 
 
 def test_events_to_trades_orders_same_open_by_source_bar_then_exit_priority():
