@@ -14,7 +14,7 @@
 #   docker compose logs -f bot
 #   docker compose down            # detiene y mantiene el volumen de datos
 #
-# El archivo .env del directorio define SYMBOL, INTERVAL, STRATEGY_*, etc.
+# La raíz define FEED_*; live/.env conserva la configuración del bot.
 
 name: blacker-bot1
 
@@ -28,6 +28,7 @@ x-common: &common
   image: blacker-bot1:latest
   working_dir: /app/legacy/bot1
   env_file:
+    - ../.env
     - .env
   volumes:
     - bot_data:/data
@@ -49,6 +50,7 @@ services:
     environment:
       # Absoluto para que feed.py y bot.py apunten al mismo archivo.
       DB_PATH: /data/feed.db
+      FEED_DB_PATH: /data/feed.db
     healthcheck:
       test: ["CMD", "python", "healthcheck.py", "feed"]
       interval: 30s

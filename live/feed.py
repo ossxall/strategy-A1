@@ -9,7 +9,6 @@ Binance USDⓈ-M Futures OHLCV Collector
 - Cierre ordenado con Ctrl+C
 """
 
-import argparse
 import logging
 import os
 import random
@@ -32,49 +31,52 @@ import websocket
 
 try:
     from dotenv import load_dotenv
-    load_dotenv()
+    load_dotenv(
+        Path(__file__).resolve().parent.parent / ".env",
+        override=False,
+    )
 except ImportError:
     pass
 
 REST_BASE_URL = "https://fapi.binance.com"
 WS_BASE_URL = "wss://fstream.binance.com/ws"
 
-SYMBOL = os.getenv("SYMBOL", "BTCUSDT").upper()
-INTERVAL = os.getenv("INTERVAL", "1m")
-DB_PATH = os.getenv("DB_PATH", "data/feed.db")
-START_DATE = os.getenv("START_DATE", "2026-08-01")
+SYMBOL = os.getenv("FEED_SYMBOL", "BTCUSDT").upper()
+INTERVAL = os.getenv("FEED_INTERVAL", "1m")
+DB_PATH = os.getenv("FEED_DB_PATH", "data/feed.db")
+START_DATE = os.getenv("FEED_START_DATE", "2026-08-01")
 
-REST_TIMEOUT_CONNECT = float(os.getenv("REST_TIMEOUT_CONNECT", "5"))
-REST_TIMEOUT_READ = float(os.getenv("REST_TIMEOUT_READ", "20"))
+REST_TIMEOUT_CONNECT = float(os.getenv("FEED_REST_TIMEOUT_CONNECT", "5"))
+REST_TIMEOUT_READ = float(os.getenv("FEED_REST_TIMEOUT_READ", "20"))
 REST_PAGE_LIMIT = min(
-    1500, max(1, int(os.getenv("REST_PAGE_LIMIT", "1500")))
+    1500, max(1, int(os.getenv("FEED_REST_PAGE_LIMIT", "1500")))
 )
 REST_REPAIR_INTERVAL = max(
-    5, int(os.getenv("REST_REPAIR_INTERVAL", "60"))
+    5, int(os.getenv("FEED_REST_REPAIR_INTERVAL", "60"))
 )
 GAP_SCAN_MINUTES = max(
-    10, int(os.getenv("GAP_SCAN_MINUTES", "1440"))
+    10, int(os.getenv("FEED_GAP_SCAN_MINUTES", "1440"))
 )
 
 WS_PING_INTERVAL = max(
-    5, int(os.getenv("WS_PING_INTERVAL", "20"))
+    5, int(os.getenv("FEED_WS_PING_INTERVAL", "20"))
 )
 WS_PING_TIMEOUT = max(
-    1, int(os.getenv("WS_PING_TIMEOUT", "10"))
+    1, int(os.getenv("FEED_WS_PING_TIMEOUT", "10"))
 )
 WS_WATCHDOG_SECONDS = max(
-    15, int(os.getenv("WS_WATCHDOG_SECONDS", "90"))
+    15, int(os.getenv("FEED_WS_WATCHDOG_SECONDS", "90"))
 )
 MAX_BACKOFF_SECONDS = max(
-    5, int(os.getenv("MAX_BACKOFF_SECONDS", "60"))
+    5, int(os.getenv("FEED_MAX_BACKOFF_SECONDS", "60"))
 )
 # 0 (por defecto) = reintentar indefinidamente.
 WS_MAX_RECOVERY_SECONDS = max(
-    0, int(os.getenv("WS_MAX_RECOVERY_SECONDS", "0"))
+    0, int(os.getenv("FEED_WS_MAX_RECOVERY_SECONDS", "0"))
 )
 WS_STABLE_SECONDS = 60
 
-LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+LOG_LEVEL = os.getenv("FEED_LOG_LEVEL", "INFO").upper()
 
 STOP_EVENT = threading.Event()
 DB_LOCK = threading.RLock()
@@ -908,39 +910,7 @@ def request_stop(signum=None, frame=None):
             pass
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(
-        description="Binance Futures OHLCV Collector"
-    )
-    parser.add_argument(
-        "--symbol", default=SYMBOL
-    )
-    parser.add_argument(
-        "--interval", default=INTERVAL
-    )
-    parser.add_argument(
-        "--db", default=DB_PATH
-    )
-    parser.add_argument(
-        "--start-date", default=START_DATE
-    )
-    return parser.parse_args()
-
-
 def main():
-    global SYMBOL, INTERVAL, DB_PATH
-    global INTERVAL_MS, START_TIME_MS
-
-    args = parse_args()
-
-    SYMBOL = args.symbol.upper()
-    INTERVAL = args.interval
-    DB_PATH = args.db
-    START_DATE = args.start_date
-
-    INTERVAL_MS = interval_milliseconds(INTERVAL)
-    START_TIME_MS = parse_start_date(START_DATE)
-
     init_db()
 
     logger.info(
