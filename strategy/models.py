@@ -66,7 +66,7 @@ RSI_DIVERGENCE_BULL_REASON = "RSI_DIVERGENCE_BULL"
 RSI_DIVERGENCE_BEAR_REASON = "RSI_DIVERGENCE_BEAR"
 #: Salida parcial cuando el volumen cae en las últimas `volume_exit_bars` velas.
 VOLUME_DECLINE_REASON = "VOLUME_DECLINE"
-DEFAULT_OUTPUT_DIR = "report/backtest_out"
+DEFAULT_OUTPUT_DIR = "strategy/report/backtest_out"
 
 
 def empty_trades() -> pd.DataFrame:

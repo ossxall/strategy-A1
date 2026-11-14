@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Sirve el dashboard y los informes HTML de report/ por HTTP."""
+"""Sirve por HTTP el dashboard generado en strategy/report/."""
 
 from __future__ import annotations
 
@@ -10,11 +10,11 @@ from urllib.parse import unquote, urlsplit
 
 
 ROOT = Path(__file__).resolve().parent
-REPORT_DIR = ROOT / "report"
+REPORT_DIR = ROOT / "strategy" / "report"
 
 
 class ReportHandler(SimpleHTTPRequestHandler):
-    """Sirve exclusivamente archivos contenidos en el directorio report/."""
+    """Sirve exclusivamente archivos contenidos en strategy/report/."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(REPORT_DIR), **kwargs)

@@ -1,6 +1,6 @@
 {
   "strategy": "strategy2_ema_cross",
-  "generated_at": "2026-11-14T11:08:41.084405+00:00",
+  "generated_at": "2026-11-14T11:43:28.813272+00:00",
   "dataset": {
     "source": "/home/debian/Documents/GitHub/strategy-A1/dataset/binance/BTCUSDT/merged/BTCUSDT-1m.parquet",
     "bars": 118320,
@@ -99,9 +99,9 @@
     "partial_tp5_r": 3.0,
     "partial_tp5_pct": 10.0,
     "partial_tp6_r": 3.5,
-    "partial_tp6_pct": 10.0,
+    "partial_tp6_pct": 15.0,
     "partial_tp7_r": 4.0,
-    "partial_tp7_pct": 10.0,
+    "partial_tp7_pct": 15.0,
     "tp3_ema_slow_penetration_pct": 1.75,
     "move_stop_to_breakeven": true,
     "trend_timeframe": "1D",
@@ -117,27 +117,27 @@
   },
   "metrics": {
     "initial_capital": 10000.0,
-    "final_equity": 72683.87093537992,
-    "net_pnl": 62683.87093537998,
-    "return_pct": 626.8387093537992,
-    "max_drawdown_pct": -8.830822194252107,
-    "max_dd_peak_equity": 22164.508057408493,
-    "max_dd_trough_equity": 20207.199760628067,
-    "max_dd_peak_vs_capital_pct": 121.64508057408491,
-    "max_dd_trough_vs_capital_pct": 102.07199760628068,
+    "final_equity": 66238.98105195173,
+    "net_pnl": 56238.98105195173,
+    "return_pct": 562.3898105195173,
+    "max_drawdown_pct": -8.567163041931325,
+    "max_dd_peak_equity": 20947.199237591423,
+    "max_dd_trough_equity": 19152.61852618877,
+    "max_dd_peak_vs_capital_pct": 109.47199237591425,
+    "max_dd_trough_vs_capital_pct": 91.52618526188769,
     "min_equity": 9982.187879749863,
     "min_equity_vs_capital_pct": -0.17812120250136898,
-    "return_over_maxdd": 70.98305181161979,
-    "sharpe_daily_365": 2.218003177973724,
-    "sortino_daily_365": 4.928990115958184,
+    "return_over_maxdd": 65.6448123803578,
+    "sharpe_daily_365": 2.2343169469410546,
+    "sortino_daily_365": 4.943002303831269,
     "legs": 1460,
     "positions": 392,
     "wins": 236,
     "losses": 156,
     "win_rate_pct": 60.204081632653065,
-    "profit_factor": 2.4006952600834954,
-    "avg_pnl": 159.90783401882646,
-    "expectancy_r": 0.5394971580924696,
+    "profit_factor": 2.338816871329498,
+    "avg_pnl": 143.46678839783604,
+    "expectancy_r": 0.5115142706520924,
     "max_consecutive_losses": 5
   },
   "by_side": {
@@ -146,10 +146,10 @@
       "wins": 124,
       "losses": 85,
       "win_rate_pct": 59.33014354066985,
-      "profit_factor": 2.8902850615233886,
-      "net_pnl": 45452.129217592745,
-      "avg_pnl": 217.4743024765203,
-      "expectancy_r": 0.7305278105179612,
+      "profit_factor": 2.7901906776437952,
+      "net_pnl": 40457.93964743513,
+      "avg_pnl": 193.5786586001681,
+      "expectancy_r": 0.6869339318235902,
       "max_consecutive_losses": 5
     },
     "SHORT": {
@@ -157,10 +157,10 @@
       "wins": 112,
       "losses": 71,
       "win_rate_pct": 61.20218579234973,
-      "profit_factor": 1.832175905950973,
-      "net_pnl": 17231.74171778723,
-      "avg_pnl": 94.16252304801765,
-      "expectancy_r": 0.32132553865570584,
+      "profit_factor": 1.8131755658944124,
+      "net_pnl": 15781.041404516593,
+      "avg_pnl": 86.23519893178467,
+      "expectancy_r": 0.31117159751087364,
       "max_consecutive_losses": 8
     }
   },
@@ -168,92 +168,92 @@
     "VOLUME_DECLINE_20B_20%": {
       "legs": 314,
       "positions": 314,
-      "pnl_net": 2679.387954468258
+      "pnl_net": 2429.619215165134
     },
     "PARTIAL_TP2_1.5R": {
       "legs": 139,
       "positions": 139,
-      "pnl_net": 5953.160551392521
+      "pnl_net": 5537.767867860813
     },
     "PARTIAL_TP5_3R": {
       "legs": 76,
       "positions": 76,
-      "pnl_net": 4801.414085888228
+      "pnl_net": 4370.471779007937
     },
     "PARTIAL_TP4_2.5R": {
       "legs": 86,
       "positions": 86,
-      "pnl_net": 5097.328191792298
+      "pnl_net": 4660.691785610248
     },
     "PARTIAL_TP3_2R": {
       "legs": 113,
       "positions": 113,
-      "pnl_net": 5656.567235017127
+      "pnl_net": 5274.481553896464
     },
     "PARTIAL_TP_1R": {
       "legs": 220,
       "positions": 220,
-      "pnl_net": 6857.1258691273215
+      "pnl_net": 6404.206879764968
     },
     "PARTIAL_TP6_3.5R": {
       "legs": 59,
       "positions": 59,
-      "pnl_net": 4106.735862685689
+      "pnl_net": 5605.583822847412
     },
     "PARTIAL_TP7_4R": {
       "legs": 61,
       "positions": 61,
-      "pnl_net": 4205.268800180436
+      "pnl_net": 5817.439645429526
     },
     "BREAKEVEN": {
       "legs": 157,
       "positions": 157,
-      "pnl_net": -253.71438233558987
+      "pnl_net": -234.68777739541935
     },
     "STOP_LOSS_1.00%": {
       "legs": 136,
       "positions": 136,
-      "pnl_net": -40352.36516695718
+      "pnl_net": -37872.57530697926
     },
     "ADX_1440M_REVERSAL": {
       "legs": 54,
       "positions": 54,
-      "pnl_net": 30733.562659606047
+      "pnl_net": 26443.85849352555
     },
     "EMA_SLOW_TOUCH_SHORT_AFTER_TP3": {
       "legs": 14,
       "positions": 14,
-      "pnl_net": 17196.194228406977
+      "pnl_net": 14434.971288773439
     },
     "EMA_WEAKENING_4H_1D_EMA21/55": {
       "legs": 13,
       "positions": 13,
-      "pnl_net": 2988.6960623650593
+      "pnl_net": 2747.318788421292
     },
     "EMA55_REPEATED_TOUCH_WEAKNESS": {
       "legs": 9,
       "positions": 9,
-      "pnl_net": -2168.3577789346673
+      "pnl_net": -2032.5154732393578
     },
     "RSI_DIVERGENCE_BEAR": {
       "legs": 2,
       "positions": 2,
-      "pnl_net": 4321.639501368104
+      "pnl_net": 3679.2556267989753
     },
     "EMA_CROSS_EXIT": {
       "legs": 5,
       "positions": 5,
-      "pnl_net": 10983.239228767063
+      "pnl_net": 9078.428715975617
     },
     "RSI_DIVERGENCE_BULL": {
       "legs": 1,
       "positions": 1,
-      "pnl_net": 308.98422207684877
+      "pnl_net": 294.48373222748205
     },
     "EMA55_REPEATED_TOUCH_WEAKNESS_SHORT": {
       "legs": 1,
       "positions": 1,
-      "pnl_net": -430.9961895345626
+      "pnl_net": -399.819585739089
     }
   }
 }

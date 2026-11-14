@@ -88,6 +88,7 @@ from strategy.models import (
     RSI_DIVERGENCE_BULL_REASON,
     RSI_DIVERGENCE_BEAR_REASON,
     VOLUME_DECLINE_REASON,
+    DEFAULT_OUTPUT_DIR,
     empty_trades,
 )
 from strategy.indicators import (
@@ -1178,7 +1179,7 @@ class Backtester:
 #: Dataset OHLCV en Parquet; las rutas relativas cuelgan de la raíz del proyecto.
 DATASET = "dataset/binance/BTCUSDT/merged/BTCUSDT-1m.parquet"
 #: Directorio donde se escriben los informes del backtest.
-OUTPUT_DIR = "report/backtest_out"
+OUTPUT_DIR = DEFAULT_OUTPUT_DIR
 #: Escribir los archivos del informe.
 WRITE_OUTPUTS = True
 #: Generar además el CSV con la curva de equity.
