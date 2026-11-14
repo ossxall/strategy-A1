@@ -63,3 +63,8 @@ publicado en `http://127.0.0.1:8080/live/bot/health`.
 durabilidad de señales y estado de recuperación, y un `busy_timeout` de 5 s.
 El autocheckpoint se configura en 1000 páginas y el límite de tamaño de WAL de
 64 MiB es orientativo, no un tope duro.
+
+La configuración común de conexiones está en `live/db/sqlite_config.py` y se
+reaplica al abrir cada base. Borrar `signal.db` no afecta a la configuración del
+código, pero sí elimina las señales, la deduplicación y `live_since_ms`; detén
+los servicios antes de borrar archivos SQLite.

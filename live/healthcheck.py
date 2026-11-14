@@ -25,6 +25,11 @@ from pathlib import Path
 
 _UNIT_SECONDS = {"s": 1, "m": 60, "h": 3600, "d": 86_400, "w": 604_800}
 
+try:
+    from .db.sqlite_config import connect_sqlite
+except ImportError:  # ejecución directa como ``python healthcheck.py``
+    from db.sqlite_config import connect_sqlite
+
 
 def interval_seconds(raw: str | None, default: float = 60.0) -> float:
     """Convierte un intervalo estilo Binance ('1m', '1h', '1d') a segundos."""
@@ -52,7 +57,11 @@ def check_feed() -> bool:
         return False
 
     try:
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)
+        conn = connect_sqlite(
+            db_path,
+            read_only=True,
+            query_only=True,
+        )
         try:
             row = conn.execute(
                 "SELECT value FROM collector_state WHERE key = 'collector_status'"

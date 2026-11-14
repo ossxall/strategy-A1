@@ -11,9 +11,10 @@ import pandas as pd
 
 from .config import logger
 
-DB_BUSY_TIMEOUT_MS = 5_000
-DB_JOURNAL_SIZE_LIMIT = 67_108_864
-DB_WAL_AUTOCHECKPOINT = 1_000
+try:
+    from ..db.sqlite_config import connect_sqlite
+except ImportError:  # ejecución como paquete top-level desde live/
+    from db.sqlite_config import connect_sqlite
 
 SIGNALS_DDL = """
 CREATE TABLE IF NOT EXISTS signals (
@@ -97,24 +98,13 @@ class SignalStore:
 
     def connect(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(
+        self.conn = connect_sqlite(
             self.path,
-            timeout=DB_BUSY_TIMEOUT_MS / 1000,
+            synchronous="FULL",
+            ensure_wal=True,
         )
         try:
-            self.conn.execute(f"PRAGMA busy_timeout={DB_BUSY_TIMEOUT_MS}")
-            self.conn.execute("PRAGMA foreign_keys=ON")
-            row = self.conn.execute("PRAGMA journal_mode=WAL").fetchone()
-            mode = str(row[0]).lower() if row else ""
-            if mode != "wal":
-                raise sqlite3.OperationalError(
-                    f"No se pudo activar WAL para {self.path}: "
-                    f"modo devuelto {mode!r}"
-                )
             # Signals and the live_since marker are important recovery state.
-            self.conn.execute("PRAGMA synchronous=FULL")
-            self.conn.execute(f"PRAGMA wal_autocheckpoint={DB_WAL_AUTOCHECKPOINT}")
-            self.conn.execute(f"PRAGMA journal_size_limit={DB_JOURNAL_SIZE_LIMIT}")
             self.conn.execute(SIGNALS_DDL)
             self._migrate_signal_ids()
             self.conn.execute(BOT_STATE_DDL)
@@ -202,13 +192,11 @@ class FeedReader:
             raise FileNotFoundError(
                 f"No existe feed.db en {self.path}. Inicia feed.py primero."
             )
-        self.conn = sqlite3.connect(
+        self.conn = connect_sqlite(
             self.path,
-            timeout=DB_BUSY_TIMEOUT_MS / 1000,
+            read_only=True,
+            query_only=True,
         )
-        self.conn.execute(f"PRAGMA busy_timeout={DB_BUSY_TIMEOUT_MS}")
-        self.conn.execute("PRAGMA foreign_keys=ON")
-        self.conn.execute("PRAGMA query_only=ON")
 
     def load_closed(self) -> pd.DataFrame:
         """Devuelve las velas cerradas indexadas por timestamp UTC."""

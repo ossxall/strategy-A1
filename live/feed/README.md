@@ -16,11 +16,16 @@ Paquete del colector OHLCV de Binance USDⓈ-M Futures.
 
 ## SQLite
 
-`feed.db` usa WAL y comprueba al iniciar que SQLite haya devuelto `wal`.
-Las conexiones del colector usan `synchronous=NORMAL` porque las velas pueden
-recuperarse desde REST, un `busy_timeout` de 5 s, claves foráneas activadas,
-autocheckpoint cada 1000 páginas y un objetivo de truncado del WAL de 64 MiB.
-El límite del WAL no es duro y depende de que el checkpoint pueda completarse.
+`live/db/sqlite_config.py` centraliza la apertura de todas las bases SQLite de
+`/live`, incluidas las conexiones de solo lectura. `feed.db` usa WAL y comprueba
+al iniciar que SQLite haya devuelto `wal`. Las conexiones del colector usan
+`synchronous=NORMAL` porque las velas pueden recuperarse desde REST, un
+`busy_timeout` de 5 s, claves foráneas activadas, autocheckpoint cada 1000
+páginas y un objetivo de truncado del WAL de 64 MiB. El límite del WAL no es
+duro y depende de que el checkpoint pueda completarse.
+
+Al borrar y recrear `feed.db`, el colector vuelve a aplicar esta política al
+iniciar. El archivo eliminado también contenía las velas persistidas.
 
 ## Ejecución
 

@@ -2,9 +2,13 @@
 
 import sqlite3
 from datetime import datetime, timezone
-from pathlib import Path
 
 from .config import DB_PATH, INTERVAL, STATUS_DB_TIMEOUT, SYMBOL
+
+try:
+    from ..db.sqlite_config import connect_sqlite
+except ImportError:  # ejecución como paquete top-level desde live/
+    from db.sqlite_config import connect_sqlite
 
 CHART_CANDLE_LIMIT = 100
 CHART_ROUTE = "/live/feed/chart"
@@ -18,13 +22,12 @@ def load_latest_candles(limit=CHART_CANDLE_LIMIT):
     """Lee velas recientes sin tomar el lock usado por los escritores."""
     connection = None
     try:
-        database_uri = f"{Path(DB_PATH).resolve().as_uri()}?mode=ro"
-        connection = sqlite3.connect(
-            database_uri,
-            uri=True,
-            timeout=STATUS_DB_TIMEOUT,
+        connection = connect_sqlite(
+            DB_PATH,
+            timeout_ms=max(1, int(STATUS_DB_TIMEOUT * 1000)),
+            read_only=True,
+            query_only=True,
         )
-        connection.execute(f"PRAGMA busy_timeout={int(STATUS_DB_TIMEOUT * 1000)}")
         rows = connection.execute(
             """
             SELECT open_time, open, high, low, close, volume

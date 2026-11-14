@@ -16,6 +16,11 @@ from urllib.parse import unquote, urlparse
 
 from .config import logger
 
+try:
+    from ..db.sqlite_config import connect_sqlite
+except ImportError:  # ejecución como paquete top-level desde live/
+    from db.sqlite_config import connect_sqlite
+
 HEALTH_ROUTE = "/live/bot/health"
 STATUS_ROUTE = "/live/bot/status"
 BACKTEST_ROUTE = "/live/bot/backtest"
@@ -44,12 +49,11 @@ def probe_signal_database(path: Path, timeout_seconds: float) -> dict:
     started = time.monotonic()
     connection = None
     try:
-        uri = f"{path.resolve().as_uri()}?mode=ro"
-        connection = sqlite3.connect(
-            uri, uri=True, timeout=max(0.01, timeout_seconds)
-        )
-        connection.execute(
-            f"PRAGMA busy_timeout={max(1, int(timeout_seconds * 1000))}"
+        connection = connect_sqlite(
+            path,
+            timeout_ms=max(10, int(timeout_seconds * 1000)),
+            read_only=True,
+            query_only=True,
         )
         deadline = started + max(0.01, timeout_seconds)
         connection.set_progress_handler(
