@@ -34,6 +34,13 @@ class FeedState:
             "started_at": None,
             "completed_at": None,
             "candles_saved": 0,
+            "candles_expected": None,
+            "pages_completed": 0,
+            "pages_expected": None,
+            "progress_percent": 0.0,
+            "candles_per_second": 0.0,
+            "eta_seconds": None,
+            "last_candle_at": None,
             "last_error": None,
             "_running_since_monotonic": None,
         }

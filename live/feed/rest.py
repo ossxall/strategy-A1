@@ -2,7 +2,7 @@
 
 import random
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from itertools import pairwise
 
@@ -112,13 +112,15 @@ def rest_row_to_candle(row):
     )
 
 
-def fetch_and_save_range(session, start_ms, end_ms):
+def fetch_and_save_range(session, start_ms, end_ms, progress_callback=None):
     """
     Descarga un rango paginado. Devuelve las velas procesadas.
     """
     cursor = max(0, int(start_ms))
     end_ms = int(end_ms)
     total = 0
+    expected = max(1, (end_ms - cursor) // INTERVAL_MS + 1)
+    page = 0
     while cursor <= end_ms and (not STATE.stop_event.is_set()):
         rows = rest_get_klines(session, cursor, end_ms)
         if not rows or STATE.stop_event.is_set():
@@ -139,6 +141,9 @@ def fetch_and_save_range(session, start_ms, end_ms):
             logger.error("Cursor REST no avanza; se cancela página")
             break
         cursor = next_cursor
+        page += 1
+        if progress_callback is not None:
+            progress_callback(total, expected, last_open_time, page)
         if len(rows) < REST_PAGE_LIMIT:
             break
         STATE.stop_event.wait(0.1)
@@ -168,13 +173,81 @@ def initial_backfill_worker():
                 "Backfill desde la última vela guardada (con solapamiento de 10 velas)."
             )
         end_ms = int(time.time() * 1000)
-        total = fetch_and_save_range(session, start_ms, end_ms)
+
+        expected_candles = max(1, (end_ms - start_ms) // INTERVAL_MS + 1)
+        expected_pages = (expected_candles + REST_PAGE_LIMIT - 1) // REST_PAGE_LIMIT
+        progress_started = time.monotonic()
+        update_diagnostics(
+            "backfill",
+            candles_saved=0,
+            candles_expected=expected_candles,
+            pages_completed=0,
+            pages_expected=expected_pages,
+            progress_percent=0.0,
+            candles_per_second=0.0,
+            eta_seconds=None,
+            last_candle_at=None,
+        )
+        logger.info(
+            "Backfill planificado: %s velas (~%s páginas REST)",
+            expected_candles,
+            expected_pages,
+        )
+
+        def log_backfill_progress(saved, expected, last_open_time, page):
+            elapsed = max(time.monotonic() - progress_started, 0.001)
+            rate = saved / elapsed
+            percent = min(100.0, saved * 100.0 / expected)
+            remaining = max(0, expected - saved)
+            eta_seconds = remaining / rate if rate > 0 else None
+            last_candle_at = datetime.fromtimestamp(
+                last_open_time / 1000,
+                timezone.utc,
+            ).isoformat()
+
+            update_diagnostics(
+                "backfill",
+                candles_saved=saved,
+                pages_completed=page,
+                progress_percent=round(percent, 2),
+                candles_per_second=round(rate, 2),
+                eta_seconds=(
+                    round(eta_seconds, 1) if eta_seconds is not None else None
+                ),
+                last_candle_at=last_candle_at,
+            )
+            eta_text = (
+                "n/a"
+                if eta_seconds is None
+                else f"{eta_seconds / 60:.1f} min"
+            )
+            logger.info(
+                "Backfill progreso: %s/%s velas (%.1f%%), "
+                "página %s/%s, última=%s, velocidad=%.1f velas/s, ETA=%s",
+                saved,
+                expected,
+                percent,
+                page,
+                expected_pages,
+                last_candle_at,
+                rate,
+                eta_text,
+            )
+
+        total = fetch_and_save_range(
+            session,
+            start_ms,
+            end_ms,
+            progress_callback=log_backfill_progress,
+        )
         logger.info("Backfill terminado: %s velas", total)
         update_diagnostics(
             "backfill",
             status="completed",
             completed_at=utc_iso(),
             candles_saved=total,
+            progress_percent=100.0,
+            eta_seconds=0.0,
             last_error=None,
             _running_since_monotonic=None,
         )
