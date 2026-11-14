@@ -9,7 +9,7 @@ from strategy import report
 from strategy.config import Config
 
 
-def test_monthly_backtest_html_uses_one_paginated_chart(tmp_path, monkeypatch):
+def test_monthly_backtest_html_renders_isolated_panels_per_page(tmp_path, monkeypatch):
     bars = pd.DataFrame(
         index=pd.DatetimeIndex(
             ["2024-01-15T00:00:00Z", "2024-02-15T00:00:00Z"],
@@ -40,15 +40,25 @@ def test_monthly_backtest_html_uses_one_paginated_chart(tmp_path, monkeypatch):
     assert not (tmp_path / "html" / "backtest_2024-01.html").exists()
 
     document = expected_path.read_text(encoding="utf-8")
-    assert document.count('id="chart"') == 1
-    assert "justify-content:center" in document
-    assert "max-width:1800px" in document
+    assert document.count('id="chart-panels"') == 1
+    assert 'id="chart"' not in document
+    assert 'id="chart-title"' in document
+    assert "max-width:none" in document
+    assert "padding:0" in document
+    assert "padding:16px" in document
+    assert "background:#000" in document
+    assert "gap:12px" in document
+    assert ".panel-card" in document
+    assert "padding:12px" in document
+    assert "border-radius:.75rem" in document
+    assert "function splitFigure(figure)" in document
+    assert "Plotly.newPlot(plot, panel.data, panel.layout, config)" in document
     assert "const chartHeight = Math.max(" in document
-    assert "height:chartHeight || page.figure.layout.height" in document
+    assert "max-width:100% !important" in document
+    assert "Plotly.Plots.resize(plot)" in document
+    assert "domain:[0, 1]" in document
     assert 'id="previous"' in document
     assert 'id="next"' in document
-    assert "Plotly.react(chart" in document
-
     payload = re.search(
         r'<script id="monthly-data" type="application/json">(.*?)</script>',
         document,

@@ -1,7 +1,8 @@
 import json
 import sqlite3
+import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import urlopen
@@ -109,3 +110,86 @@ def test_health_endpoint_returns_promptly_if_snapshot_lock_is_held(tmp_path):
         server.server_close()
         http_thread.join(timeout=1)
         probe_thread.join(timeout=1)
+
+
+def test_stale_feed_is_reported_as_degraded_by_both_routes(tmp_path):
+    signal_path = tmp_path / "signal.db"
+    health = _make_health(tmp_path)
+    stale_feed = _RawFeed()
+    stale_feed.index = [datetime.now(timezone.utc) - timedelta(minutes=10)]
+    health.record_feed(stale_feed)
+    server, http_thread, probe_thread = start_health_server(
+        health,
+        "127.0.0.1",
+        0,
+        signal_path,
+        probe_interval=1,
+    )
+    base_url = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        for route in ("/live/bot/health", "/live/bot/status"):
+            try:
+                urlopen(base_url + route, timeout=1)
+            except HTTPError as response:
+                payload = json.load(response)
+                assert response.code == 503
+                assert payload["status"] == "degraded"
+                assert payload["healthy"] is False
+                assert payload["checks"]["feed_candle_fresh"] is False
+            else:
+                raise AssertionError(f"{route} debía responder HTTP 503")
+    finally:
+        health.stop()
+        server.shutdown()
+        server.server_close()
+        http_thread.join(timeout=1)
+        probe_thread.join(timeout=1)
+
+
+def test_build_payload_reports_healthy_when_all_health_checks_pass(tmp_path):
+    health = _make_health(tmp_path)
+    current_thread = threading.current_thread()
+    health.attach_threads(current_thread, current_thread)
+
+    payload = health.build_payload("127.0.0.1", 8080, 1.0)
+
+    assert payload["status"] == "healthy"
+    assert payload["healthy"] is True
+    assert all(payload["checks"].values())
+    assert payload["bot"]["last_cycle_status"] == "ok"
+    assert payload["signal_database"]["available"] is True
+
+
+def test_build_payload_reports_degraded_when_last_cycle_failed(tmp_path):
+    health = _make_health(tmp_path)
+    current_thread = threading.current_thread()
+    health.attach_threads(current_thread, current_thread)
+    health.finish_cycle(
+        status="error",
+        duration_seconds=0.25,
+        error="fallo simulado",
+    )
+
+    payload = health.build_payload("127.0.0.1", 8080, 1.0)
+
+    assert payload["status"] == "degraded"
+    assert payload["healthy"] is False
+    assert payload["checks"]["last_cycle_ok"] is False
+    assert payload["bot"]["last_cycle_error"] == "fallo simulado"
+
+
+def test_build_payload_reports_unhealthy_when_signal_database_is_unavailable(
+    tmp_path,
+):
+    health = _make_health(tmp_path)
+    current_thread = threading.current_thread()
+    health.attach_threads(current_thread, current_thread)
+    health.record_database_probe(
+        probe_signal_database(tmp_path / "missing.db", timeout_seconds=0.1)
+    )
+
+    payload = health.build_payload("127.0.0.1", 8080, 1.0)
+
+    assert payload["status"] == "unhealthy"
+    assert payload["healthy"] is False
+    assert payload["checks"]["signal_database_available"] is False

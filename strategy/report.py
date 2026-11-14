@@ -1305,7 +1305,7 @@ def _write_paginated_backtest_html(
     bars: pd.DataFrame,
     pages: list[dict],
 ) -> None:
-    """Escribe un único HTML que reutiliza el mismo gráfico para cada mes."""
+    """Escribe un HTML paginado que renderiza cada panel mensual por separado."""
     import html
     from plotly.offline import get_plotlyjs_version
 
@@ -1366,29 +1366,34 @@ def _write_paginated_backtest_html(
     .pager-button:disabled {{ color:#637282; cursor:not-allowed; opacity:.62; }}
     .page-label {{ min-width:10rem; padding:0 .35rem; color:#c8d4df; text-align:center;
                    font-size:.82rem; font-variant-numeric:tabular-nums; }}
-    main {{ display:flex; justify-content:center; width:100%;
-            padding:1rem clamp(.65rem,2vw,1.5rem) 1.5rem; }}
+    main {{ display:block; width:100%; padding:0; }}
     .chart-shell {{
-      display:flex; justify-content:center; width:100%; max-width:1800px;
-      margin-inline:auto; overflow:hidden;
-      border:1px solid var(--border); border-radius:.85rem;
-      background:var(--surface); box-shadow:0 18px 45px rgba(0,0,0,.22);
+      display:block; width:100%; max-width:none; margin:0; overflow:hidden;
+      padding:16px;
+      border:1px solid var(--border);
+      background:#000; box-shadow:0 18px 45px rgba(0,0,0,.22);
     }}
-    #chart {{ display:block; flex:1 1 auto; width:100%; min-width:0;
-              min-height:75vh; margin:0 auto; }}
-    #chart .js-plotly-plot {{
-      display:block !important; width:100% !important; max-width:100%;
-      margin:0 auto !important;
-    }}
-    #chart .plot-container, #chart .svg-container {{
-      width:100% !important;
+    .chart-title {{ margin:0; padding:0; color:var(--text); text-align:center;
+                    font-size:1rem; font-weight:600; }}
+    .chart-panels {{ display:flex; flex-direction:column; gap:12px; width:100%; }}
+    .panel-card {{ width:100%; min-width:0; margin:0; padding:12px; overflow:hidden;
+                   border:1px solid var(--border); border-radius:.75rem;
+                   background:var(--surface); }}
+    .panel-title {{ margin:0; padding:0; color:var(--text); text-align:center;
+                    font-size:.9rem; font-weight:600; line-height:1.3; }}
+    .panel-plot {{ display:block; width:100%; min-width:0; max-width:100%; margin:0; padding:0; }}
+    .panel-plot .js-plotly-plot,
+    .panel-plot .plot-container,
+    .panel-plot .svg-container {{
+      box-sizing:border-box !important; width:100% !important; max-width:100% !important;
     }}
     @media (max-width:700px) {{
       .page-header {{ align-items:stretch; flex-direction:column; gap:.9rem; padding:1rem; }}
       .pager {{ width:100%; grid-template-columns:auto minmax(0,1fr) auto; }}
       .page-label {{ min-width:0; }}
-      main {{ padding:.65rem; }}
-      .chart-shell {{ border-radius:.6rem; }}
+      .chart-shell {{ padding:8px; }}
+      .chart-panels {{ gap:8px; }}
+      .panel-card {{ padding:8px; border-radius:.55rem; }}
     }}
     @media (max-width:390px) {{
       .pager-button {{ padding:.5rem .6rem; font-size:.8rem; }}
@@ -1409,7 +1414,7 @@ def _write_paginated_backtest_html(
       <button class="pager-button" id="next" type="button">Siguiente →</button>
     </nav>
   </header>
-  <main><section class="chart-shell" aria-label="Gráfico mensual del backtest"><div id="chart"></div></section></main>
+  <main><section class="chart-shell" aria-label="Gráficos mensuales del backtest"><div class="chart-title" id="chart-title"></div><div class="chart-panels" id="chart-panels"></div></section></main>
   <script id="monthly-data" type="application/json">{page_json}</script>
   <script>
     const pages = JSON.parse(document.getElementById("monthly-data").textContent);
@@ -1417,15 +1422,121 @@ def _write_paginated_backtest_html(
       0,
       ...pages.map(page => Number(page.figure.layout.height) || 0)
     );
-    const chart = document.getElementById("chart");
+    const panelsRoot = document.getElementById("chart-panels");
+    const chartTitle = document.getElementById("chart-title");
     const label = document.getElementById("page-label");
     const previous = document.getElementById("previous");
     const next = document.getElementById("next");
     const config = {{responsive:true, displaylogo:false, scrollZoom:true,
+                     displayModeBar:"hover",
                      modeBarButtonsToRemove:["select2d","lasso2d"]}};
     let current = 0;
+    let activePlots = [];
+    let renderSequence = 0;
 
-    function showPage(index) {{
+    function axisNumber(name) {{
+      return Number(name.replace(/^[xy]axis/, "")) || 1;
+    }}
+
+    function remapReference(reference, axisMap, fallback) {{
+      const value = reference || fallback;
+      const parts = String(value).split(" ");
+      if (parts[0] === "paper") return value;
+      const mapped = axisMap.get(parts[0]);
+      return mapped ? [mapped, ...parts.slice(1)].join(" ") : value;
+    }}
+
+    function remapItems(items, xMap, yMap, xRef, yRef) {{
+      return (items || []).filter(item => {{
+        const oldX = String(item.xref || xRef).split(" ")[0];
+        const oldY = String(item.yref || yRef).split(" ")[0];
+        return (oldX === "paper" || xMap.has(oldX))
+          && (oldY === "paper" || yMap.has(oldY))
+          && !(oldX === "paper" && oldY === "paper");
+      }}).map(item => ({{
+        ...item,
+        xref: remapReference(item.xref, xMap, xRef),
+        yref: remapReference(item.yref, yMap, yRef)
+      }}));
+    }}
+
+    function splitFigure(figure) {{
+      const sourceLayout = figure.layout || {{}};
+      const xAxes = Object.entries(sourceLayout)
+        .filter(([name, axis]) => name.startsWith("xaxis") && axis?.domain)
+        .sort(([a], [b]) => axisNumber(a) - axisNumber(b));
+
+      return xAxes.map(([xAxisName, sourceXAxis]) => {{
+        const xRef = xAxisName.replace("axis", "");
+        const yAxes = Object.entries(sourceLayout)
+          .filter(([name, axis]) => name.startsWith("yaxis") && axis?.anchor === xRef)
+          .sort(([, a], [, b]) => Number(Boolean(b.domain)) - Number(Boolean(a.domain)));
+        const yMap = new Map(yAxes.map(([name], i) => [
+          name.replace("axis", ""), i === 0 ? "y" : `y${{i + 1}}`
+        ]));
+        const xMap = new Map([[xRef, "x"]]);
+        const traces = figure.data.filter(trace => (trace.xaxis || "x") === xRef);
+        const data = traces.map(trace => ({{
+          ...trace,
+          xaxis: "x",
+          yaxis: yMap.get(trace.yaxis || "y") || "y"
+        }}));
+        const primaryYAxis = yAxes.find(([, axis]) => axis.domain) || yAxes[0];
+        const domain = primaryYAxis?.[1].domain || [0, 1];
+        const legendItems = traces.filter(trace => trace.showlegend !== false && trace.name);
+        const legendWidth = legendItems.reduce(
+          (total, trace) => total + String(trace.name).length * 7 + 34, 0
+        );
+        const legendRows = legendItems.length
+          ? Math.max(1, Math.ceil(legendWidth / Math.max(320, window.innerWidth - 96)))
+          : 0;
+        const legendMargin = legendItems.length
+          ? Math.min(180, 20 + legendRows * 24)
+          : 20;
+        const panelHeight = Math.max(
+          280,
+          Math.round(Math.max(0, chartHeight - 340) * (domain[1] - domain[0]))
+            + legendMargin + 40
+        );
+        const layout = {{
+          autosize:true,
+          height:panelHeight,
+          template:sourceLayout.template,
+          font:sourceLayout.font,
+          paper_bgcolor:sourceLayout.paper_bgcolor,
+          plot_bgcolor:sourceLayout.plot_bgcolor,
+          hovermode:sourceLayout.hovermode,
+          bargap:sourceLayout.bargap,
+          margin:{{l:48, r:48, t:legendMargin, b:24}},
+          showlegend:legendItems.length > 0,
+          legend:{{...sourceLayout.legend, x:0.5, y:1.02, yanchor:"bottom"}}
+        }};
+
+        const xAxis = {{...sourceXAxis, domain:[0, 1], anchor:"y"}};
+        delete xAxis.matches;
+        layout.xaxis = xAxis;
+
+        yAxes.forEach(([axisName, sourceYAxis], i) => {{
+          const newRef = yMap.get(axisName.replace("axis", ""));
+          const newAxisName = `yaxis${{newRef === "y" ? "" : newRef.slice(1)}}`;
+          const axis = {{...sourceYAxis, anchor:"x"}};
+          if (sourceYAxis.domain) axis.domain = [0, 1];
+          if (sourceYAxis.overlaying) axis.overlaying = yMap.get(sourceYAxis.overlaying) || "y";
+          delete axis.matches;
+          delete axis.title;
+          layout[newAxisName] = axis;
+        }});
+
+        const yRef = yAxes[0]?.[0].replace("axis", "") || "y";
+        layout.shapes = remapItems(sourceLayout.shapes, xMap, yMap, xRef, yRef);
+        layout.annotations = remapItems(sourceLayout.annotations, xMap, yMap, xRef, yRef);
+        const title = yAxes.map(([, axis]) => axis.title?.text).filter(Boolean).join(" · ");
+
+        return {{title, data, layout}};
+      }}).filter(panel => panel.data.length);
+    }}
+
+    async function showPage(index) {{
       if (!pages.length) {{
         label.textContent = "No hay meses para mostrar";
         previous.disabled = true;
@@ -1433,19 +1544,48 @@ def _write_paginated_backtest_html(
         return;
       }}
       current = index;
+      const sequence = ++renderSequence;
       const page = pages[current];
       label.textContent = `${{page.label}} · ${{page.positions}} posiciones (${{current + 1}}/${{pages.length}})`;
+      previous.disabled = true;
+      next.disabled = true;
+      const pageTitle = page.figure.layout?.title;
+      chartTitle.textContent = typeof pageTitle === "string" ? pageTitle : pageTitle?.text || "";
+      const panels = splitFigure(page.figure);
+
+      activePlots.forEach(plot => Plotly.purge(plot));
+      activePlots = [];
+      panelsRoot.replaceChildren();
+      const renders = panels.map(panel => {{
+        const card = document.createElement("section");
+        card.className = "panel-card";
+        const heading = document.createElement("h2");
+        heading.className = "panel-title";
+        heading.textContent = panel.title;
+        const plot = document.createElement("div");
+        plot.className = "panel-plot";
+        card.append(heading, plot);
+        panelsRoot.appendChild(card);
+        activePlots.push(plot);
+        return Plotly.newPlot(plot, panel.data, panel.layout, config);
+      }});
+
+      try {{
+        await Promise.all(renders);
+      }} catch (error) {{
+        console.error("Error al dibujar los paneles:", error);
+        panelsRoot.textContent = "No se pudieron renderizar los gráficos de este mes.";
+      }}
+      if (sequence !== renderSequence) return;
       previous.disabled = current === 0;
       next.disabled = current === pages.length - 1;
-      const layout = {{
-        ...page.figure.layout,
-        height:chartHeight || page.figure.layout.height
-      }};
-      Plotly.react(chart, page.figure.data, layout, config);
     }}
 
     previous.addEventListener("click", () => showPage(current - 1));
     next.addEventListener("click", () => showPage(current + 1));
+    window.addEventListener("resize", () => {{
+      activePlots.forEach(plot => Plotly.Plots.resize(plot));
+    }});
     showPage(0);
   </script>
 </body>
@@ -1470,13 +1610,14 @@ def build_monthly_backtest_htmls(
     output_dir: str | Path = DEFAULT_OUTPUT_DIR,
     index_path: str | Path | None = None,
 ) -> list[Path]:
-    """Genera un único HTML de Plotly con paginación por mes.
+    """Genera un único HTML de Plotly con paginación por mes y paneles aislados.
 
     Cada página cubre un mes calendario, pero los indicadores se calculan sobre
     la serie completa y solo se recortan al mostrar, así que no se pierde el
-    warmup de las EMAs/ADX. El archivo se guarda en ``index_path`` (por defecto
-    ``output_dir/html/backtest.html``) y actualiza el mismo gráfico al cambiar
-    de mes con los botones Anterior/Siguiente.
+    warmup de las EMAs/ADX. Cada panel se renderiza en su propio contenedor.
+    El archivo se guarda en ``index_path`` (por defecto
+    ``output_dir/html/backtest.html``) y los botones Anterior/Siguiente cambian
+    los gráficos al mes seleccionado.
     """
     index_path = (Path(index_path) if index_path is not None
                   else Path(output_dir) / _PLOTLY_SUBDIR / "backtest.html")
