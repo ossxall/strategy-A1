@@ -2343,6 +2343,29 @@ def main() -> int:
                 "BINANCE_TRADING_ENABLED=false; no se enviarán órdenes."
             )
         if settings.test_mode:
+            try:
+                if __package__:
+                    from .executor_selftest import run_executor_self_tests
+                else:
+                    source_root = Path(__file__).resolve().parents[2]
+                    if (source_root / "live" / "bot").is_dir():
+                        from live.bot.executor_selftest import (
+                            run_executor_self_tests,
+                        )
+                    else:
+                        from bot.executor_selftest import run_executor_self_tests
+                selftest_count = run_executor_self_tests()
+            except Exception:
+                LOG.exception(
+                    "Autopruebas offline del executor fallaron; "
+                    "no se iniciará la secuencia Binance."
+                )
+                return 1
+            LOG.warning(
+                "Autopruebas offline del executor superadas (%s grupos); "
+                "no enviaron órdenes.",
+                selftest_count,
+            )
             LOG.warning(
                 "EXECUTOR_TEST_MODE activo: BTCUSDT, tope de margen %s USDT "
                 "por orden a un máximo de %sx, stop-loss %s%%. "

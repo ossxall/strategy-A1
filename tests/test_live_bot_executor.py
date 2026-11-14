@@ -5,6 +5,7 @@ import pytest
 
 from live.bot.binance_usdm import BinanceOrderNotFound, BinanceUsdmClient
 from live.bot.executor import ExecutionWorker, ExecutorSettings
+from live.bot.executor_selftest import run_executor_self_tests
 from live.bot.storage import SignalStore
 from strategy.config import Config
 
@@ -1268,3 +1269,7 @@ def test_heartbeat_falls_back_beside_signal_db_when_configured_path_is_unwritabl
         assert worker._heartbeat_path == fallback
     finally:
         store.close()
+
+
+def test_offline_executor_selftest_matrix_passes():
+    assert run_executor_self_tests() >= 6
