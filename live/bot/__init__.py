@@ -24,7 +24,7 @@ from .config import (
     parse_live_since,
     ts_ms,
 )
-from .events import build_events, events_to_trades
+from .events import build_events, build_events_and_result, events_to_trades
 from .series import build_series_frames, resample, series_frame
 from .storage import FeedReader, SignalStore
 
@@ -34,6 +34,7 @@ __all__ = [
     "SignalBot",
     "SignalStore",
     "build_events",
+    "build_events_and_result",
     "build_series_frames",
     "build_strategy_config",
     "env_bool",

@@ -10,7 +10,7 @@ from dataclasses import replace
 import numpy as np
 import pandas as pd
 
-from strategy.models import CROSS_REASON
+from strategy.models import CROSS_REASON, empty_trades
 from strategy.strategy import Backtester, Config
 
 from .config import opt_float, ts_ms, utc_iso
@@ -47,7 +47,7 @@ def _reason_is_intrabar(reason: str) -> bool:
     ) or reason == "BREAKEVEN"
 
 
-def build_events(
+def build_events_and_result(
     bars: pd.DataFrame,
     signals: pd.DataFrame,
     adx_exit: np.ndarray | None,
@@ -56,14 +56,26 @@ def build_events(
     cfg: Config,
     symbol: str,
     interval: str,
-) -> list[dict]:
-    """Ejecuta el backtester y convierte acciones e intenciones en eventos.
+) -> tuple[list[dict], pd.DataFrame, pd.DataFrame]:
+    """Ejecuta una vez el backtester y devuelve eventos, trades y equity.
 
     Las intenciones de la última vela se publican para la siguiente apertura,
     sin esperar al cierre de esa vela futura.
     """
     if len(bars) < 2:
-        return []
+        return (
+            [],
+            empty_trades(),
+            pd.DataFrame(
+                columns=[
+                    "timestamp",
+                    "cash",
+                    "equity",
+                    "position_side",
+                    "position_quantity",
+                ]
+            ),
+        )
 
     engine = Backtester(
         bars,
@@ -74,7 +86,7 @@ def build_events(
         rsi_div_exit,
     )
     with contextlib.redirect_stdout(io.StringIO()):
-        engine.run()
+        backtest_trades, equity = engine.run()
 
     timeframe_ms = int(pd.Timedelta(cfg.timeframe).total_seconds() * 1000)
     created_at = utc_iso()
@@ -288,7 +300,7 @@ def build_events(
                 )
             )
 
-    return sorted(
+    ordered_events = sorted(
         events,
         key=lambda event: (
             event["signal_time"],
@@ -296,3 +308,28 @@ def build_events(
             event["event"] != "EXIT",
         ),
     )
+    return ordered_events, backtest_trades, equity
+
+
+def build_events(
+    bars: pd.DataFrame,
+    signals: pd.DataFrame,
+    adx_exit: np.ndarray | None,
+    weak_exit: np.ndarray | None,
+    rsi_div_exit: np.ndarray | None,
+    cfg: Config,
+    symbol: str,
+    interval: str,
+) -> list[dict]:
+    """Compatibilidad: devuelve solo los eventos live generados."""
+    events, _, _ = build_events_and_result(
+        bars,
+        signals,
+        adx_exit,
+        weak_exit,
+        rsi_div_exit,
+        cfg,
+        symbol,
+        interval,
+    )
+    return events

@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-11-14T06:15:31.471221+00:00",
+  "generated_at": "2026-11-14T11:08:41.157746+00:00",
   "previous_available": true,
   "delta": {
     "avg_pnl": {
@@ -136,15 +136,15 @@
       "changed": false
     },
     "sharpe_daily_365": {
-      "previous": 2.21845891656748,
-      "current": 2.21845891656748,
+      "previous": 2.218003177973724,
+      "current": 2.218003177973724,
       "delta": 0.0,
       "delta_pct": 0.0,
       "changed": false
     },
     "sortino_daily_365": {
-      "previous": 4.9299898097350106,
-      "current": 4.9299898097350106,
+      "previous": 4.928990115958184,
+      "current": 4.928990115958184,
       "delta": 0.0,
       "delta_pct": 0.0,
       "changed": false

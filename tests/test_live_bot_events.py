@@ -340,7 +340,49 @@ def test_live_only_includes_event_actionable_at_start_even_if_signal_bar_started
         "prepare_exits",
         lambda raw, frame: (None, None, None),
     )
-    monkeypatch.setattr(bot_app, "build_events", lambda *args: [event])
+    monkeypatch.setattr(
+        bot_app,
+        "build_events_and_result",
+        lambda *args: ([event], pd.DataFrame(), pd.DataFrame()),
+    )
 
     assert signal_bot.process_once() == 1
     assert store.inserted == [event]
+
+
+def test_live_backtest_files_refresh_only_when_strategy_bars_change(
+    tmp_path, monkeypatch
+):
+    bars = make_bars(2)
+    bot = SignalBot(
+        make_config(),
+        feed=None,
+        store=None,
+        symbol="BTCUSDT",
+        interval="1m",
+        backtest_report_dir=tmp_path,
+    )
+    calls = []
+    monkeypatch.setattr(
+        "strategy.report.build_monthly_backtest_htmls",
+        lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+
+    bot._publish_backtest_files(
+        bars, bars, make_signals(bars, [0, 0]), None, None, None,
+        pd.DataFrame(), pd.DataFrame(),
+    )
+    bot._publish_backtest_files(
+        bars, bars, make_signals(bars, [0, 0]), None, None, None,
+        pd.DataFrame(), pd.DataFrame(),
+    )
+    assert len(calls) == 1
+    assert calls[0][1]["output_dir"] == tmp_path
+
+    updated = bars.copy()
+    updated.iloc[-1, updated.columns.get_loc("close")] += 1
+    bot._publish_backtest_files(
+        updated, updated, make_signals(updated, [0, 0]), None, None, None,
+        pd.DataFrame(), pd.DataFrame(),
+    )
+    assert len(calls) == 2

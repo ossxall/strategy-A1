@@ -1,5 +1,4 @@
 import json
-import re
 
 import numpy as np
 import pandas as pd
@@ -53,20 +52,31 @@ def test_monthly_backtest_html_renders_isolated_panels_per_page(tmp_path, monkey
     assert "border-radius:.75rem" in document
     assert "function splitFigure(figure)" in document
     assert "Plotly.newPlot(plot, panel.data, panel.layout, config)" in document
-    assert "const chartHeight = Math.max(" in document
+    assert "plotly-4.1.1.min.js" in document
+    assert "plotly-latest.min.js" not in document
+    assert "fetch(url, {cache:\"no-store\"})" in document
+    assert "const manifestUrl = new URL(\"data/manifest.json\"" in document
+    assert "chartHeight = Math.max(" in document
     assert "max-width:100% !important" in document
     assert "Plotly.Plots.resize(plot)" in document
     assert "domain:[0, 1]" in document
     assert 'id="previous"' in document
     assert 'id="next"' in document
-    payload = re.search(
-        r'<script id="monthly-data" type="application/json">(.*?)</script>',
-        document,
-        re.DOTALL,
-    ).group(1)
-    pages = json.loads(payload)
-    assert [page["label"] for page in pages] == ["2024-01", "2024-02"]
-    assert len(pages) == 2
+    assert 'id="monthly-data"' not in document
+    assert "2024-01" not in document
+    manifest = json.loads(
+        (tmp_path / "html" / "data" / "manifest.json").read_text(encoding="utf-8")
+    )
+    assert [page["label"] for page in manifest["pages"]] == ["2024-01", "2024-02"]
+    assert len(manifest["pages"]) == 2
+    assert all("figure_height" in page for page in manifest["pages"])
+    first_page = json.loads(
+        (tmp_path / "html" / "data" / manifest["pages"][0]["file"]).read_text(
+            encoding="utf-8"
+        )
+    )
+    assert first_page["label"] == "2024-01"
+    assert first_page["figure"]["data"]
 
 
 def test_backtest_figure_visualizes_atr_filter_and_hides_it_when_disabled():

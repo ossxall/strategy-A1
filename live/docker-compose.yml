@@ -74,6 +74,7 @@ services:
     environment:
       DB_PATH: /data/feed.db
       SIGNAL_DB: /data/signal.db
+      BACKTEST_REPORT_DIR: /data/backtest_out
       BOT_HEARTBEAT: /data/bot1.heartbeat
       HTTP_HOST: 0.0.0.0
       HTTP_PORT: "8080"

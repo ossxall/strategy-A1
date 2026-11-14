@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 import time
 
 from strategy.strategy import Config, EMACrossStrategy
 
 from .config import (
+    DEFAULT_BACKTEST_REPORT_DIR,
     DEFAULT_FEED_DB,
     DEFAULT_HTTP_HOST,
     DEFAULT_HTTP_PORT,
@@ -30,7 +32,7 @@ from .config import (
     ts_ms,
     utc_now,
 )
-from .events import build_events, events_to_trades
+from .events import build_events_and_result, events_to_trades
 from .health import BotHealth, start_health_server
 from .series import build_series_frames, resample
 from .storage import FeedReader, SignalStore
@@ -68,6 +70,7 @@ class SignalBot:
         live_since_ms: int | None = None,
         snapshot: SeriesSnapshot | None = None,
         health: BotHealth | None = None,
+        backtest_report_dir: Path | None = None,
     ):
         self.cfg = cfg
         self.feed = feed
@@ -80,6 +83,8 @@ class SignalBot:
         self.live_since_ms = live_since_ms
         self.snapshot = snapshot
         self.health = health
+        self.backtest_report_dir = backtest_report_dir
+        self._last_report_signature = None
         self._live_resolved = False
 
     def _resolve_live_since(self) -> None:
@@ -128,6 +133,41 @@ class SignalBot:
         except Exception:  # noqa: BLE001 - el snapshot es accesorio al ciclo de señales
             logger.exception("No se pudo actualizar el snapshot de series")
 
+    def _publish_backtest_files(
+        self, raw, bars, signals, adx_exit, weak_exit, rsi_div_exit, trades, equity
+    ) -> None:
+        """Actualiza los archivos del visor solo cuando llega una vela nueva."""
+        if self.backtest_report_dir is None or bars.empty:
+            return
+        signature = (
+            len(bars),
+            bars.index[0].value,
+            bars.index[-1].value,
+            tuple(bars.iloc[-1].to_list()),
+        )
+        if signature == self._last_report_signature:
+            return
+        try:
+            from strategy.report import build_monthly_backtest_htmls
+
+            build_monthly_backtest_htmls(
+                bars,
+                self.cfg,
+                signals=signals,
+                trades=trades,
+                equity=equity,
+                adx_exit=adx_exit,
+                weak_exit=weak_exit,
+                rsi_div_exit=rsi_div_exit,
+                raw=raw,
+                source=f"{self.symbol} live",
+                output_dir=self.backtest_report_dir,
+            )
+        except Exception:  # noqa: BLE001 - los informes no detienen el ciclo live
+            logger.exception("No se pudieron actualizar los archivos del backtest live")
+            return
+        self._last_report_signature = signature
+
     def process_once(self) -> int:
         """Lee datos cerrados, calcula acciones y persiste los eventos nuevos."""
         self._resolve_live_since()
@@ -156,7 +196,7 @@ class SignalBot:
 
         signals = self.strategy.generate_signals(bars, raw)
         adx_exit, weak_exit, rsi_div_exit = self.strategy.prepare_exits(raw, bars)
-        events = build_events(
+        events, trades, equity = build_events_and_result(
             bars,
             signals,
             adx_exit,
@@ -185,6 +225,9 @@ class SignalBot:
                 inserted,
                 len(events),
             )
+        self._publish_backtest_files(
+            raw, bars, signals, adx_exit, weak_exit, rsi_div_exit, trades, equity
+        )
         return inserted
 
     def run(self, once: bool = False, poll_seconds: float = DEFAULT_POLL_SECONDS) -> None:
@@ -240,6 +283,9 @@ def main() -> int:
     interval = env_str("INTERVAL", DEFAULT_INTERVAL)
     feed_path = resolve_path(env_str("DB_PATH", DEFAULT_FEED_DB))
     signal_path = resolve_path(env_str("SIGNAL_DB", DEFAULT_SIGNAL_DB))
+    backtest_report_dir = resolve_path(
+        env_str("BACKTEST_REPORT_DIR", DEFAULT_BACKTEST_REPORT_DIR)
+    )
     poll_seconds = env_float("POLL_SECONDS", DEFAULT_POLL_SECONDS)
     run_once = env_bool("BOT_RUN_ONCE", DEFAULT_RUN_ONCE)
     live_since_value = env_str("LIVE_SINCE", "").strip()
@@ -311,6 +357,7 @@ def main() -> int:
             live_only=live_only,
             live_since_ms=live_since_ms,
             health=health,
+            backtest_report_dir=backtest_report_dir,
         ).run(once=run_once, poll_seconds=poll_seconds)
     finally:
         health.stop()
