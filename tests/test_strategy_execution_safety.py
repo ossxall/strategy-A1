@@ -169,7 +169,7 @@ def test_monthly_loss_limit_closes_position_and_blocks_reentry_until_month_end()
     )
     engine = Backtester(
         bars,
-        quiet_config(monthly_loss_limit_pct=5.0),
+        quiet_config(monthly_loss_limit_pct=5.0, max_leverage=1.0),
         signals=manual_signals(bars, [1, 0, 1]),
     )
 
@@ -202,7 +202,7 @@ def test_monthly_loss_limit_rearms_at_the_start_of_the_next_calendar_month():
     )
     engine = Backtester(
         bars,
-        quiet_config(monthly_loss_limit_pct=5.0),
+        quiet_config(monthly_loss_limit_pct=5.0, max_leverage=1.0),
         signals=manual_signals(bars, [1, 0, 1, 0]),
     )
 

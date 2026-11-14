@@ -1,7 +1,9 @@
-# Docker Compose para bot1: colector (live/feed/) + bot de señales.
+# Docker Compose para bot1: colector + estrategia de señales + consumidor Futures.
 # =============================================================================
 # - Ambos servicios comparten la imagen y un volumen con feed.db y signal.db.
 # - `feed` escribe feed.db (WAL); `bot` solo lee feed.db y escribe signal.db.
+# - `executor` consume signal.db y registra su estado por cuenta; trading está
+#   desactivado por defecto en `live/.env`.
 # - Resiliencia: `restart: unless-stopped`, `init: true`, healthchecks reales
 #   y límites de log. El bot solo espera a que el contenedor del feed ARRANQUE
 #   (`service_started`), no a que esté sano: el paquete bot tolera que feed.db falte o
@@ -28,8 +30,10 @@ x-common: &common
   image: blacker-bot1:latest
   working_dir: /app/legacy/bot1
   env_file:
-    - ../.env
-    - .env
+    - path: ../.env
+      required: false
+    - path: .env
+      required: false
   volumes:
     - bot_data:/data
   init: true
@@ -88,6 +92,24 @@ services:
       timeout: 10s
       retries: 5
       start_period: 120s
+
+  executor:
+    <<: *common
+    command: ["python", "-m", "bot.executor"]
+    volumes:
+      - bot_data:/data
+    depends_on:
+      bot:
+        condition: service_started
+    environment:
+      SIGNAL_DB: /data/signal.db
+      EXECUTOR_HEARTBEAT: /data/executor.heartbeat
+    healthcheck:
+      test: ["CMD", "python", "healthcheck.py", "executor"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
 volumes:
   bot_data:

@@ -14,7 +14,7 @@ from strategy.models import CROSS_REASON, empty_trades
 from strategy.strategy import Backtester, Config
 
 from .config import opt_float, ts_ms, utc_iso
-from .storage import build_signal_id
+from .storage import SIGNAL_SCHEMA_VERSION, build_signal_id
 
 
 def events_to_trades(events: list[dict]) -> list[dict]:
@@ -114,7 +114,7 @@ def build_events_and_result(
     ) -> dict:
         fast, slow, adx_entry = indicators.get(bar_time, (np.nan,) * 3)
         normalized = {
-            "schema_version": 2,
+            "schema_version": SIGNAL_SCHEMA_VERSION,
             "symbol": symbol,
             "interval": interval,
             "timeframe": cfg.timeframe,
@@ -142,6 +142,7 @@ def build_events_and_result(
     entries: dict[int, tuple[str, pd.Timestamp, float]] = {}
     closed_legs: dict[int, list] = {}
     entry_quantities: dict[int, float] = {}
+    entry_sizing: dict[int, dict] = {}
     for trade in engine.trades:
         entries.setdefault(
             trade.position_id,
@@ -164,11 +165,33 @@ def build_events_and_result(
             opened["price"],
         )
         entry_quantities[opened["position_id"]] = float(opened["quantity"])
+        entry_sizing[opened["position_id"]] = {
+            "risk_pct": opened["risk_pct"],
+            "risk_multiplier": opened["risk_multiplier"],
+            "adaptive_multiplier": opened["adaptive_multiplier"],
+            "mfi_multiplier": opened["mfi_multiplier"],
+            "er_multiplier": opened["er_multiplier"],
+            "stop_loss_pct": opened["stop_loss_pct"],
+            "max_leverage": opened["max_leverage"],
+            "commission_bps": opened["commission_bps"],
+            "slippage_bps": opened["slippage_bps"],
+            "move_stop_to_breakeven": cfg.move_stop_to_breakeven,
+            "sizing_equity": opened["sizing_equity"],
+            "model_quantity": opened["quantity"],
+            "model_risk_unit": opened["risk_unit"],
+        }
 
     events: list[dict] = []
     for position_id in sorted(entries):
         side, entry_time, entry_price = entries[position_id]
         signal_time = ts_ms(entry_time)
+        payload = {
+            "action": "OPEN",
+            "position_id": position_id,
+            "entry_pct": 100.0,
+        }
+        if position_id in entry_sizing:
+            payload["sizing"] = entry_sizing[position_id]
         events.append(
             make_event(
                 "ENTRY",
@@ -177,11 +200,7 @@ def build_events_and_result(
                 signal_time - timeframe_ms,
                 signal_time,
                 entry_price,
-                {
-                    "action": "OPEN",
-                    "position_id": position_id,
-                    "entry_pct": 100.0,
-                },
+                payload,
             )
         )
 
@@ -215,6 +234,8 @@ def build_events_and_result(
                 "pnl_net": opt_float(leg.pnl_net),
                 "r_multiple": opt_float(r_multiple),
             }
+            if position_id in entry_sizing:
+                payload["sizing"] = entry_sizing[position_id]
             if intrabar:
                 event_price = closes.get(bar_time, leg.exit_price)
                 payload.update(
@@ -263,11 +284,20 @@ def build_events_and_result(
                             "pnl_net": None,
                             "r_multiple": None,
                             "pending": True,
+                            "sizing": entry_sizing.get(
+                                position.position_id, {}
+                            ),
                         },
                     )
                 )
             if position is None or position.side != target:
                 new_side = "LONG" if target == 1 else "SHORT"
+                sizing = engine.entry_sizing_context(
+                    target,
+                    signal_index=len(bars) - 1,
+                    sizing_equity=engine.cash,
+                )
+                sizing["move_stop_to_breakeven"] = cfg.move_stop_to_breakeven
                 events.append(
                     make_event(
                         "ENTRY",
@@ -281,6 +311,7 @@ def build_events_and_result(
                             "position_id": engine.position_id + 1,
                             "entry_pct": 100.0,
                             "pending": True,
+                            "sizing": sizing,
                         },
                     )
                 )
@@ -303,6 +334,9 @@ def build_events_and_result(
                         "pnl_net": None,
                         "r_multiple": None,
                         "pending": True,
+                        "sizing": entry_sizing.get(
+                            engine.position.position_id, {}
+                        ),
                     },
                 )
             )

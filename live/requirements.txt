@@ -7,3 +7,4 @@ requests>=2.31
 websocket-client>=1.7
 python-dotenv>=1.0
 plotly>=5.18
+binance-sdk-derivatives-trading-usds-futures==18.3.1

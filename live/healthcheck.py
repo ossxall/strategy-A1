@@ -8,11 +8,13 @@ o 1 (no sano). Solo usa la librería estándar, así que es rápido.
 Modos:
     python healthcheck.py feed   # feed.py: BD fresca y collector activo
     python healthcheck.py bot    # paquete bot: heartbeat reciente
+    python healthcheck.py executor # consumidor de señales: heartbeat reciente
 
 Variables:
     FEED_DB_PATH           ruta a feed.db (mode feed; fallback DB_PATH)
     FEED_INTERVAL          intervalo del feed, p.ej. 1m (fallback INTERVAL)
     BOT_HEARTBEAT          ruta del archivo de heartbeat (mode bot)
+    EXECUTOR_HEARTBEAT     ruta del archivo de heartbeat (mode executor)
     HEALTHCHECK_MAX_AGE    segundos máximos de antigüedad (mode bot)
 """
 from __future__ import annotations
@@ -100,9 +102,74 @@ def check_bot() -> bool:
     return age <= max_age
 
 
+def check_executor() -> bool:
+    """Sano si el consumidor de señales actualiza su heartbeat."""
+    heartbeat = Path(
+        os.getenv("EXECUTOR_HEARTBEAT", "/data/executor.heartbeat")
+    )
+    max_age = float(os.getenv("EXECUTOR_HEALTHCHECK_MAX_AGE", "60"))
+    if not heartbeat.exists():
+        print(f"[executor] heartbeat aún no existe: {heartbeat}")
+        return False
+    age = time.time() - heartbeat.stat().st_mtime
+    print(
+        f"[executor] heartbeat_hace={age:.1f}s limite={max_age:.0f}s "
+        f"trading_enabled={os.getenv('BINANCE_TRADING_ENABLED', 'false')}"
+    )
+    if age > max_age:
+        return False
+    if os.getenv("BINANCE_TRADING_ENABLED", "false").strip().lower() not in {
+        "1", "true", "yes", "y", "on"
+    }:
+        return True
+
+    db_path = Path(os.getenv("SIGNAL_DB", "/data/signal.db"))
+    environment = os.getenv("BINANCE_ENVIRONMENT", "testnet").strip().lower()
+    account_id = os.getenv("BINANCE_ACCOUNT_ID", f"binance-{environment}")
+    try:
+        conn = connect_sqlite(db_path, read_only=True, query_only=True)
+        try:
+            row = conn.execute(
+                """
+                SELECT environment, observed_at_ms, last_error
+                FROM binance_account_snapshot
+                WHERE account_id = ?
+                """,
+                (account_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+    except (OSError, sqlite3.Error) as exc:
+        print(f"[executor] error leyendo snapshot: {exc}")
+        return False
+    if row is None:
+        print(f"[executor] falta snapshot de cuenta {account_id}")
+        return False
+    snapshot_env, observed_at_ms, last_error = row
+    snapshot_age = time.time() * 1000 - int(observed_at_ms)
+    snapshot_limit = float(
+        os.getenv("EXECUTOR_ACCOUNT_HEALTH_MAX_AGE", "60")
+    ) * 1000
+    healthy = (
+        snapshot_env == environment
+        and last_error is None
+        and 0 <= snapshot_age <= snapshot_limit
+    )
+    print(
+        f"[executor] account={account_id} environment={snapshot_env} "
+        f"snapshot_hace={snapshot_age / 1000:.1f}s "
+        f"error={last_error or 'none'}"
+    )
+    return healthy
+
+
 def main(argv: list[str]) -> int:
     mode = argv[1] if len(argv) > 1 else ""
-    checks = {"feed": check_feed, "bot": check_bot}
+    checks = {
+        "feed": check_feed,
+        "bot": check_bot,
+        "executor": check_executor,
+    }
     check = checks.get(mode)
     if check is None:
         print(f"[healthcheck] modo desconocido: '{mode}'. Usa 'feed' o 'bot'.")

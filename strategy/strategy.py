@@ -577,11 +577,17 @@ class Backtester:
         price = self._price(raw_price, side)
         if not np.isfinite(price) or price <= 0:
             return
+        sizing_equity = self.cash
         pct_sl = self.cfg.stop_loss_pct
         risk_unit = self._risk_per_unit(side, price, pct_sl) if pct_sl > 0 else 0.0
-        adaptive_multiplier = self._risk_multiplier()
-        mfi_multiplier = self._entry_mfi_risk_multiplier(side)
-        er_multiplier = self._entry_er_risk_multiplier()
+        sizing = self.entry_sizing_context(
+            side,
+            signal_index=self._bar_index - 1,
+            sizing_equity=sizing_equity,
+        )
+        adaptive_multiplier = sizing["adaptive_multiplier"]
+        mfi_multiplier = sizing["mfi_multiplier"]
+        er_multiplier = sizing["er_multiplier"]
         unscaled_by_risk = (
             self.cash * self.cfg.risk_pct * adaptive_multiplier / risk_unit
             if risk_unit > 0 else np.inf
@@ -626,6 +632,9 @@ class Backtester:
         self.opened.append({
             "position_id": self.position_id, "time": ts, "price": price, "side": side,
             "quantity": qty_total,
+            "sizing_equity": sizing_equity,
+            "risk_unit": risk_unit,
+            **sizing,
         })
 
     def close_position(self, percent: float, raw_price: float, ts: pd.Timestamp, reason: str):
@@ -680,13 +689,45 @@ class Backtester:
         factor = 1 + cfg.adaptive_risk_k * (win_rate - 0.5)
         return float(min(max(factor, cfg.adaptive_risk_min), cfg.adaptive_risk_max))
 
-    def _entry_mfi_risk_multiplier(self, side: int) -> float:
+    def entry_sizing_context(
+        self,
+        side: int,
+        *,
+        signal_index: int | None = None,
+        sizing_equity: float | None = None,
+    ) -> dict[str, float]:
+        """Devuelve los factores de tamaño efectivos para una intención ENTRY."""
+        if side not in (1, -1):
+            raise ValueError("side debe ser 1 (LONG) o -1 (SHORT)")
+        index = self._bar_index - 1 if signal_index is None else signal_index
+        adaptive = self._risk_multiplier()
+        mfi = self._entry_mfi_risk_multiplier(side, signal_index=index)
+        er = self._entry_er_risk_multiplier(signal_index=index)
+        return {
+            "risk_pct": float(self.cfg.risk_pct),
+            "adaptive_multiplier": float(adaptive),
+            "mfi_multiplier": float(mfi),
+            "er_multiplier": float(er),
+            "risk_multiplier": float(adaptive * mfi * er),
+            "stop_loss_pct": float(self.cfg.stop_loss_pct),
+            "max_leverage": float(self.cfg.max_leverage),
+            "commission_bps": float(self.cfg.commission_bps),
+            "slippage_bps": float(self.cfg.slippage_bps),
+            "sizing_equity": float(
+                self.cash if sizing_equity is None else sizing_equity
+            ),
+        }
+
+    def _entry_mfi_risk_multiplier(
+        self, side: int, *, signal_index: int | None = None
+    ) -> float:
         """Escala tamaño por flujo MFI de la última vela de señal ya cerrada."""
         cfg = self.cfg
         if (not cfg.entry_mfi_risk_scaling_enabled or self.entry_mfi is None
                 or side not in (1, -1)):
             return 1.0
-        signal_index = self._bar_index - 1
+        if signal_index is None:
+            signal_index = self._bar_index - 1
         if signal_index < 0 or signal_index >= len(self.entry_mfi):
             return 1.0
         value = self.entry_mfi[signal_index]
@@ -698,12 +739,13 @@ class Backtester:
         )
         return float(np.clip(factor, cfg.entry_mfi_risk_min, cfg.entry_mfi_risk_max))
 
-    def _entry_er_risk_multiplier(self) -> float:
+    def _entry_er_risk_multiplier(self, *, signal_index: int | None = None) -> float:
         """Escala riesgo por eficiencia direccional de los cierres previos."""
         cfg = self.cfg
         if not cfg.entry_er_risk_scaling_enabled or self.entry_er is None:
             return 1.0
-        signal_index = self._bar_index - 1
+        if signal_index is None:
+            signal_index = self._bar_index - 1
         if signal_index < 0 or signal_index >= len(self.entry_er):
             return 1.0
         value = self.entry_er[signal_index]

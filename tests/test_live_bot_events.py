@@ -117,7 +117,7 @@ def test_last_closed_bar_entry_is_published_for_next_open_without_waiting_next_c
     assert entry["bar_time"] == ts_ms(bars.index[-1])
     assert entry["signal_time"] == ts_ms(bars.index[-1] + pd.Timedelta("30min"))
     assert entry["price"] is None
-    assert entry["schema_version"] == 2
+    assert entry["schema_version"] == 3
     assert entry["action"] == "OPEN"
     assert entry["position_id"] == payload["position_id"]
     assert entry["scheduled"] is True
@@ -231,7 +231,7 @@ def test_signal_store_deduplicates_pending_events_across_restarts(tmp_path):
     assert store.conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
     assert store.conn.execute("PRAGMA wal_autocheckpoint").fetchone()[0] == 1_000
     assert store.conn.execute("PRAGMA journal_size_limit").fetchone()[0] == 67_108_864
-    assert store.conn.execute("PRAGMA user_version").fetchone()[0] == 2
+    assert store.conn.execute("PRAGMA user_version").fetchone()[0] == 3
     assert store.insert([event]) == 1
     signal_id, action, position_id, scheduled = store.conn.execute(
         "SELECT signal_id, action, position_id, scheduled FROM signals"
@@ -350,7 +350,27 @@ def test_signal_store_migrates_existing_rows_to_signal_id(tmp_path):
             "SELECT signal_id, action, position_id, scheduled FROM signals"
         ).fetchone()
         assert row == (build_signal_id(event), "OPEN", 1, 1)
-        assert store.insert([event]) == 0
+        upgraded = {
+            **event,
+            "payload": json.dumps(
+                {
+                    "action": "OPEN",
+                    "position_id": 1,
+                    "pending": True,
+                    "sizing": {
+                        "risk_pct": 0.01,
+                        "risk_multiplier": 1.0,
+                        "stop_loss_pct": 0.01,
+                    },
+                }
+            ),
+        }
+        assert store.insert([upgraded]) == 1
+        upgraded_row = store.conn.execute(
+            "SELECT schema_version, payload FROM signals"
+        ).fetchone()
+        assert upgraded_row[0] == 3
+        assert "sizing" in json.loads(upgraded_row[1])
         another_position = {
             **event,
             "position_id": 2,
@@ -433,7 +453,175 @@ def test_signal_store_rekeys_previous_signal_id_schema(tmp_path):
             FROM signals
             """
         ).fetchone()
-        assert row == (build_signal_id(event), 2, "OPEN", 3, 1)
+        assert row == (build_signal_id(event), 1, "OPEN", 3, 1)
+    finally:
+        store.close()
+
+
+def test_signal_store_migrates_previous_execution_ledger_columns(tmp_path):
+    path = tmp_path / "legacy-execution.db"
+    connection = sqlite3.connect(path)
+    connection.execute(
+        """
+        CREATE TABLE signals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            signal_id TEXT NOT NULL,
+            symbol TEXT NOT NULL,
+            interval TEXT NOT NULL,
+            timeframe TEXT NOT NULL,
+            bar_time INTEGER NOT NULL,
+            signal_time INTEGER NOT NULL,
+            event TEXT NOT NULL,
+            signal TEXT NOT NULL,
+            side TEXT,
+            reason TEXT NOT NULL,
+            price REAL,
+            ema_fast REAL,
+            ema_slow REAL,
+            adx_entry REAL,
+            executed INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            payload TEXT NOT NULL DEFAULT '{}'
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE signal_execution (
+            account_id TEXT NOT NULL,
+            signal_id TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'READY',
+            attempt_count INTEGER NOT NULL DEFAULT 0,
+            lease_owner TEXT,
+            lease_until_ms INTEGER,
+            client_order_id TEXT,
+            exchange_order_id TEXT,
+            last_error TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY(account_id, signal_id)
+        )
+        """
+    )
+    connection.commit()
+    connection.close()
+
+    store = SignalStore(path)
+    store.connect()
+    try:
+        columns = {
+            row[1]
+            for row in store.conn.execute("PRAGMA table_info(signal_execution)")
+        }
+        assert {
+            "filled_qty",
+            "average_fill_price",
+            "order_status",
+            "result_json",
+            "last_reconciled_at_ms",
+        } <= columns
+        assert store.conn.execute(
+            "SELECT COUNT(*) FROM binance_account_snapshot"
+        ).fetchone()[0] == 0
+        assert store.conn.execute(
+            "SELECT COUNT(*) FROM signal_consumer_state"
+        ).fetchone()[0] == 0
+    finally:
+        store.close()
+
+
+def test_signal_migration_preserves_parent_unique_index_for_foreign_keys(tmp_path):
+    path = tmp_path / "legacy-v2-with-ledger.db"
+    connection = sqlite3.connect(path)
+    connection.executescript(
+        """
+        CREATE TABLE signals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            signal_id TEXT NOT NULL,
+            schema_version INTEGER NOT NULL DEFAULT 2,
+            symbol TEXT NOT NULL,
+            interval TEXT NOT NULL,
+            timeframe TEXT NOT NULL,
+            bar_time INTEGER NOT NULL,
+            signal_time INTEGER NOT NULL,
+            event TEXT NOT NULL,
+            action TEXT NOT NULL,
+            signal TEXT NOT NULL,
+            side TEXT,
+            position_id INTEGER,
+            scheduled INTEGER NOT NULL DEFAULT 0,
+            reason TEXT NOT NULL,
+            price REAL,
+            ema_fast REAL,
+            ema_slow REAL,
+            adx_entry REAL,
+            executed INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            payload TEXT NOT NULL DEFAULT '{}'
+        );
+        CREATE UNIQUE INDEX ux_signals_signal_id ON signals(signal_id);
+        CREATE TABLE signal_execution (
+            account_id TEXT NOT NULL,
+            signal_id TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'READY',
+            attempt_count INTEGER NOT NULL DEFAULT 0,
+            lease_owner TEXT,
+            lease_until_ms INTEGER,
+            client_order_id TEXT,
+            exchange_order_id TEXT,
+            last_error TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY(account_id, signal_id),
+            FOREIGN KEY(signal_id) REFERENCES signals(signal_id)
+                ON UPDATE CASCADE ON DELETE RESTRICT
+        );
+        PRAGMA user_version = 2;
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO signals(
+            signal_id, symbol, interval, timeframe, bar_time, signal_time,
+            event, action, signal, side, position_id, reason, created_at, payload
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "sig_v1_legacy",
+            "BTCUSDT",
+            "1m",
+            "30min",
+            100,
+            100,
+            "ENTRY",
+            "OPEN",
+            "LONG",
+            "LONG",
+            7,
+            "EMA_CROSS",
+            "2026-01-01T00:00:00+00:00",
+            '{"action":"OPEN","position_id":7}',
+        ),
+    )
+    connection.execute(
+        "INSERT INTO signal_execution(account_id, signal_id) VALUES (?, ?)",
+        ("test-account", "sig_v1_legacy"),
+    )
+    connection.commit()
+    connection.close()
+
+    store = SignalStore(path)
+    store.connect()
+    try:
+        signal_id = store.conn.execute(
+            "SELECT signal_id FROM signals WHERE id = 1"
+        ).fetchone()[0]
+        assert signal_id.startswith("sig_v2_")
+        assert store.conn.execute(
+            "SELECT signal_id FROM signal_execution WHERE account_id = ?",
+            ("test-account",),
+        ).fetchone()[0] == signal_id
+        assert store.conn.execute("PRAGMA foreign_key_check").fetchall() == []
     finally:
         store.close()
 

@@ -12,6 +12,8 @@ el paquete desde el directorio live con `python -m bot`; no hay opciones CLI.
 - `events.py`: conversión de la ejecución del backtester a eventos live.
 - `health.py`: endpoints JSON de salud y sondeo en segundo plano de `signal.db`.
 - `app.py`: ciclo de polling y coordinación de los componentes.
+- `executor.py`: consumidor persistente de señales para USDⓈ-M Futures.
+- `binance_usdm.py`: adaptador del SDK oficial de Binance.
 - `__main__.py`: entrypoint sin opciones de CLI.
 
 La configuración operativa se toma de `live/.env` y de las variables de
@@ -34,7 +36,9 @@ señales debe validar su vigencia e idempotencia antes de operar.
 `signals` es un outbox inmutable de intenciones de estrategia, no un registro de
 órdenes ni de posiciones reales. Cada fila incluye `schema_version`, `signal_id`,
 `event`, `action`, `side`, `position_id`, `scheduled`, `signal_time` y el
-`payload` detallado. `signal_id` es un SHA-256 determinista v2; `position_id`
+`payload` detallado. Los `ENTRY` incluyen en `payload.sizing` los multiplicadores
+efectivos de `strategy`, el stop y el leverage simulado. `signal_id` es un
+SHA-256 determinista v2; `position_id`
 solo correlaciona eventos del backtest y no identifica una posición de Binance.
 `signal` y `side` se conservan iguales por compatibilidad; en un `EXIT`, `side`
 indica la posición que se cierra, no el lado de la orden de Binance.
@@ -50,19 +54,65 @@ marcados como simulados no son fills de Binance. El consumidor debe validar
 frescura, cuenta, tamaño y posición real; no debe ejecutar eventos atrasados a
 ciegas.
 
-`signal_execution` prepara estado separado por `(account_id, signal_id)` con
-reclamo/lease, intentos y referencias de orden. El productor nunca crea ni
-reinicia ese estado. El futuro consumidor debe registrar `READY` por cuenta al
-descubrir una señal y reclamarla en una transacción,
-usar un `client_order_id` determinista compatible con Binance (no el `signal_id`
-completo) y reconciliar órdenes/posiciones con la cuenta antes de reintentar.
-La ausencia de una fila en `signal_execution` significa que esa cuenta aún no
-registró la señal.
+`signal_execution` mantiene estado separado por `(account_id, signal_id)`, con
+reclamo/lease, intentos, fills y referencias de orden. El productor nunca crea
+ni reinicia ese estado. El executor reclama atómicamente, usa un
+`client_order_id` determinista compatible con Binance (no el `signal_id`
+completo) y reconcilia órdenes/posiciones antes de reintentar.
 La columna `executed` se conserva por compatibilidad, pero no es el acuse
-autoritativo. Este paquete todavía no incluye ese consumidor.
-Al migrar a v2 se recalculan los `signal_id` existentes para incorporar la acción
-y `position_id`; se conservan las filas, pero no se deben mantener referencias
-externas a los IDs de la versión anterior.
+autoritativo. Las migraciones conservan filas antiguas y recalculan IDs cuando
+es necesario.
+El executor solo acepta señales v3 con `payload.sizing`; eventos legacy sin ese
+contrato quedan rechazados y no generan órdenes.
+
+## Executor USDⓈ-M Futures
+
+Compose ejecuta `python -m bot.executor`, pero **no envía órdenes por defecto**:
+`BINANCE_TRADING_ENABLED=false`. Usa el SDK oficial
+`binance-sdk-derivatives-trading-usds-futures`; el entorno predeterminado es
+testnet. Producción requiere `BINANCE_ENVIRONMENT=production`,
+`BINANCE_TRADING_ENABLED=true` y `BINANCE_ALLOW_LIVE_TRADING=true`.
+El tope de leverage predeterminado es 10x. `BINANCE_SET_LEVERAGE=true` aplica
+en Binance el menor valor entre ese tope y el de `strategy`, pero no tiene efecto
+mientras el trading siga deshabilitado. El tamaño puede ser menor que 10x por
+`risk_pct`, los multiplicadores adaptativos y el límite de exposición.
+`STRATEGY_INITIAL_CAPITAL=100` es la referencia del backtest; el worker lee el
+equity/margen real de Binance para calcular la cantidad live.
+El executor fija un corte inicial por cuenta con un margen corto de recuperación
+(`EXECUTOR_INITIAL_BACKFILL_SECONDS`) para no ejecutar el histórico al activarlo.
+
+`EXECUTOR_TEST_MODE=true` ejecuta ciclos reales de prueba y requiere también
+`BINANCE_TRADING_ENABLED=true`; en producción sigue siendo obligatorio
+`BINANCE_ALLOW_LIVE_TRADING=true` (`BINANCE_ENVIRONMENT=mainnet` es alias de
+`production`). Fuerza `BTCUSDT`, leverage máximo 10x y stop
+al 1%. Interpreta el límite de 10 USDT como margen estimado por orden (hasta
+110 USDT de notional a 10x), no como notional ni como límite de pérdidas o
+comisiones. Alterna ciclos LONG/SHORT de entrada, cierre parcial del 50%,
+movimiento del stop a breakeven y cierre total; espera 10 s entre ciclos. Usa
+una base de señales y un ledger separados. Se niega a empezar si BTCUSDT no está
+flat o tiene órdenes abiertas, y se detiene ante cualquier error. Los filtros
+del exchange deben permitir un cierre parcial dentro del tope; si no, no envía
+órdenes. Comprueba colocación/cancelación de stops, pero no fuerza que el stop
+de pérdida llegue a ejecutarse ni simula todos los errores posibles de Binance.
+
+El executor solo admite One-way Mode y el símbolo configurado en `SYMBOL`.
+Calcula cantidad con `payload.sizing`, equity/margen reales, precio mark,
+`stepSize`, `minQty` y filtros de notional. Usa órdenes MARKET y salidas
+`reduceOnly`; `ENTRY` instala un stop condicional y TP1 puede moverlo a
+breakeven. Incertidumbres de orden o discrepancias de posición dejan la señal en
+`RECONCILIATION_REQUIRED` y bloquean nuevas ejecuciones. Las entradas vencidas
+se marcan `EXPIRED`; las salidas atrasadas se contrastan con la posición real.
+
+La lógica y los multiplicadores siguen saliendo del mismo `Backtester` que el
+backtest; el worker no los recalcula. El capital y el equity del sizing live
+provienen de Binance. Las diferencias reales de fill/PnL no se retroalimentan al
+historial adaptativo simulado, por lo que no se prometen resultados idénticos al
+backtest. Una divergencia de posición real detiene la ejecución automática.
+
+Para habilitar, comienza con claves de testnet y
+`BINANCE_TRADING_ENABLED=true`. No habilites producción hasta validar fills,
+órdenes reduce-only, stops y recuperación de reinicios en testnet. Usa claves
+sin permisos de retiro y restringidas por IP.
 
 ## Visor de backtest live
 
