@@ -1,0 +1,2 @@
+python-dotenv>=1.0
+binance-sdk-derivatives-trading-usds-futures==18.3.1
