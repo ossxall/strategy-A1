@@ -11,6 +11,7 @@ Paquete del colector OHLCV de Binance USDⓈ-M Futures.
 - `rest.py`: backfill, descarga REST y reparación de huecos.
 - `websocket.py`: flujo en tiempo real, watchdog y reconexión.
 - `status.py`: endpoints JSON `/live/feed/health` y `/live/feed/status`.
+- `chart.py`: gráfico Plotly con las últimas 100 velas OHLCV.
 - `app.py` / `cli.py`: ciclo de vida y puntos de entrada.
 
 ## Ejecución
@@ -26,6 +27,7 @@ desde el `.env` de la raíz del repositorio; las variables exportadas en el
 proceso tienen prioridad.
 
 Los endpoints locales son `http://127.0.0.1:8787/live/feed/health` y
-`http://127.0.0.1:8787/live/feed/status`. Las rutas anteriores `/health` y
+`http://127.0.0.1:8787/live/feed/status`. El gráfico interactivo se sirve en
+`http://127.0.0.1:8787/live/feed/chart`. Las rutas anteriores `/health` y
 `/status` se conservan como alias. En Docker Compose el puerto solo se publica
 en la interfaz local del host.

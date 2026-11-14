@@ -216,11 +216,7 @@ def initial_backfill_worker():
                 ),
                 last_candle_at=last_candle_at,
             )
-            eta_text = (
-                "n/a"
-                if eta_seconds is None
-                else f"{eta_seconds / 60:.1f} min"
-            )
+            eta_text = "n/a" if eta_seconds is None else f"{eta_seconds / 60:.1f} min"
             logger.info(
                 "Backfill progreso: %s/%s velas (%.1f%%), "
                 "página %s/%s, última=%s, velocidad=%.1f velas/s, ETA=%s",

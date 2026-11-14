@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
+from .chart import CHART_CANDLE_LIMIT, CHART_ROUTE, ChartUnavailable, render_ohlcv_chart
 from .config import (
     DB_PATH,
     GAP_SCAN_MINUTES,
@@ -37,7 +38,7 @@ from .state import STATE
 HEALTH_ROUTE = "/live/feed/health"
 STATUS_ROUTE = "/live/feed/status"
 LEGACY_ROUTES = ("/health", "/status")
-STATUS_ROUTES = (HEALTH_ROUTE, STATUS_ROUTE, *LEGACY_ROUTES)
+STATUS_ROUTES = (HEALTH_ROUTE, STATUS_ROUTE, CHART_ROUTE, *LEGACY_ROUTES)
 
 
 def build_status_payload():
@@ -165,7 +166,8 @@ def build_status_payload():
             "status_endpoint": {
                 "host": STATUS_HOST,
                 "port": STATUS_PORT,
-                "routes": [HEALTH_ROUTE, STATUS_ROUTE],
+                "routes": [HEALTH_ROUTE, STATUS_ROUTE, CHART_ROUTE],
+                "chart_candle_limit": CHART_CANDLE_LIMIT,
             },
             "rest": {
                 "timeout_connect_seconds": REST_TIMEOUT_CONNECT,
@@ -290,15 +292,49 @@ class _StatusHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def send_html(self, html):
+        body = html.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_GET(self):
         path = urlparse(self.path).path
+        if path == CHART_ROUTE:
+            try:
+                html = render_ohlcv_chart()
+            except ChartUnavailable as exc:
+                try:
+                    self.send_json(503, {"error": str(exc)})
+                except OSError:
+                    pass
+            except Exception:  # noqa: BLE001 - devuelve error HTTP controlado
+                logger.exception("Error generando el gráfico OHLCV")
+                try:
+                    self.send_json(
+                        500,
+                        {"error": "no se pudo generar el gráfico OHLCV"},
+                    )
+                except OSError:
+                    pass
+            else:
+                try:
+                    self.send_html(html)
+                except OSError:
+                    pass
+            return
+
         if path not in STATUS_ROUTES:
             try:
                 self.send_json(
                     404,
                     {
                         "error": "ruta no encontrada",
-                        "routes": [HEALTH_ROUTE, STATUS_ROUTE],
+                        "routes": [HEALTH_ROUTE, STATUS_ROUTE, CHART_ROUTE],
                         "aliases": list(LEGACY_ROUTES),
                     },
                 )
@@ -338,5 +374,11 @@ def start_status_server():
         STATUS_HOST,
         STATUS_PORT,
         HEALTH_ROUTE,
+    )
+    logger.info(
+        "Gráfico OHLCV disponible en http://%s:%s%s",
+        STATUS_HOST,
+        STATUS_PORT,
+        CHART_ROUTE,
     )
     return (server, thread)
