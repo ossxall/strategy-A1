@@ -8,7 +8,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from live.bot import app as bot_app
 from live.bot import (
     SignalBot,
     SignalStore,
@@ -17,6 +16,7 @@ from live.bot import (
     events_to_trades,
     ts_ms,
 )
+from live.bot import app as bot_app
 from live.bot.storage import build_signal_id
 from strategy.config import Config
 
@@ -219,6 +219,12 @@ def test_signal_store_deduplicates_pending_events_across_restarts(tmp_path):
     path = tmp_path / "signal.db"
     store = SignalStore(path)
     store.connect()
+    assert store.conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+    assert store.conn.execute("PRAGMA synchronous").fetchone()[0] == 2
+    assert store.conn.execute("PRAGMA busy_timeout").fetchone()[0] == 5_000
+    assert store.conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+    assert store.conn.execute("PRAGMA wal_autocheckpoint").fetchone()[0] == 1_000
+    assert store.conn.execute("PRAGMA journal_size_limit").fetchone()[0] == 67_108_864
     assert store.insert([event]) == 1
     signal_id = store.conn.execute(
         "SELECT signal_id FROM signals"

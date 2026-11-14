@@ -15,11 +15,24 @@ from .config import (
 )
 from .state import STATE, update_diagnostics
 
+DB_BUSY_TIMEOUT_MS = 5_000
+DB_JOURNAL_SIZE_LIMIT = 67_108_864
+DB_WAL_AUTOCHECKPOINT = 1_000
+
 
 def db_connect():
-    connection = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
-    connection.execute("PRAGMA busy_timeout=30000")
+    connection = sqlite3.connect(
+        DB_PATH,
+        timeout=DB_BUSY_TIMEOUT_MS / 1000,
+        check_same_thread=False,
+    )
+    connection.execute(f"PRAGMA busy_timeout={DB_BUSY_TIMEOUT_MS}")
     connection.execute("PRAGMA foreign_keys=ON")
+    # Candles can be reconstructed from REST; NORMAL avoids syncing every commit.
+    # Set this on every connection because synchronous is connection-local.
+    connection.execute("PRAGMA synchronous=NORMAL")
+    connection.execute(f"PRAGMA wal_autocheckpoint={DB_WAL_AUTOCHECKPOINT}")
+    connection.execute(f"PRAGMA journal_size_limit={DB_JOURNAL_SIZE_LIMIT}")
     return connection
 
 
@@ -28,8 +41,12 @@ def init_db():
     with STATE.db_lock:
         conn = db_connect()
         try:
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA synchronous=NORMAL")
+            row = conn.execute("PRAGMA journal_mode=WAL").fetchone()
+            mode = str(row[0]).lower() if row else ""
+            if mode != "wal":
+                raise sqlite3.OperationalError(
+                    f"No se pudo activar WAL para {DB_PATH}: modo devuelto {mode!r}"
+                )
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS candles (

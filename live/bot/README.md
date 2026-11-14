@@ -58,3 +58,8 @@ El servidor usa concurrencia limitada y solo lee una instantánea en memoria.
 El sondeo de SQLite ocurre en un hilo aparte con timeout, por lo que las
 peticiones no esperan a consultas ni al ciclo de señales. En Compose está
 publicado en `http://127.0.0.1:8080/live/bot/health`.
+
+`signal.db` usa WAL con comprobación del modo, `synchronous=FULL` para
+durabilidad de señales y estado de recuperación, y un `busy_timeout` de 5 s.
+El autocheckpoint se configura en 1000 páginas y el límite de tamaño de WAL de
+64 MiB es orientativo, no un tope duro.

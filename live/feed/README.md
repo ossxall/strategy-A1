@@ -14,6 +14,14 @@ Paquete del colector OHLCV de Binance USDⓈ-M Futures.
 - `chart.py`: gráfico Plotly con las últimas 100 velas OHLCV.
 - `app.py` / `cli.py`: ciclo de vida y puntos de entrada.
 
+## SQLite
+
+`feed.db` usa WAL y comprueba al iniciar que SQLite haya devuelto `wal`.
+Las conexiones del colector usan `synchronous=NORMAL` porque las velas pueden
+recuperarse desde REST, un `busy_timeout` de 5 s, claves foráneas activadas,
+autocheckpoint cada 1000 páginas y un objetivo de truncado del WAL de 64 MiB.
+El límite del WAL no es duro y depende de que el checkpoint pueda completarse.
+
 ## Ejecución
 
 Desde el directorio `live/`:
