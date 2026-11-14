@@ -112,7 +112,9 @@ una base de señales y un ledger separados (por ejemplo,
 reclama/procesa con el mismo `ExecutionWorker.run_once()` que usa el flujo normal;
 así, las órdenes de prueba pasan por las validaciones, el sizing, el registro de
 intención, la ejecución y la reconciliación habituales. Se niega a empezar si
-BTCUSDT no está flat o tiene órdenes abiertas, y se detiene ante cualquier error.
+BTCUSDT no está flat o tiene órdenes abiertas. Si el stop protector cierra la
+posición durante el ciclo, reconcilia el fill y se detiene antes de abrir otra.
+Ante discrepancias o errores no reconciliables, también se detiene.
 Los filtros del exchange deben permitir un cierre parcial dentro del tope; si
 no, no envía órdenes. Antes del primer ciclo real corre una matriz offline con
 gateway simulado que cubre LONG/SHORT, parciales TP y no-TP, breakeven

@@ -118,6 +118,61 @@ class ExecutionTestMode:
             )
         return state
 
+    def _stop_closed_test_position(
+        self, position_id: int, side: str
+    ) -> bool:
+        """Accepts a confirmed Binance stop fill and halts before another cycle."""
+        try:
+            snapshot = self.worker._reconcile_protective_stops(
+                self.worker._account_snapshot(force=True)
+            )
+        except Exception:
+            LOG.exception(
+                "No se pudo confirmar si el stop cerró la posición de prueba"
+            )
+            return False
+        if snapshot.get("reconciliation_error"):
+            return False
+        if (
+            self.worker._position_for_symbol(snapshot) is not None
+            or snapshot.get("open_orders")
+            or snapshot.get("open_algo_orders")
+            or self.worker.store.get_active_execution_positions(
+                self.worker.settings.account_id, self.worker.settings.symbol
+            )
+        ):
+            return False
+
+        stop_fill = self.worker.store.conn.execute(
+            """
+            SELECT 1
+            FROM execution_adjustments
+            WHERE account_id = ?
+              AND symbol = ?
+              AND position_id = ?
+              AND reason = 'BINANCE_PROTECTIVE_STOP'
+            LIMIT 1
+            """,
+            (
+                self.worker.settings.account_id,
+                self.worker.settings.symbol,
+                int(position_id),
+            ),
+        ).fetchone()
+        if stop_fill is None:
+            return False
+
+        self._test_next_side = "SHORT" if side == "LONG" else "LONG"
+        STOP_EVENT.set()
+        LOG.warning(
+            "Stop protector de Binance cerró la posición de prueba %s %s; "
+            "cuenta flat y reconciliada. Test mode se detiene sin abrir "
+            "otra posición.",
+            side,
+            self.worker.settings.symbol,
+        )
+        return True
+
     def _test_entry_signal(self, position_id: int) -> dict:
         cursor = self.worker.store.conn.execute(
             """
@@ -777,6 +832,8 @@ class ExecutionTestMode:
         try:
             self.worker._verify_protective_stop(stop_id)
         except RuntimeError:
+            if self._stop_closed_test_position(position_id, side):
+                return
             if stop_variant != "be":
                 raise
             if self._resolve_finished_test_breakeven(position_id, side):
@@ -796,14 +853,19 @@ class ExecutionTestMode:
                 if side == "LONG"
                 else "EXECUTOR_TEST_PARTIAL"
             )
-            partial_state = self._run_test_signal(
-                event="EXIT",
-                action="PARTIAL_CLOSE",
-                side=side,
-                position_id=position_id,
-                reason=partial_reason,
-                close_pct=50.0,
-            )
+            try:
+                partial_state = self._run_test_signal(
+                    event="EXIT",
+                    action="PARTIAL_CLOSE",
+                    side=side,
+                    position_id=position_id,
+                    reason=partial_reason,
+                    close_pct=50.0,
+                )
+            except RuntimeError:
+                if self._stop_closed_test_position(position_id, side):
+                    return
+                raise
             partial_result = partial_state.get("result") or {}
             stop_id = partial_result.get(
                 "protective_stop_client_algo_id"
@@ -819,6 +881,8 @@ class ExecutionTestMode:
         try:
             self.worker._verify_protective_stop(stop_id)
         except RuntimeError:
+            if self._stop_closed_test_position(position_id, side):
+                return
             if stop_variant != "be":
                 raise
             if self._resolve_finished_test_breakeven(position_id, side):
@@ -829,14 +893,19 @@ class ExecutionTestMode:
             stop_id = self.worker._algo_order_id(position_id, "sl")
             self.worker._verify_protective_stop(stop_id)
 
-        self._run_test_signal(
-            event="EXIT",
-            action="CLOSE",
-            side=side,
-            position_id=position_id,
-            reason="EXECUTOR_TEST_CLOSE",
-            close_pct=100.0,
-        )
+        try:
+            self._run_test_signal(
+                event="EXIT",
+                action="CLOSE",
+                side=side,
+                position_id=position_id,
+                reason="EXECUTOR_TEST_CLOSE",
+                close_pct=100.0,
+            )
+        except RuntimeError:
+            if self._stop_closed_test_position(position_id, side):
+                return
+            raise
         final_snapshot = self.worker._account_snapshot(force=True)
         if (
             self.worker._position_for_symbol(final_snapshot) is not None

@@ -997,6 +997,68 @@ def test_test_mode_persists_signals_in_isolated_db_and_uses_worker_pipeline(
         store.close()
 
 
+def test_test_mode_stops_after_confirmed_protective_stop_fill(tmp_path):
+    from live.bot.config import STOP_EVENT
+
+    store = SignalStore(tmp_path / "test-signal.db")
+    store.connect()
+    gateway = FakeFuturesGateway()
+    try:
+        entry = _entry_event()
+        entry["reason"] = "EXECUTOR_TEST_ENTRY"
+        normalized = store._normalize_event(entry)
+        store.insert([entry])
+        store.conn.execute(
+            "INSERT INTO signal_execution(account_id, signal_id) VALUES (?, ?)",
+            ("test-account", normalized["signal_id"]),
+        )
+        store.conn.commit()
+        store.update_execution(
+            "test-account",
+            normalized["signal_id"],
+            "FILLED",
+            order_status="FILLED",
+            filled_qty=0.1,
+            client_order_id="b1_test-stop-entry",
+        )
+        store.save_execution_adjustment(
+            "test-account",
+            "BTCUSDT",
+            normalized["position_id"],
+            "stop-order:99",
+            0.1,
+            99.0,
+            "BINANCE_PROTECTIVE_STOP",
+            1_000_000,
+        )
+        worker = ExecutionWorker(
+            _settings(
+                tmp_path,
+                enabled=True,
+                test_mode=True,
+                api_key="test-key",
+                api_secret="test-secret",
+            ),
+            store,
+            gateway=gateway,
+        )
+        worker._rules_cache["BTCUSDT"] = worker._symbol_rules("BTCUSDT")
+        controller = ExecutionTestMode(worker)
+        STOP_EVENT.clear()
+
+        assert controller._stop_closed_test_position(
+            normalized["position_id"], "LONG"
+        )
+
+        assert STOP_EVENT.is_set()
+        assert controller.next_side == "SHORT"
+        assert gateway.orders == []
+        assert gateway.stops == {}
+    finally:
+        STOP_EVENT.clear()
+        store.close()
+
+
 def test_test_mode_keeps_original_stop_if_breakeven_would_trigger(tmp_path):
     store = SignalStore(tmp_path / "test-signal.db")
     store.connect()
