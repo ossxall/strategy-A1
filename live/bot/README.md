@@ -104,15 +104,20 @@ al 1%. Interpreta el límite de 10 USDT como margen estimado por orden (hasta
 comisiones. Alterna ciclos LONG/SHORT de entrada, cierre parcial del 50%,
 movimiento del stop a breakeven y cierre total; espera 10 s entre ciclos y se
 detiene tras completar un LONG y un SHORT, antes de repetir el patrón. Usa
-una base de señales y un ledger separados. Se niega a empezar si BTCUSDT no está
-flat o tiene órdenes abiertas, y se detiene ante cualquier error. Los filtros
-del exchange deben permitir un cierre parcial dentro del tope; si no, no envía
-órdenes. Antes del primer ciclo real corre una matriz offline con gateway
-simulado que cubre LONG/SHORT, parciales, breakeven favorable/no favorable,
-cierre total, fill/reconciliación de stop, recuperación idempotente, señales
-vencidas, protección de posiciones no rastreadas y rechazo de Hedge Mode. Esa
-matriz no llama a Binance. El ciclo real comprueba además la comunicación con
-Binance; no fuerza allí fallos de red ni el disparo de cada posible error API.
+una base de señales y un ledger separados (por ejemplo,
+`data/signal.executor-test.db`). Cada señal sintética se persiste allí y se
+reclama/procesa con el mismo `ExecutionWorker.run_once()` que usa el flujo normal;
+así, las órdenes de prueba pasan por las validaciones, el sizing, el registro de
+intención, la ejecución y la reconciliación habituales. Se niega a empezar si
+BTCUSDT no está flat o tiene órdenes abiertas, y se detiene ante cualquier error.
+Los filtros del exchange deben permitir un cierre parcial dentro del tope; si
+no, no envía órdenes. Antes del primer ciclo real corre una matriz offline con
+gateway simulado que cubre LONG/SHORT, parciales, breakeven favorable/no
+favorable, cierre total, fill/reconciliación de stop, recuperación idempotente,
+señales vencidas, protección de posiciones no rastreadas y rechazo de Hedge
+Mode. Esa matriz no llama a Binance. El ciclo real comprueba además la
+comunicación con Binance; no fuerza allí fallos de red ni el disparo de cada
+posible error API.
 
 El executor solo admite One-way Mode y el símbolo configurado en `SYMBOL`.
 Calcula cantidad con `payload.sizing`, equity/margen reales, precio mark,

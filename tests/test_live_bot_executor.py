@@ -802,6 +802,55 @@ def test_test_mode_runs_bounded_long_lifecycle_and_alternates_side(tmp_path):
         store.close()
 
 
+def test_test_mode_persists_signals_in_isolated_db_and_uses_worker_pipeline(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("BOT_EXECUTOR_TEST_MODE", "true")
+    monkeypatch.setenv("BOT_BINANCE_TRADING_ENABLED", "true")
+    monkeypatch.setenv("BOT_BINANCE_ENVIRONMENT", "testnet")
+    monkeypatch.setenv("BOT_BINANCE_ACCOUNT_ID", "test-account")
+    monkeypatch.setenv("BOT_BINANCE_API_KEY", "test-key")
+    monkeypatch.setenv("BOT_BINANCE_API_SECRET", "test-secret")
+    monkeypatch.setenv("BOT_SIGNAL_DB", str(tmp_path / "signal.db"))
+    monkeypatch.setenv("BOT_EXECUTOR_HEARTBEAT", "")
+
+    settings = ExecutorSettings.from_env()
+    assert settings.signal_db == tmp_path / "signal.executor-test.db"
+    assert settings.account_id == "test-account-executor-test"
+
+    store = SignalStore(settings.signal_db)
+    store.connect()
+    gateway = FakeFuturesGateway()
+    try:
+        worker = ExecutionWorker(
+            settings,
+            store,
+            gateway=gateway,
+            clock_ms=lambda: 1_000_000,
+        )
+
+        ExecutionTestMode(worker).run_sequence()
+
+        executions = store.conn.execute(
+            """
+            SELECT s.event, s.action, s.reason, x.status, x.order_status
+            FROM signals AS s
+            JOIN signal_execution AS x USING (signal_id)
+            ORDER BY s.id
+            """
+        ).fetchall()
+        assert executions == [
+            ("ENTRY", "OPEN", "EXECUTOR_TEST_ENTRY", "FILLED", "FILLED"),
+            ("EXIT", "PARTIAL_CLOSE", "PARTIAL_TP_1R", "FILLED", "FILLED"),
+            ("EXIT", "CLOSE", "EXECUTOR_TEST_CLOSE", "FILLED", "FILLED"),
+        ]
+        assert len(gateway.orders) == 3
+        assert gateway.position_amt == pytest.approx(0.0)
+        assert not (tmp_path / "signal.db").exists()
+    finally:
+        store.close()
+
+
 def test_test_mode_keeps_original_stop_if_breakeven_would_trigger(tmp_path):
     store = SignalStore(tmp_path / "test-signal.db")
     store.connect()
