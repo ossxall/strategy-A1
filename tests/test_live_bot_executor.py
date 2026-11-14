@@ -436,6 +436,21 @@ def test_production_requires_explicit_live_opt_in(tmp_path):
         )
 
 
+def test_test_mode_never_connects_to_production_for_order_execution(tmp_path):
+    with pytest.raises(RuntimeError, match="solo puede enviar órdenes a testnet"):
+        ExecutionWorker(
+            _settings(
+                tmp_path,
+                enabled=True,
+                test_mode=True,
+                environment="production",
+                allow_live_trading=True,
+            ),
+            store=None,
+            gateway=FakeFuturesGateway(),
+        )
+
+
 def test_default_strategy_and_worker_leverage_cap_is_ten(monkeypatch):
     monkeypatch.setenv("BOT_BINANCE_MAX_LEVERAGE", "10")
     monkeypatch.setenv("BOT_BINANCE_SET_LEVERAGE", "true")
@@ -470,6 +485,11 @@ def test_test_mode_forces_test_instrument_limits_and_isolated_state(
     monkeypatch.setenv("BOT_BINANCE_SET_LEVERAGE", "false")
     monkeypatch.setenv("BOT_SYMBOL", "ETHUSDT")
     monkeypatch.setenv("BOT_SIGNAL_DB", str(tmp_path / "signal.db"))
+    monkeypatch.setenv("BOT_EXECUTOR_PRODUCTION_AUDIT", "true")
+    monkeypatch.setenv("BOT_BINANCE_PRODUCTION_AUDIT_API_KEY", "audit-key")
+    monkeypatch.setenv(
+        "BOT_BINANCE_PRODUCTION_AUDIT_API_SECRET", "audit-secret"
+    )
 
     settings = ExecutorSettings.from_env()
 
@@ -479,6 +499,98 @@ def test_test_mode_forces_test_instrument_limits_and_isolated_state(
     assert settings.set_leverage is True
     assert settings.account_id == "test-account-executor-test"
     assert settings.signal_db == tmp_path / "signal.executor-test.db"
+    assert settings.production_audit_enabled is True
+    assert settings.production_audit_api_key == "audit-key"
+    assert settings.production_audit_api_secret == "audit-secret"
+
+
+def test_production_read_only_audit_checks_readiness_without_orders(tmp_path):
+    from live.bot.execution.production_audit import (
+        run_production_read_only_audit,
+    )
+
+    settings = _settings(
+        tmp_path,
+        enabled=True,
+        test_mode=True,
+        production_audit_enabled=True,
+        production_audit_api_key="read-only-key",
+        production_audit_api_secret="read-only-secret",
+    )
+    gateway = FakeFuturesGateway()
+
+    report = run_production_read_only_audit(settings, gateway=gateway)
+
+    assert report["environment"] == "production"
+    assert report["position_mode"] == "ONE_WAY"
+    assert report["flat"] is True
+    assert report["open_orders"] == 0
+    assert report["open_algo_orders"] == 0
+    assert report["orders_sent"] == 0
+    assert gateway.orders == []
+    assert gateway.stops == {}
+
+
+def test_production_read_only_audit_rejects_unsafe_account_state(tmp_path):
+    from live.bot.execution.production_audit import (
+        run_production_read_only_audit,
+    )
+
+    settings = _settings(
+        tmp_path,
+        enabled=True,
+        test_mode=True,
+        production_audit_enabled=True,
+        production_audit_api_key="read-only-key",
+        production_audit_api_secret="read-only-secret",
+    )
+    gateway = FakeFuturesGateway(position_amt=0.1)
+
+    with pytest.raises(RuntimeError, match="no está flat"):
+        run_production_read_only_audit(settings, gateway=gateway)
+
+    assert gateway.orders == []
+    assert gateway.stops == {}
+
+
+def test_test_mode_stops_before_orders_if_production_audit_fails(
+    tmp_path, monkeypatch
+):
+    from live.bot.config import STOP_EVENT
+    from live.bot.execution import production_audit, selftest, test_mode
+
+    settings = _settings(
+        tmp_path,
+        enabled=True,
+        test_mode=True,
+        production_audit_enabled=True,
+        production_audit_api_key="read-only-key",
+        production_audit_api_secret="read-only-secret",
+    )
+    store = SignalStore(settings.signal_db)
+    store.connect()
+    worker = ExecutionWorker(settings, store, gateway=FakeFuturesGateway())
+    sequence_calls = []
+    monkeypatch.setattr(selftest, "run_executor_self_tests", lambda **_: 1)
+
+    def fail_audit(_settings):
+        raise RuntimeError("auditoría no disponible")
+
+    monkeypatch.setattr(
+        production_audit, "run_production_read_only_audit", fail_audit
+    )
+    monkeypatch.setattr(
+        test_mode.ExecutionTestMode,
+        "run_sequence",
+        lambda _self: sequence_calls.append("started"),
+    )
+    STOP_EVENT.clear()
+    try:
+        assert test_mode.run_test_mode(worker) == 1
+        assert sequence_calls == []
+    finally:
+        STOP_EVENT.clear()
+        store.close()
 
 
 def test_mainnet_environment_alias_uses_production_endpoint(monkeypatch):

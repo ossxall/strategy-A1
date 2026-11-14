@@ -95,11 +95,12 @@ equity/margen real de Binance para calcular la cantidad live.
 El executor fija un corte inicial por cuenta con un margen corto de recuperación
 (`BOT_EXECUTOR_INITIAL_BACKFILL_SECONDS`) para no ejecutar el histórico al activarlo.
 
-`BOT_EXECUTOR_TEST_MODE=true` ejecuta ciclos reales de prueba y requiere también
-`BOT_BINANCE_TRADING_ENABLED=true`; en producción sigue siendo obligatorio
-`BOT_BINANCE_ALLOW_LIVE_TRADING=true` (`BOT_BINANCE_ENVIRONMENT=mainnet` es alias de
-`production`). Fuerza `BTCUSDT`, leverage máximo 10x y stop
-al 1%. Interpreta el límite de 10 USDT como margen estimado por orden (hasta
+`BOT_EXECUTOR_TEST_MODE=true` ejecuta ciclos reales de prueba en testnet y
+requiere también `BOT_BINANCE_TRADING_ENABLED=true`. Test mode rechaza
+`BOT_BINANCE_ENVIRONMENT=production` incluso si se habilitó
+`BOT_BINANCE_ALLOW_LIVE_TRADING=true`; nunca envía órdenes de prueba a mainnet.
+Fuerza `BTCUSDT`, leverage máximo 10x y stop
+al 1%. Interpreta el límite de 11 USDT como margen estimado por orden (hasta
 110 USDT de notional a 10x), no como notional ni como límite de pérdidas o
 comisiones. Alterna ciclos LONG/SHORT de entrada, cierre parcial del 50% y
 cierre total: el ciclo LONG prueba el parcial TP y el movimiento del stop a
@@ -121,6 +122,16 @@ fill/reconciliación de stop, recuperación idempotente, señales vencidas,
 protección de posiciones no rastreadas y rechazo de Hedge Mode. Esa matriz no
 llama a Binance. El ciclo real comprueba además la comunicación con Binance; no
 fuerza allí fallos de red ni el disparo de cada posible error API.
+
+Opcionalmente, `BOT_EXECUTOR_PRODUCTION_AUDIT=true` añade una auditoría de
+producción **solo lectura** antes de los ciclos testnet. Requiere credenciales
+separadas (`BOT_BINANCE_PRODUCTION_AUDIT_API_KEY` y
+`BOT_BINANCE_PRODUCTION_AUDIT_API_SECRET`) limitadas a lectura. Comprueba modo
+One-way, filtros/mark de BTCUSDT, saldo disponible, posición flat, ausencia de
+órdenes abiertas y que el tamaño mínimo de prueba quepa en el tope. No coloca,
+cancela ni modifica órdenes en producción; si falla, aborta antes de enviar
+órdenes testnet. Esta auditoría no certifica permisos de trading ni fills en
+mainnet: esos comportamientos se validan en testnet.
 
 El executor solo admite One-way Mode y el símbolo configurado en `SYMBOL`.
 Calcula cantidad con `payload.sizing`, equity/margen reales, precio mark,

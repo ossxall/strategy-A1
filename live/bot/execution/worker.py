@@ -126,6 +126,9 @@ class ExecutorSettings:
     max_risk_pct: float
     heartbeat_path: Path | None
     signal_db: Path
+    production_audit_enabled: bool = False
+    production_audit_api_key: str = ""
+    production_audit_api_secret: str = ""
 
     @classmethod
     def from_env(cls) -> ExecutorSettings:
@@ -182,6 +185,15 @@ class ExecutorSettings:
             max_risk_pct=min(0.10, max(0.0001, env_float("BINANCE_MAX_RISK_PCT", 0.03))),
             heartbeat_path=resolve_path(heartbeat) if heartbeat else None,
             signal_db=signal_db,
+            production_audit_enabled=env_bool(
+                "EXECUTOR_PRODUCTION_AUDIT", False
+            ),
+            production_audit_api_key=env_str(
+                "BINANCE_PRODUCTION_AUDIT_API_KEY", ""
+            ).strip(),
+            production_audit_api_secret=env_str(
+                "BINANCE_PRODUCTION_AUDIT_API_SECRET", ""
+            ).strip(),
         )
 
 
@@ -209,6 +221,15 @@ class ExecutionWorker:
 
         if self.settings.environment not in {"testnet", "production"}:
             raise ValueError("BOT_BINANCE_ENVIRONMENT debe ser testnet o production")
+        if self.settings.test_mode and self.settings.environment != "testnet":
+            raise RuntimeError(
+                "EXECUTOR_TEST_MODE solo puede enviar órdenes a testnet; "
+                "production se admite únicamente para auditoría de solo lectura."
+            )
+        if self.settings.production_audit_enabled and not self.settings.test_mode:
+            raise RuntimeError(
+                "BOT_EXECUTOR_PRODUCTION_AUDIT requiere BOT_EXECUTOR_TEST_MODE=true"
+            )
         if self.settings.test_mode and not self.settings.enabled:
             raise RuntimeError(
                 "BOT_EXECUTOR_TEST_MODE requiere BOT_BINANCE_TRADING_ENABLED=true"

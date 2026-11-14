@@ -873,6 +873,25 @@ def run_test_mode(worker: ExecutionWorker) -> int:
         "no enviaron órdenes.",
         selftest_count,
     )
+    if worker.settings.production_audit_enabled:
+        try:
+            from .production_audit import run_production_read_only_audit
+
+            audit = run_production_read_only_audit(worker.settings)
+        except Exception:
+            LOG.exception(
+                "Auditoría production de solo lectura falló; "
+                "no se iniciarán órdenes de prueba."
+            )
+            return 1
+        LOG.warning(
+            "Auditoría production de solo lectura superada para %s: "
+            "One-way, flat, sin órdenes; margen estimado %.2f USDT, "
+            "órdenes production enviadas=0. Esto no valida permisos de trading "
+            "ni fills production.",
+            audit["symbol"],
+            audit["estimated_margin_usdt"],
+        )
     LOG.warning(
         "EXECUTOR_TEST_MODE activo: BTCUSDT, tope de margen %s USDT "
         "por orden a un máximo de %sx, stop-loss %s%%. "
