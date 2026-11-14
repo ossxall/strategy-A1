@@ -14,8 +14,10 @@ Variables:
     FEED_DB_PATH           ruta a feed.db (mode feed; fallback DB_PATH)
     FEED_INTERVAL          intervalo del feed, p.ej. 1m (fallback INTERVAL)
     BOT_HEARTBEAT          ruta del archivo de heartbeat (mode bot)
-    EXECUTOR_HEARTBEAT     ruta del archivo de heartbeat (mode executor)
-    HEALTHCHECK_MAX_AGE    segundos máximos de antigüedad (mode bot)
+    BOT_EXECUTOR_HEARTBEAT ruta del archivo de heartbeat (mode executor)
+    BOT_HEALTHCHECK_MAX_AGE segundos máximos de antigüedad (mode bot)
+    BOT_EXECUTOR_HEALTHCHECK_MAX_AGE segundos máximos (mode executor)
+    BOT_EXECUTOR_ACCOUNT_HEALTH_MAX_AGE segundos máximos del snapshot de cuenta
 """
 from __future__ import annotations
 
@@ -26,6 +28,7 @@ import time
 from pathlib import Path
 
 _UNIT_SECONDS = {"s": 1, "m": 60, "h": 3600, "d": 86_400, "w": 604_800}
+LIVE_DATA_DIR = Path(__file__).resolve().parent / "data"
 
 try:
     from .db.sqlite_config import connect_sqlite
@@ -52,7 +55,10 @@ def interval_seconds(raw: str | None, default: float = 60.0) -> float:
 def check_feed() -> bool:
     """Sano si el colector está corriendo y la última vela es reciente."""
     db_path = Path(
-        os.getenv("FEED_DB_PATH", os.getenv("DB_PATH", "/data/feed.db"))
+        os.getenv(
+            "FEED_DB_PATH",
+            os.getenv("DB_PATH", str(LIVE_DATA_DIR / "feed.db")),
+        )
     )
     if not db_path.exists():
         print(f"[feed] feed.db aún no existe: {db_path}")
@@ -92,7 +98,9 @@ def check_feed() -> bool:
 
 def check_bot() -> bool:
     """Sano si el bot actualizó su heartbeat hace poco."""
-    heartbeat = Path(os.getenv("BOT_HEARTBEAT", "/data/bot1.heartbeat"))
+    heartbeat = Path(
+        os.getenv("BOT_HEARTBEAT", str(LIVE_DATA_DIR / "bot1.heartbeat"))
+    )
     max_age = float(os.getenv("HEALTHCHECK_MAX_AGE", "180"))
     if not heartbeat.exists():
         print(f"[bot] heartbeat aún no existe: {heartbeat}")
@@ -105,27 +113,32 @@ def check_bot() -> bool:
 def check_executor() -> bool:
     """Sano si el consumidor de señales actualiza su heartbeat."""
     heartbeat = Path(
-        os.getenv("EXECUTOR_HEARTBEAT", "/data/executor.heartbeat")
+        os.getenv(
+            "BOT_EXECUTOR_HEARTBEAT",
+            str(LIVE_DATA_DIR / "executor.heartbeat"),
+        )
     )
-    max_age = float(os.getenv("EXECUTOR_HEALTHCHECK_MAX_AGE", "60"))
+    max_age = float(os.getenv("BOT_EXECUTOR_HEALTHCHECK_MAX_AGE", "60"))
     if not heartbeat.exists():
         print(f"[executor] heartbeat aún no existe: {heartbeat}")
         return False
     age = time.time() - heartbeat.stat().st_mtime
     print(
         f"[executor] heartbeat_hace={age:.1f}s limite={max_age:.0f}s "
-        f"trading_enabled={os.getenv('BINANCE_TRADING_ENABLED', 'false')}"
+        f"trading_enabled={os.getenv('BOT_BINANCE_TRADING_ENABLED', 'false')}"
     )
     if age > max_age:
         return False
-    if os.getenv("BINANCE_TRADING_ENABLED", "false").strip().lower() not in {
+    if os.getenv("BOT_BINANCE_TRADING_ENABLED", "false").strip().lower() not in {
         "1", "true", "yes", "y", "on"
     }:
         return True
 
-    db_path = Path(os.getenv("SIGNAL_DB", "/data/signal.db"))
-    environment = os.getenv("BINANCE_ENVIRONMENT", "testnet").strip().lower()
-    account_id = os.getenv("BINANCE_ACCOUNT_ID", f"binance-{environment}")
+    db_path = Path(
+        os.getenv("BOT_SIGNAL_DB", str(LIVE_DATA_DIR / "signal.db"))
+    )
+    environment = os.getenv("BOT_BINANCE_ENVIRONMENT", "testnet").strip().lower()
+    account_id = os.getenv("BOT_BINANCE_ACCOUNT_ID", f"binance-{environment}")
     try:
         conn = connect_sqlite(db_path, read_only=True, query_only=True)
         try:
@@ -148,7 +161,7 @@ def check_executor() -> bool:
     snapshot_env, observed_at_ms, last_error = row
     snapshot_age = time.time() * 1000 - int(observed_at_ms)
     snapshot_limit = float(
-        os.getenv("EXECUTOR_ACCOUNT_HEALTH_MAX_AGE", "60")
+        os.getenv("BOT_EXECUTOR_ACCOUNT_HEALTH_MAX_AGE", "60")
     ) * 1000
     healthy = (
         snapshot_env == environment

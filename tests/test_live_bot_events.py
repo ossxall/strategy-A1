@@ -87,9 +87,9 @@ def test_bot_rejects_terminal_arguments_instead_of_parsing_cli():
 
 
 def test_strategy_parameters_continue_to_load_from_environment(monkeypatch):
-    monkeypatch.setenv("STRATEGY_TIMEFRAME", "15min")
-    monkeypatch.setenv("STRATEGY_EMA_FAST", "8")
-    monkeypatch.setenv("STRATEGY_EMA_SLOW", "21")
+    monkeypatch.setenv("BOT_STRATEGY_TIMEFRAME", "15min")
+    monkeypatch.setenv("BOT_STRATEGY_EMA_FAST", "8")
+    monkeypatch.setenv("BOT_STRATEGY_EMA_SLOW", "21")
 
     config = build_strategy_config()
 

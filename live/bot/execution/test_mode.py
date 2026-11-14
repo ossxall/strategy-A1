@@ -846,7 +846,9 @@ def run_test_mode(worker: ExecutionWorker) -> int:
     try:
         from .selftest import run_executor_self_tests
 
-        selftest_count = run_executor_self_tests()
+        selftest_count = run_executor_self_tests(
+            data_dir=worker.settings.signal_db.parent
+        )
     except Exception:
         LOG.exception(
             "Autopruebas offline del executor fallaron; "

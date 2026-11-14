@@ -1,6 +1,6 @@
 # Docker Compose para bot1: colector + estrategia de señales + consumidor Futures.
 # =============================================================================
-# - Ambos servicios comparten la imagen y un volumen con feed.db y signal.db.
+# - Los servicios comparten ./data (live/data en el host), montado como /data.
 # - `feed` escribe feed.db (WAL); `bot` solo lee feed.db y escribe signal.db.
 # - `executor` consume signal.db y registra su estado por cuenta; trading está
 #   desactivado por defecto en `live/.env`.
@@ -14,18 +14,18 @@
 #   docker compose up -d --build
 #   docker compose ps
 #   docker compose logs -f bot
-#   docker compose down            # detiene y mantiene el volumen de datos
+#   docker compose down            # detiene servicios; conserva live/data
 #
 # Compose carga primero ../.env y después live/.env; ante claves repetidas,
 # prevalece live/.env. El servicio feed fija algunos valores de despliegue.
+# Los datos persistentes se guardan en live/data y no se incluyen en la imagen.
 
 name: blacker-bot1
 
 x-common: &common
   build:
     context: .
-    # Se pasan solo los paquetes de estrategia y bot; no se envía al daemon
-    # todo el directorio padre (incluye data/).
+    # El .dockerignore excluye live/data y otros artefactos locales.
     additional_contexts:
       strategy: ../strategy
   image: blacker-bot1:latest
@@ -36,7 +36,7 @@ x-common: &common
     - path: .env
       required: false
   volumes:
-    - bot_data:/data
+    - ./data:/data
   init: true
   restart: unless-stopped
   stop_grace_period: 30s
@@ -71,7 +71,7 @@ services:
     <<: *common
     command: ["python", "-m", "bot"]
     volumes:
-      - bot_data:/data
+      - ./data:/data
       - bot_reports:/app/legacy/bot1/bot/data
     ports:
       - "127.0.0.1:8080:8080"
@@ -80,13 +80,13 @@ services:
         # Solo orden de arranque, no salud: el bot arranca igual y espera datos.
         condition: service_started
     environment:
-      DB_PATH: /data/feed.db
-      SIGNAL_DB: /data/signal.db
-      BACKTEST_REPORT_DIR: /app/legacy/bot1/bot/data/backtest_out
+      BOT_DB_PATH: /data/feed.db
+      BOT_SIGNAL_DB: /data/signal.db
+      BOT_BACKTEST_REPORT_DIR: /app/legacy/bot1/bot/data/backtest_out
       BOT_HEARTBEAT: /data/bot1.heartbeat
-      HTTP_HOST: 0.0.0.0
-      HTTP_PORT: "8080"
-      LIVE_ONLY: "true"
+      BOT_HTTP_HOST: 0.0.0.0
+      BOT_HTTP_PORT: "8080"
+      BOT_LIVE_ONLY: "true"
     healthcheck:
       test: ["CMD", "python", "healthcheck.py", "bot"]
       interval: 60s
@@ -98,13 +98,13 @@ services:
     <<: *common
     command: ["python", "-m", "bot.execution"]
     volumes:
-      - bot_data:/data
+      - ./data:/data
     depends_on:
       bot:
         condition: service_started
     environment:
-      SIGNAL_DB: /data/signal.db
-      EXECUTOR_HEARTBEAT: /data/executor.heartbeat
+      BOT_SIGNAL_DB: /data/signal.db
+      BOT_EXECUTOR_HEARTBEAT: /data/executor.heartbeat
     healthcheck:
       test: ["CMD", "python", "healthcheck.py", "executor"]
       interval: 30s
@@ -113,7 +113,5 @@ services:
       start_period: 30s
 
 volumes:
-  bot_data:
-    name: blacker-bot1-data
   bot_reports:
     name: blacker-bot1-reports

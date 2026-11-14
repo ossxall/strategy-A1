@@ -437,25 +437,39 @@ def test_production_requires_explicit_live_opt_in(tmp_path):
 
 
 def test_default_strategy_and_worker_leverage_cap_is_ten(monkeypatch):
-    monkeypatch.setenv("BINANCE_MAX_LEVERAGE", "10")
-    monkeypatch.setenv("BINANCE_SET_LEVERAGE", "true")
-    monkeypatch.setenv("EXECUTOR_TEST_MODE", "false")
+    monkeypatch.setenv("BOT_BINANCE_MAX_LEVERAGE", "10")
+    monkeypatch.setenv("BOT_BINANCE_SET_LEVERAGE", "true")
+    monkeypatch.setenv("BOT_EXECUTOR_TEST_MODE", "false")
     settings = ExecutorSettings.from_env()
     assert Config().max_leverage == 10.0
     assert settings.max_leverage == 10
     assert settings.set_leverage is True
 
 
+def test_executor_database_and_heartbeat_default_to_live_data(monkeypatch):
+    from live.bot.config import APP_DIR
+
+    monkeypatch.setenv("BOT_EXECUTOR_TEST_MODE", "false")
+    monkeypatch.setenv("BOT_SIGNAL_DB", "data/signal.db")
+    monkeypatch.setenv("BOT_EXECUTOR_HEARTBEAT", "data/executor.heartbeat")
+
+    settings = ExecutorSettings.from_env()
+
+    data_dir = APP_DIR / "data"
+    assert settings.signal_db == data_dir / "signal.db"
+    assert settings.heartbeat_path == data_dir / "executor.heartbeat"
+
+
 def test_test_mode_forces_test_instrument_limits_and_isolated_state(
     monkeypatch, tmp_path
 ):
-    monkeypatch.setenv("EXECUTOR_TEST_MODE", "true")
-    monkeypatch.setenv("BINANCE_ENVIRONMENT", "testnet")
-    monkeypatch.setenv("BINANCE_ACCOUNT_ID", "test-account")
-    monkeypatch.setenv("BINANCE_MAX_LEVERAGE", "25")
-    monkeypatch.setenv("BINANCE_SET_LEVERAGE", "false")
-    monkeypatch.setenv("SYMBOL", "ETHUSDT")
-    monkeypatch.setenv("SIGNAL_DB", str(tmp_path / "signal.db"))
+    monkeypatch.setenv("BOT_EXECUTOR_TEST_MODE", "true")
+    monkeypatch.setenv("BOT_BINANCE_ENVIRONMENT", "testnet")
+    monkeypatch.setenv("BOT_BINANCE_ACCOUNT_ID", "test-account")
+    monkeypatch.setenv("BOT_BINANCE_MAX_LEVERAGE", "25")
+    monkeypatch.setenv("BOT_BINANCE_SET_LEVERAGE", "false")
+    monkeypatch.setenv("BOT_SYMBOL", "ETHUSDT")
+    monkeypatch.setenv("BOT_SIGNAL_DB", str(tmp_path / "signal.db"))
 
     settings = ExecutorSettings.from_env()
 
@@ -468,9 +482,9 @@ def test_test_mode_forces_test_instrument_limits_and_isolated_state(
 
 
 def test_mainnet_environment_alias_uses_production_endpoint(monkeypatch):
-    monkeypatch.setenv("BINANCE_ENVIRONMENT", "mainnet")
-    monkeypatch.delenv("BINANCE_ACCOUNT_ID", raising=False)
-    monkeypatch.setenv("EXECUTOR_TEST_MODE", "false")
+    monkeypatch.setenv("BOT_BINANCE_ENVIRONMENT", "mainnet")
+    monkeypatch.delenv("BOT_BINANCE_ACCOUNT_ID", raising=False)
+    monkeypatch.setenv("BOT_EXECUTOR_TEST_MODE", "false")
 
     settings = ExecutorSettings.from_env()
 
@@ -941,7 +955,9 @@ def test_test_mode_requires_trading_explicitly_enabled(tmp_path):
     store = SignalStore(tmp_path / "test-signal.db")
     store.connect()
     try:
-        with pytest.raises(RuntimeError, match="BINANCE_TRADING_ENABLED=true"):
+        with pytest.raises(
+            RuntimeError, match="BOT_BINANCE_TRADING_ENABLED=true"
+        ):
             ExecutionWorker(
                 _settings(tmp_path, test_mode=True),
                 store,

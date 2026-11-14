@@ -1,2 +1,8 @@
 .venv/
 data/
+!/data/
+!/data/.gitkeep
+/data/*
+!/data/.gitkeep
+live/bot/data
+live/data

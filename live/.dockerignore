@@ -1,13 +1,4 @@
-.env
-Dockerfile
-.dockerignore
-docker-compose.yml
-__pycache__/
-*.py[cod]
-.ruff_cache/
-.pytest_cache/
-*.db
-*.db-wal
-*.db-shm
-*.log
-*.heartbeat
+/data
+/.env
+/.venv
+**/__pycache__

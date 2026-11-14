@@ -141,7 +141,9 @@ class ExecutorSettings:
             signal_db = signal_db.with_name(
                 f"{signal_db.stem}.executor-test{signal_db.suffix}"
             )
-        heartbeat = env_str("EXECUTOR_HEARTBEAT", "/data/executor.heartbeat").strip()
+        heartbeat = env_str(
+            "EXECUTOR_HEARTBEAT", "data/executor.heartbeat"
+        ).strip()
         return cls(
             enabled=env_bool("BINANCE_TRADING_ENABLED", False),
             test_mode=test_mode,
@@ -178,7 +180,7 @@ class ExecutorSettings:
                 1.0, max(0.01, env_float("BINANCE_MAX_EQUITY_FRACTION", 0.95))
             ),
             max_risk_pct=min(0.10, max(0.0001, env_float("BINANCE_MAX_RISK_PCT", 0.03))),
-            heartbeat_path=Path(heartbeat) if heartbeat else None,
+            heartbeat_path=resolve_path(heartbeat) if heartbeat else None,
             signal_db=signal_db,
         )
 
@@ -206,17 +208,17 @@ class ExecutionWorker:
         self._heartbeat_path = self.settings.heartbeat_path
 
         if self.settings.environment not in {"testnet", "production"}:
-            raise ValueError("BINANCE_ENVIRONMENT debe ser testnet o production")
+            raise ValueError("BOT_BINANCE_ENVIRONMENT debe ser testnet o production")
         if self.settings.test_mode and not self.settings.enabled:
             raise RuntimeError(
-                "EXECUTOR_TEST_MODE requiere BINANCE_TRADING_ENABLED=true"
+                "BOT_EXECUTOR_TEST_MODE requiere BOT_BINANCE_TRADING_ENABLED=true"
             )
         if self.settings.enabled:
             if self.settings.environment == "production" \
                     and not self.settings.allow_live_trading:
                 raise RuntimeError(
                     "Producción bloqueada: configura "
-                    "BINANCE_ALLOW_LIVE_TRADING=true explícitamente."
+                    "BOT_BINANCE_ALLOW_LIVE_TRADING=true explícitamente."
                 )
             if self.gateway is None:
                 self.gateway = BinanceUsdmClient(
@@ -1564,7 +1566,7 @@ class ExecutionWorker:
         self._mark_heartbeat()
         if not self.settings.enabled:
             LOG.debug(
-                "BINANCE_TRADING_ENABLED=false; no se reclaman ni ejecutan señales"
+                "BOT_BINANCE_TRADING_ENABLED=false; no se reclaman ni ejecutan señales"
             )
             return
         self._initialize()
@@ -1660,7 +1662,7 @@ def main() -> int:
         if not settings.enabled:
             logger.warning(
                 "Executor iniciado en modo seguro: "
-                "BINANCE_TRADING_ENABLED=false; no se enviarán órdenes."
+                "BOT_BINANCE_TRADING_ENABLED=false; no se enviarán órdenes."
             )
         if settings.test_mode:
             from .test_mode import run_test_mode

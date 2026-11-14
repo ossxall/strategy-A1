@@ -38,13 +38,13 @@ if load_dotenv is not None:
 from strategy.config import Config
 
 logging.basicConfig(
-    level=getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO),
+    level=getattr(logging, os.getenv("BOT_LOG_LEVEL", "INFO").upper(), logging.INFO),
     format="%(asctime)s %(levelname)s %(threadName)s: %(message)s",
 )
 logger = logging.getLogger("bot1")
 STOP_EVENT = threading.Event()
 
-# Defaults operativos; live/.env puede sobrescribirlos.
+# Defaults operativos; live/.env puede sobrescribirlos con claves BOT_.
 DEFAULT_SYMBOL = "BTCUSDT"
 DEFAULT_INTERVAL = "1m"
 DEFAULT_FEED_DB = "data/feed.db"
@@ -94,24 +94,29 @@ def opt_float(value) -> float | None:
 
 
 def env_str(name: str, default: str) -> str:
-    return os.getenv(name, default)
+    return os.getenv(_bot_env_name(name), default)
 
 
 def env_int(name: str, default: int) -> int:
-    raw = os.getenv(name)
+    raw = os.getenv(_bot_env_name(name))
     return default if raw is None or raw == "" else int(raw)
 
 
 def env_float(name: str, default: float) -> float:
-    raw = os.getenv(name)
+    raw = os.getenv(_bot_env_name(name))
     return default if raw is None or raw == "" else float(raw)
 
 
 def env_bool(name: str, default: bool) -> bool:
-    raw = os.getenv(name)
+    raw = os.getenv(_bot_env_name(name))
     if raw is None or raw == "":
         return default
     return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _bot_env_name(name: str) -> str:
+    """Añade el prefijo del bot sin duplicarlo en claves ya prefijadas."""
+    return name if name.startswith("BOT_") else f"BOT_{name}"
 
 
 def resolve_path(value: str) -> Path:

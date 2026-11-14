@@ -29,8 +29,16 @@ entorno del contenedor. No se admiten argumentos de terminal.
 
 `LIVE_ONLY` está activado por defecto. Deja `LIVE_SINCE` vacío para que el bot
 guarde su marca inicial en `SIGNAL_DB` y la reutilice tras reiniciarse. Conserva
-esa base de datos: en Docker Compose vive en el volumen persistente `bot_data`.
-No elimines el volumen al recrear los contenedores.
+esa base de datos: en Docker Compose los datos persistentes se guardan en
+`live/data` del host (montado como `/data` dentro de los contenedores). No
+elimines ese directorio al recrear los contenedores.
+Las bases temporales de las autopruebas offline del executor también se crean
+allí y se eliminan al terminar.
+Las instalaciones anteriores pueden conservar datos en el volumen Docker
+`blacker-bot1-data`: Compose ya no lo monta ni lo elimina automáticamente.
+Antes de volver a iniciar una instalación existente, detén sus servicios y
+migra los archivos necesarios a `live/data`; no sobrescribas bases existentes
+sin compararlas.
 
 Tras una caída, el bot vuelve a recorrer el feed y puede insertar eventos no
 procesados desde esa marca; la base de datos evita duplicados. `LIVE_ONLY` no es
@@ -74,22 +82,22 @@ contrato quedan rechazados y no generan órdenes.
 ## Executor USDⓈ-M Futures
 
 Compose ejecuta `python -m bot.execution`, pero **no envía órdenes por defecto**:
-`BINANCE_TRADING_ENABLED=false`. Usa el SDK oficial
+`BOT_BINANCE_TRADING_ENABLED=false`. Usa el SDK oficial
 `binance-sdk-derivatives-trading-usds-futures`; el entorno predeterminado es
-testnet. Producción requiere `BINANCE_ENVIRONMENT=production`,
-`BINANCE_TRADING_ENABLED=true` y `BINANCE_ALLOW_LIVE_TRADING=true`.
-El tope de leverage predeterminado es 10x. `BINANCE_SET_LEVERAGE=true` aplica
+testnet. Producción requiere `BOT_BINANCE_ENVIRONMENT=production`,
+`BOT_BINANCE_TRADING_ENABLED=true` y `BOT_BINANCE_ALLOW_LIVE_TRADING=true`.
+El tope de leverage predeterminado es 10x. `BOT_BINANCE_SET_LEVERAGE=true` aplica
 en Binance el menor valor entre ese tope y el de `strategy`, pero no tiene efecto
 mientras el trading siga deshabilitado. El tamaño puede ser menor que 10x por
 `risk_pct`, los multiplicadores adaptativos y el límite de exposición.
-`STRATEGY_INITIAL_CAPITAL=100` es la referencia del backtest; el worker lee el
+`BOT_STRATEGY_INITIAL_CAPITAL=100` es la referencia del backtest; el worker lee el
 equity/margen real de Binance para calcular la cantidad live.
 El executor fija un corte inicial por cuenta con un margen corto de recuperación
-(`EXECUTOR_INITIAL_BACKFILL_SECONDS`) para no ejecutar el histórico al activarlo.
+(`BOT_EXECUTOR_INITIAL_BACKFILL_SECONDS`) para no ejecutar el histórico al activarlo.
 
-`EXECUTOR_TEST_MODE=true` ejecuta ciclos reales de prueba y requiere también
-`BINANCE_TRADING_ENABLED=true`; en producción sigue siendo obligatorio
-`BINANCE_ALLOW_LIVE_TRADING=true` (`BINANCE_ENVIRONMENT=mainnet` es alias de
+`BOT_EXECUTOR_TEST_MODE=true` ejecuta ciclos reales de prueba y requiere también
+`BOT_BINANCE_TRADING_ENABLED=true`; en producción sigue siendo obligatorio
+`BOT_BINANCE_ALLOW_LIVE_TRADING=true` (`BOT_BINANCE_ENVIRONMENT=mainnet` es alias de
 `production`). Fuerza `BTCUSDT`, leverage máximo 10x y stop
 al 1%. Interpreta el límite de 10 USDT como margen estimado por orden (hasta
 110 USDT de notional a 10x), no como notional ni como límite de pérdidas o
@@ -121,7 +129,7 @@ historial adaptativo simulado, por lo que no se prometen resultados idénticos a
 backtest. Una divergencia de posición real detiene la ejecución automática.
 
 Para habilitar, comienza con claves de testnet y
-`BINANCE_TRADING_ENABLED=true`. No habilites producción hasta validar fills,
+`BOT_BINANCE_TRADING_ENABLED=true`. No habilites producción hasta validar fills,
 órdenes reduce-only, stops y recuperación de reinicios en testnet. Usa claves
 sin permisos de retiro y restringidas por IP.
 
@@ -129,9 +137,9 @@ sin permisos de retiro y restringidas por IP.
 
 El bot actualiza el visor mensual al cambiar una vela de estrategia. Escribe
 `live/bot/data/backtest_out/html/backtest.html` y los datos JSON en
-`live/bot/data/backtest_out/html/data/`. En Docker Compose, `BACKTEST_REPORT_DIR`
+`live/bot/data/backtest_out/html/data/`. En Docker Compose, `BOT_BACKTEST_REPORT_DIR`
 apunta a `/app/legacy/bot1/bot/data/backtest_out`, persistido en el volumen
-`blacker-bot1-reports`. Se puede cambiar con esa misma variable de entorno.
+`blacker-bot1-reports`. Se puede cambiar con `BOT_BACKTEST_REPORT_DIR`.
 
 `backtest.html` es una plantilla estática compartida con `strategy/report.py`;
 no contiene resultados. Consume `data/manifest.json` y los JSON mensuales. Para
@@ -155,6 +163,8 @@ El sondeo de SQLite ocurre en un hilo aparte con timeout, por lo que las
 peticiones no esperan a consultas ni al ciclo de señales. En Compose está
 publicado en `http://127.0.0.1:8080/live/bot/health`.
 
+`signal.db`, el snapshot de cuenta y el ledger del executor comparten
+`live/data` con el feed; el heartbeat del executor también se escribe allí.
 `signal.db` usa WAL con comprobación del modo, `synchronous=FULL` para
 durabilidad de señales y estado de recuperación, y un `busy_timeout` de 5 s.
 El autocheckpoint se configura en 1000 páginas y el límite de tamaño de WAL de

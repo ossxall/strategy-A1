@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from ..config import resolve_path
 from ..storage import SignalStore
 from .binance_usdm import BinanceOrderNotFound
 from .worker import ExecutionWorker, ExecutorSettings
@@ -644,12 +645,16 @@ def _self_test_guards(root: Path, now_ms: int) -> int:
     return passed
 
 
-def run_executor_self_tests() -> int:
+def run_executor_self_tests(data_dir: Path | None = None) -> int:
     """Run offline happy-path and safety/recovery scenarios before live testing."""
     previous_disable = logging.root.manager.disable
     logging.disable(logging.CRITICAL)
     try:
-        with TemporaryDirectory(prefix="executor-selftest-") as temp_dir:
+        root_dir = Path(data_dir) if data_dir is not None else resolve_path("data")
+        root_dir.mkdir(parents=True, exist_ok=True)
+        with TemporaryDirectory(
+            prefix="executor-selftest-", dir=root_dir
+        ) as temp_dir:
             root = Path(temp_dir)
             now_ms = int(time.time() * 1000)
             passed = (
