@@ -8,3 +8,7 @@ plotly>=5.18
 
 # Descarga de datos de Binance Vision.
 requests>=2.31
+
+# Colector live de Binance Futures (WebSocket y carga de .env).
+websocket-client>=1.7
+python-dotenv>=1.0

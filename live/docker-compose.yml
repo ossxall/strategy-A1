@@ -1,4 +1,4 @@
-# Docker Compose para bot1: colector de datos (feed.py) + bot de señales (bot.py)
+# Docker Compose para bot1: colector (live/feed/) + bot de señales.
 # =============================================================================
 # - Ambos servicios comparten la imagen y un volumen con feed.db y signal.db.
 # - `feed` escribe feed.db (WAL); `bot` solo lee feed.db y escribe signal.db.
@@ -21,8 +21,8 @@ name: blacker-bot1
 x-common: &common
   build:
     context: .
-    # La estrategia vive un nivel arriba; se inyecta como contexto extra para
-    # no tener que enviar al daemon todo el directorio padre (incluye data/).
+    # Se pasa la estrategia como contexto extra para no enviar al daemon todo
+    # el directorio padre (incluye data/).
     additional_contexts:
       strategy: ../strategy
   image: blacker-bot1:latest
@@ -46,11 +46,15 @@ x-common: &common
 services:
   feed:
     <<: *common
-    command: ["python", "feed.py"]
+    command: ["python", "-m", "feed"]
+    ports:
+      - "127.0.0.1:8787:8787"
     environment:
-      # Absoluto para que feed.py y bot.py apunten al mismo archivo.
+      # Absoluto para que el colector y bot.py compartan la base de datos.
       DB_PATH: /data/feed.db
       FEED_DB_PATH: /data/feed.db
+      FEED_STATUS_HOST: 0.0.0.0
+      FEED_STATUS_PORT: "8787"
     healthcheck:
       test: ["CMD", "python", "healthcheck.py", "feed"]
       interval: 30s

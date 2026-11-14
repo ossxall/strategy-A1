@@ -10,8 +10,8 @@ Modos:
     python healthcheck.py bot    # bot.py: heartbeat reciente
 
 Variables:
-    DB_PATH                ruta a feed.db (mode feed)
-    INTERVAL               intervalo del feed, p.ej. 1m (mode feed)
+    FEED_DB_PATH           ruta a feed.db (mode feed; fallback DB_PATH)
+    FEED_INTERVAL          intervalo del feed, p.ej. 1m (fallback INTERVAL)
     BOT_HEARTBEAT          ruta del archivo de heartbeat (mode bot)
     HEALTHCHECK_MAX_AGE    segundos máximos de antigüedad (mode bot)
 """
@@ -44,7 +44,9 @@ def interval_seconds(raw: str | None, default: float = 60.0) -> float:
 
 def check_feed() -> bool:
     """Sano si el colector está corriendo y la última vela es reciente."""
-    db_path = Path(os.getenv("DB_PATH", "/data/feed.db"))
+    db_path = Path(
+        os.getenv("FEED_DB_PATH", os.getenv("DB_PATH", "/data/feed.db"))
+    )
     if not db_path.exists():
         print(f"[feed] feed.db aún no existe: {db_path}")
         return False
@@ -63,7 +65,9 @@ def check_feed() -> bool:
         print(f"[feed] error leyendo {db_path}: {exc}")
         return False
 
-    interval_ms = interval_seconds(os.getenv("INTERVAL", "1m")) * 1000
+    interval_ms = interval_seconds(
+        os.getenv("FEED_INTERVAL", os.getenv("INTERVAL", "1m"))
+    ) * 1000
     max_age_ms = max(300_000, 5 * interval_ms)  # al menos 5 min
     age_ms = None if latest is None else (time.time() * 1000 - latest)
 
