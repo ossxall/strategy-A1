@@ -65,6 +65,8 @@ services:
   bot:
     <<: *common
     command: ["python", "-m", "bot"]
+    ports:
+      - "127.0.0.1:8080:8080"
     depends_on:
       feed:
         # Solo orden de arranque, no salud: el bot arranca igual y espera datos.
@@ -73,6 +75,8 @@ services:
       DB_PATH: /data/feed.db
       SIGNAL_DB: /data/signal.db
       BOT_HEARTBEAT: /data/bot1.heartbeat
+      HTTP_HOST: 0.0.0.0
+      HTTP_PORT: "8080"
       LIVE_ONLY: "true"
     healthcheck:
       test: ["CMD", "python", "healthcheck.py", "bot"]

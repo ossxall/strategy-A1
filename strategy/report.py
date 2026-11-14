@@ -1369,13 +1369,16 @@ def _write_paginated_backtest_html(
     main {{ display:flex; justify-content:center; width:100%;
             padding:1rem clamp(.65rem,2vw,1.5rem) 1.5rem; }}
     .chart-shell {{
-      display:block; width:100%; max-width:1800px; margin-inline:auto; overflow:hidden;
+      display:flex; justify-content:center; width:100%; max-width:1800px;
+      margin-inline:auto; overflow:hidden;
       border:1px solid var(--border); border-radius:.85rem;
       background:var(--surface); box-shadow:0 18px 45px rgba(0,0,0,.22);
     }}
-    #chart {{ display:block; width:100%; min-height:75vh; margin:0 auto; }}
+    #chart {{ display:block; flex:1 1 auto; width:100%; min-width:0;
+              min-height:75vh; margin:0 auto; }}
     #chart .js-plotly-plot {{
-      display:block !important; width:100% !important; margin:0 auto !important;
+      display:block !important; width:100% !important; max-width:100%;
+      margin:0 auto !important;
     }}
     #chart .plot-container, #chart .svg-container {{
       width:100% !important;
@@ -1410,6 +1413,10 @@ def _write_paginated_backtest_html(
   <script id="monthly-data" type="application/json">{page_json}</script>
   <script>
     const pages = JSON.parse(document.getElementById("monthly-data").textContent);
+    const chartHeight = Math.max(
+      0,
+      ...pages.map(page => Number(page.figure.layout.height) || 0)
+    );
     const chart = document.getElementById("chart");
     const label = document.getElementById("page-label");
     const previous = document.getElementById("previous");
@@ -1430,7 +1437,11 @@ def _write_paginated_backtest_html(
       label.textContent = `${{page.label}} · ${{page.positions}} posiciones (${{current + 1}}/${{pages.length}})`;
       previous.disabled = current === 0;
       next.disabled = current === pages.length - 1;
-      Plotly.react(chart, page.figure.data, page.figure.layout, config);
+      const layout = {{
+        ...page.figure.layout,
+        height:chartHeight || page.figure.layout.height
+      }};
+      Plotly.react(chart, page.figure.data, layout, config);
     }}
 
     previous.addEventListener("click", () => showPage(current - 1));

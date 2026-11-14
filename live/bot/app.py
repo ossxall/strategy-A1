@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 from strategy.strategy import Config, EMACrossStrategy
 
 from .config import (
@@ -29,11 +31,12 @@ from .config import (
     utc_now,
 )
 from .events import build_events, events_to_trades
+from .health import BotHealth, start_health_server
 from .series import build_series_frames, resample
 from .storage import FeedReader, SignalStore
 
 try:
-    from server import SeriesSnapshot, start_server
+    from server import SeriesSnapshot
 except ModuleNotFoundError as exc:
     if exc.name != "server":
         raise
@@ -44,10 +47,10 @@ except ModuleNotFoundError as exc:
         def __init__(self, *args, **kwargs):
             raise RuntimeError("El endpoint HTTP requiere el módulo server.")
 
-    start_server = None
-    HTTP_SERVER_AVAILABLE = False
-else:
-    HTTP_SERVER_AVAILABLE = True
+
+# El endpoint de salud se implementa en el propio paquete y no depende del
+# módulo opcional usado históricamente para servir series de depuración.
+HTTP_SERVER_AVAILABLE = True
 
 
 class SignalBot:
@@ -64,6 +67,7 @@ class SignalBot:
         live_only: bool = False,
         live_since_ms: int | None = None,
         snapshot: SeriesSnapshot | None = None,
+        health: BotHealth | None = None,
     ):
         self.cfg = cfg
         self.feed = feed
@@ -75,6 +79,7 @@ class SignalBot:
         self.live_only = live_only
         self.live_since_ms = live_since_ms
         self.snapshot = snapshot
+        self.health = health
         self._live_resolved = False
 
     def _resolve_live_since(self) -> None:
@@ -127,8 +132,12 @@ class SignalBot:
         """Lee datos cerrados, calcula acciones y persiste los eventos nuevos."""
         self._resolve_live_since()
         raw = self.feed.load_closed()
+        if self.health is not None:
+            self.health.record_feed(raw)
         if raw.empty:
             logger.debug("feed.db sin velas cerradas todavía.")
+            if self.health is not None:
+                self.health.record_strategy_ready(False)
             return 0
 
         bars = resample(raw, self.cfg.timeframe)
@@ -139,7 +148,11 @@ class SignalBot:
                 len(bars),
                 self.min_bars,
             )
+            if self.health is not None:
+                self.health.record_strategy_ready(False)
             return 0
+        if self.health is not None:
+            self.health.record_strategy_ready(True)
 
         signals = self.strategy.generate_signals(bars, raw)
         adx_exit, weak_exit, rsi_div_exit = self.strategy.prepare_exits(raw, bars)
@@ -175,17 +188,45 @@ class SignalBot:
         return inserted
 
     def run(self, once: bool = False, poll_seconds: float = DEFAULT_POLL_SECONDS) -> None:
-        while not STOP_EVENT.is_set():
-            try:
-                self.process_once()
-            except FileNotFoundError as exc:
-                logger.warning("%s", exc)
-            except Exception:  # noqa: BLE001 - el proceso se recupera en el siguiente ciclo
-                logger.exception("Error durante el ciclo del bot")
+        if self.health is not None:
+            self.health.mark_running()
+        try:
+            while not STOP_EVENT.is_set():
+                started = time.monotonic()
+                if self.health is not None:
+                    self.health.begin_cycle()
+                try:
+                    inserted = self.process_once()
+                except FileNotFoundError as exc:
+                    logger.warning("%s", exc)
+                    if self.health is not None:
+                        self.health.finish_cycle(
+                            status="error",
+                            duration_seconds=time.monotonic() - started,
+                            error=str(exc),
+                        )
+                except Exception as exc:  # noqa: BLE001 - el proceso se recupera
+                    logger.exception("Error durante el ciclo del bot")
+                    if self.health is not None:
+                        self.health.finish_cycle(
+                            status="error",
+                            duration_seconds=time.monotonic() - started,
+                            error=str(exc),
+                        )
+                else:
+                    if self.health is not None:
+                        self.health.finish_cycle(
+                            status="ok",
+                            duration_seconds=time.monotonic() - started,
+                            events_inserted=inserted,
+                        )
 
-            touch_heartbeat()
-            if once or STOP_EVENT.wait(poll_seconds):
-                break
+                touch_heartbeat()
+                if once or STOP_EVENT.wait(poll_seconds):
+                    break
+        finally:
+            if self.health is not None:
+                self.health.mark_stopped()
 
 
 def request_stop(signum=None, frame=None) -> None:
@@ -206,6 +247,10 @@ def main() -> int:
     live_only = env_bool("LIVE_ONLY", DEFAULT_LIVE_ONLY) or live_since_ms is not None
     http_host = env_str("HTTP_HOST", DEFAULT_HTTP_HOST)
     http_port = env_int("HTTP_PORT", DEFAULT_HTTP_PORT)
+    http_max_clients = env_int("HTTP_MAX_CLIENTS", 8)
+    http_request_timeout = env_float("HTTP_REQUEST_TIMEOUT", 1.0)
+    health_probe_interval = env_float("HEALTH_DB_PROBE_INTERVAL", 5.0)
+    health_probe_timeout = env_float("HEALTH_DB_PROBE_TIMEOUT", 0.2)
 
     logger.info(
         "Bot iniciado: symbol=%s interval=%s timeframe=%s feed=%s signal=%s",
@@ -218,43 +263,64 @@ def main() -> int:
 
     feed = FeedReader(feed_path, symbol, interval)
     store = SignalStore(signal_path)
-    snapshot = (
-        SeriesSnapshot(symbol, interval)
-        if http_port > 0 and HTTP_SERVER_AVAILABLE
-        else None
+    min_bars = cfg.ema_slow + 2
+    health = BotHealth(
+        symbol=symbol,
+        interval=interval,
+        timeframe=cfg.timeframe,
+        feed_path=feed_path,
+        signal_path=signal_path,
+        poll_seconds=poll_seconds,
+        min_bars=min_bars,
+        live_only=live_only,
+        live_since_ms=live_since_ms,
+        probe_interval_seconds=health_probe_interval,
     )
     http_server = None
+    http_thread = None
+    probe_thread = None
     try:
-        store.connect()
-        if http_port > 0 and not HTTP_SERVER_AVAILABLE:
-            logger.warning(
-                "Módulo server no disponible; el endpoint HTTP de debug queda desactivado."
-            )
-        if snapshot is not None:
+        if http_port > 0:
             try:
-                http_server = start_server(snapshot, http_host, http_port)
+                http_server, http_thread, probe_thread = start_health_server(
+                    health,
+                    http_host,
+                    http_port,
+                    signal_path,
+                    max_clients=http_max_clients,
+                    request_timeout=http_request_timeout,
+                    probe_interval=health_probe_interval,
+                    probe_timeout=health_probe_timeout,
+                )
             except OSError:
                 logger.exception(
-                    "No se pudo abrir el endpoint HTTP en %s:%d; "
+                    "No se pudo abrir el endpoint de salud en %s:%d; "
                     "el bot sigue sin él.",
                     http_host,
                     http_port,
                 )
-                snapshot = None
+
+        store.connect()
         SignalBot(
             cfg,
             feed,
             store,
             symbol,
             interval,
+            min_bars=min_bars,
             live_only=live_only,
             live_since_ms=live_since_ms,
-            snapshot=snapshot,
+            health=health,
         ).run(once=run_once, poll_seconds=poll_seconds)
     finally:
+        health.stop()
         if http_server is not None:
             http_server.shutdown()
             http_server.server_close()
+        if http_thread is not None:
+            http_thread.join(timeout=2)
+        if probe_thread is not None:
+            probe_thread.join(timeout=2)
         feed.close()
         store.close()
 

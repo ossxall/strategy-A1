@@ -10,8 +10,22 @@ el paquete desde el directorio live con `python -m bot`; no hay opciones CLI.
   cerradas de `feed.db`.
 - `series.py`: remuestreo y construcción de series para diagnóstico.
 - `events.py`: conversión de la ejecución del backtester a eventos live.
+- `health.py`: endpoints JSON de salud y sondeo en segundo plano de `signal.db`.
 - `app.py`: ciclo de polling y coordinación de los componentes.
 - `__main__.py`: entrypoint sin opciones de CLI.
 
 La configuración operativa se toma de `live/.env` y de las variables de
 entorno del contenedor. No se admiten argumentos de terminal.
+
+## Salud HTTP
+
+`GET /live/bot/health` y su alias `GET /live/bot/status` devuelven el estado
+del proceso, los ciclos recientes, la frescura de las velas, la disponibilidad
+de `signal.db`, los umbrales y los checks calculados. También se conservan
+`/health` y `/status` como alias cortos. La respuesta es JSON; devuelve HTTP
+200 cuando está sano y 503 cuando está degradado o no sano.
+
+El servidor usa concurrencia limitada y solo lee una instantánea en memoria.
+El sondeo de SQLite ocurre en un hilo aparte con timeout, por lo que las
+peticiones no esperan a consultas ni al ciclo de señales. En Compose está
+publicado en `http://127.0.0.1:8080/live/bot/health`.

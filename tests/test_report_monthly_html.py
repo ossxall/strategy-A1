@@ -43,6 +43,8 @@ def test_monthly_backtest_html_uses_one_paginated_chart(tmp_path, monkeypatch):
     assert document.count('id="chart"') == 1
     assert "justify-content:center" in document
     assert "max-width:1800px" in document
+    assert "const chartHeight = Math.max(" in document
+    assert "height:chartHeight || page.figure.layout.height" in document
     assert 'id="previous"' in document
     assert 'id="next"' in document
     assert "Plotly.react(chart" in document
