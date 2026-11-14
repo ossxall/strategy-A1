@@ -173,13 +173,14 @@ def test_monthly_loss_limit_closes_position_and_blocks_reentry_until_month_end()
         signals=manual_signals(bars, [1, 0, 1]),
     )
 
-    trades, _ = engine.run()
+    trades, equity = engine.run()
 
     assert trades.reason.tolist() == ["MONTHLY_LOSS_LIMIT_5%"]
     assert trades.pnl_net.iloc[0] == pytest.approx(-1000.0)
     assert trades.exit_time.iloc[0] == bars.index[1] + pd.Timedelta("30min")
     assert engine.position is None
     assert engine.halt_until is not None
+    assert "protección mensual" in equity.execution_rejection.iloc[2]
 
 
 def test_monthly_loss_limit_rearms_at_the_start_of_the_next_calendar_month():
@@ -211,6 +212,36 @@ def test_monthly_loss_limit_rearms_at_the_start_of_the_next_calendar_month():
     assert len(engine.opened) == 2
     assert engine.position is not None
     assert engine.position.entry_time == bars.index[3]
+
+
+def test_equity_records_effective_stop_and_breakeven_activation():
+    bars = make_bars(
+        [
+            {"open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0, "volume": 1.0},
+            {"open": 100.0, "high": 111.0, "low": 99.0, "close": 110.0, "volume": 1.0},
+        ]
+    )
+    engine = Backtester(
+        bars,
+        quiet_config(
+            stop_loss_pct=0.1,
+            partial_tp_enabled=True,
+            partial_tp_r=1.0,
+            partial_tp_pct=50.0,
+            move_stop_to_breakeven=True,
+        ),
+        signals=manual_signals(bars, [0, 0]),
+    )
+    engine._bar_index = 0
+    engine.open_position(1, 100.0, bars.index[0])
+    engine._bar_index = 1
+
+    engine._manage(1)
+    engine._mark(bars.index[1] + pd.Timedelta("30min"), 110.0, signal_time=bars.index[1])
+
+    assert engine.eq_breakeven_activated == [True]
+    assert engine.eq_breakeven_price == [100.0]
+    assert engine.eq_stop_price == [100.0]
 
 
 def test_adaptive_risk_multiplier_uses_only_the_configured_recent_window():

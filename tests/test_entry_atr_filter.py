@@ -82,10 +82,17 @@ def test_atr_filter_is_applied_to_both_long_and_short_entries(monkeypatch):
 
     assert signals.target.tolist() == [0, 0, 0, -1]
     assert signals.atr_filter_allowed.tolist() == [True, False, True, True]
+    assert signals.cross_up_candidate.iloc[1]
+    assert signals.cross_up_rejected.iloc[1]
+    assert "ATR fuera de rango" in signals.entry_rejection_reasons_long.iloc[1]
+    assert signals.cross_down_candidate.iloc[3]
+    assert not signals.cross_down_rejected.iloc[3]
 
     allowed[:] = [True, True, True, False]
     signals = EMACrossStrategy(cfg).generate_signals(bars)
     assert signals.target.tolist() == [0, 1, 0, 0]
+    assert signals.cross_up.iloc[1]
+    assert not signals.cross_up_rejected.iloc[1]
 
 
 def test_atr_filter_defaults_and_validation():

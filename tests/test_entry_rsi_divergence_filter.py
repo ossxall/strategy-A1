@@ -68,6 +68,17 @@ def test_entries_are_filtered_by_recent_divergence_in_the_same_direction(monkeyp
     assert signals.entry_rsi_bear_divergence_blocked.tolist() == [False, False, True, True]
     assert signals.target.tolist() == [0, 1, 0, -1]
 
+    monkeypatch.setattr(
+        strategy_module,
+        "build_rsi_divergence_flags",
+        lambda raw, source_bars, cfg: np.array([-1, 0, 1, 0]),
+    )
+    rejected = EMACrossStrategy(cfg).generate_signals(bars)
+    assert rejected.cross_up_rejected.iloc[1]
+    assert rejected.cross_down_rejected.iloc[3]
+    assert rejected.entry_rejection_reasons_long.iloc[1] == "divergencia RSI"
+    assert rejected.entry_rejection_reasons_short.iloc[3] == "divergencia RSI"
+
 
 def test_backtester_applies_recent_divergence_to_custom_long_signals_only():
     bars = make_bars(7)

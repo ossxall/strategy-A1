@@ -80,6 +80,22 @@ def test_crosses_are_rejected_when_macd_main_line_is_on_wrong_side_or_zero(monke
     assert not signals.cross_down.any()
 
 
+def test_unconfirmed_ema_cross_is_reported_as_rejected(monkeypatch):
+    configure_crosses(
+        monkeypatch,
+        macd_line=np.array([0.0, 1.0, 1.0, -1.0]),
+        signal_line=np.zeros(4),
+        histogram=np.zeros(4),
+    )
+    config = Config(**{**make_config().__dict__, "confirm_bars": 1})
+
+    signals = EMACrossStrategy(config).generate_signals(make_bars())
+
+    assert signals.cross_up.iloc[2]
+    assert signals.cross_down_rejected.iloc[3]
+    assert "confirmación EMA no completada" in signals.entry_rejection_reasons_short.iloc[3]
+
+
 def test_macd_periods_are_configurable_and_passed_to_talib(monkeypatch):
     configure_crosses(
         monkeypatch,

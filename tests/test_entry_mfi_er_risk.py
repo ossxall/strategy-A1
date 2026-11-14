@@ -71,6 +71,45 @@ def test_entry_mfi_and_er_risk_multipliers_are_clamped_and_can_be_disabled():
     assert no_scale._entry_er_risk_multiplier() == 1.0
 
 
+def test_entry_sizing_factors_and_quantity_impact_are_saved_on_trade():
+    bars = make_bars(2)
+    signals = pd.DataFrame(
+        {
+            "valid": True,
+            "target": 0,
+            "trend_bias": 0,
+            "entry_mfi": [70.0, 50.0],
+            "entry_er": [0.5, 0.2],
+        },
+        index=bars.index,
+    )
+    config = Config(
+        timeframe="30min",
+        stop_loss_pct=0.1,
+        entry_mfi_risk_scaling_enabled=True,
+        entry_er_risk_scaling_enabled=True,
+        entry_atr_enabled=False,
+        entry_adx_enabled=False,
+        streak_trend_only=False,
+    )
+    engine = Backtester(bars, config, signals=signals)
+    engine._bar_index = 1
+    engine.open_position(1, 100.0, bars.index[1])
+    position = engine.position
+
+    assert position.entry_mfi_multiplier == pytest.approx(1.2)
+    assert position.entry_er_multiplier == pytest.approx(1.25)
+    assert position.entry_size_multiplier == pytest.approx(1.5)
+    assert position.quantity_without_entry_scaling == pytest.approx(10.0)
+    assert position.initial_quantity == pytest.approx(15.0)
+
+    engine.close_position(100.0, 100.0, bars.index[1], "TEST")
+    trade = engine.trades[0]
+    assert trade.position_initial_quantity == pytest.approx(15.0)
+    assert trade.quantity_without_entry_scaling == pytest.approx(10.0)
+    assert trade.entry_size_multiplier == pytest.approx(1.5)
+
+
 def test_generated_signals_expose_mfi_and_er_without_filtering_entries():
     bars = make_bars(220)
     enabled = Config(timeframe="30min", streak_trend_only=False)

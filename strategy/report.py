@@ -384,12 +384,13 @@ def build_backtest_figure(
     Cubre la totalidad de la serie e incluye:
 
     * velas del timeframe de la estrategia y las EMAs rápida/lenta;
-    * señales de cruce (`cross_up`/`cross_down`) y salidas (`adx_exit`,
-      `weak_exit`, `rsi_div_exit`);
-    * trades: entradas, salidas, unión entrada→salida, stop-loss, breakeven,
-      take-profit parcial y salidas por toque a la EMA slow (motivo
-      ``EMA_SLOW_TOUCH_*``), estas últimas con un marcador propio;
-    * paneles de ADX de entrada, `target` (señal), volumen y curva de equity;
+    * cruces aceptados/rechazados con motivos, sesgo de tendencia y bloqueos
+      detectados durante la ejecución;
+    * señal objetivo frente a posición real, trades con detalle de cantidad,
+      costes, riesgo, múltiplos R y escalado de tamaño;
+    * stop efectivo y activación del breakeven, take-profits y salidas por toque
+      a la EMA slow (motivo ``EMA_SLOW_TOUCH_*``);
+    * paneles de indicadores, equity, drawdown y PnL por lado/motivo de salida;
     * series e indicadores de los timeframes de salida (ADX y EMA weakening)
       cuando se dispone del dataset original `raw`.
 
@@ -423,6 +424,21 @@ def build_backtest_figure(
             weak_exit = auto_weak if weak_exit is None else weak_exit
             rsi_div_exit = auto_div if rsi_div_exit is None else rsi_div_exit
 
+    summary_trades = trades if trades is not None else pd.DataFrame()
+    execution_events = (
+        equity.loc[equity["execution_rejection"].fillna("").astype(str).ne("")].copy()
+        if equity is not None and "execution_rejection" in equity
+        else pd.DataFrame()
+    )
+    if equity is not None and not equity.empty and "equity" in equity:
+        equity = equity.copy()
+        if "drawdown_pct" not in equity:
+            equity_values = equity["equity"].astype(float)
+            peaks = np.maximum(equity_values.cummax().to_numpy(float), cfg.initial_capital)
+            equity["drawdown_pct"] = np.where(
+                peaks > 0, (equity_values.to_numpy(float) / peaks - 1) * 100, 0.0
+            )
+
     # Recorte opcional a una ventana temporal (p. ej. un mes). Los indicadores se
     # calculan sobre la serie completa y recién después se recorta para mostrar.
     win_start = win_end = None
@@ -441,9 +457,23 @@ def build_backtest_figure(
         if volume_exit is not None:
             volume_exit = np.asarray(volume_exit, bool)[keep]
         if trades is not None and not trades.empty:
+            summary_trades = trades[
+                (trades["exit_time"] >= win_start) & (trades["exit_time"] < win_end)
+            ]
             trades = trades[(trades["entry_time"] < win_end) & (trades["exit_time"] >= win_start)]
+        else:
+            summary_trades = pd.DataFrame()
         if equity is not None and not equity.empty:
             equity = equity[(equity["timestamp"] >= win_start) & (equity["timestamp"] < win_end)]
+        if not execution_events.empty and "execution_rejection_time" in execution_events:
+            event_times = pd.to_datetime(execution_events["execution_rejection_time"], utc=True)
+            start_utc = pd.Timestamp(win_start)
+            end_utc = pd.Timestamp(win_end)
+            start_utc = start_utc.tz_localize("UTC") if start_utc.tzinfo is None else start_utc.tz_convert("UTC")
+            end_utc = end_utc.tz_localize("UTC") if end_utc.tzinfo is None else end_utc.tz_convert("UTC")
+            execution_events = execution_events[
+                (event_times >= start_utc) & (event_times < end_utc)
+            ]
 
     n = len(bars)
     adx_flags = np.asarray(adx_exit, bool) if adx_exit is not None else np.zeros(n, bool)
@@ -486,47 +516,88 @@ def build_backtest_figure(
     if window is not None:
         adx_tfs = [frame for frame in
                    (_slice_timeframe(frame, win_start, win_end) for frame in adx_tfs)
-                   if frame is not None]
+                   if frame is not None and np.isfinite(frame["adx"]).any()]
         weak_tfs = [frame for frame in
                     (_slice_timeframe(frame, win_start, win_end) for frame in weak_tfs)
-                    if frame is not None]
+                    if frame is not None
+                    and (np.isfinite(frame["ema_fast"]).any()
+                         or np.isfinite(frame["ema_slow"]).any())]
+    else:
+        adx_tfs = [frame for frame in adx_tfs if np.isfinite(frame["adx"]).any()]
+        weak_tfs = [
+            frame for frame in weak_tfs
+            if np.isfinite(frame["ema_fast"]).any() or np.isfinite(frame["ema_slow"]).any()
+        ]
 
     trade_count = 0 if trades is None or trades.empty else int(trades["position_id"].nunique())
 
     adx_panels = [f"adx_tf_{i}" for i in range(len(adx_tfs))]
     weak_panels = [f"weak_tf_{i}" for i in range(len(weak_tfs))]
 
-    panels = ["price"]
-    if signals is not None and "macd_line" in signals:
-        panels.append("macd")
-    adx_entry_panels = []
-    if signals is not None:
-        for timeframe in cfg.entry_adx_timeframes:
+    entry_adx_series: list[tuple[str | None, str]] = []
+    if cfg.entry_adx_enabled and signals is not None:
+        for idx, timeframe in enumerate(cfg.entry_adx_timeframes):
             column = f"adx_entry_{timeframe}"
-            if column in signals or (timeframe == cfg.entry_adx_timeframes[0] and "adx_entry" in signals):
-                adx_entry_panels.append(f"adx_entry_tf_{len(adx_entry_panels)}")
+            if column not in signals and idx == 0 and "adx_entry" in signals:
+                column = "adx_entry"
+            if column in signals and np.isfinite(signals[column].to_numpy(float)).any():
+                entry_adx_series.append((timeframe, column))
+    adx_entry_panels = [f"adx_entry_tf_{i}" for i in range(len(entry_adx_series))]
+
+    summary_rows: list[tuple[str, float, int, int]] = []
+    if summary_trades is not None and not summary_trades.empty:
+        for side in ("LONG", "SHORT"):
+            side_trades = summary_trades[summary_trades["side"] == side]
+            if not side_trades.empty:
+                summary_rows.append((
+                    f"{side} · {side_trades['position_id'].nunique()} pos",
+                    float(side_trades["pnl_net"].sum()),
+                    int(len(side_trades)),
+                    int(side_trades["position_id"].nunique()),
+                ))
+        for reason, group in summary_trades.groupby("reason", sort=False):
+            summary_rows.append((
+                f"{reason} · {group['position_id'].nunique()} pos",
+                float(group["pnl_net"].sum()),
+                int(len(group)),
+                int(group["position_id"].nunique()),
+            ))
+        summary_rows.sort(key=lambda item: item[1])
+
+    panels = ["price"]
+    if (signals is not None and "macd_line" in signals
+            and np.isfinite(signals["macd_line"].to_numpy(float)).any()):
+        panels.append("macd")
     panels.extend(adx_entry_panels)
     atr_filter_enabled = (
         cfg.entry_atr_enabled
         and signals is not None
         and {"atr", "atr_mean", "atr_ratio", "atr_filter_ready", "atr_filter_allowed"}
         .issubset(signals.columns)
+        and np.isfinite(signals["atr"].to_numpy(float)).any()
     )
     if atr_filter_enabled:
         panels.append("atr")
-    if signals is not None and "entry_mfi" in signals:
+    if (signals is not None and "entry_mfi" in signals
+            and np.isfinite(signals["entry_mfi"].to_numpy(float)).any()):
         panels.append("mfi")
-    if signals is not None and "entry_er" in signals:
+    if (signals is not None and "entry_er" in signals
+            and np.isfinite(signals["entry_er"].to_numpy(float)).any()):
         panels.append("er")
-    if signals is not None and "target" in signals:
+    if ((signals is not None and "target" in signals)
+            or (equity is not None and not equity.empty and "position_side" in equity)):
         panels.append("target")
     panels.extend(adx_panels)
     panels.extend(weak_panels)
     if equity is not None and not equity.empty:
         panels.append("equity")
+        if np.isfinite(equity["drawdown_pct"].to_numpy(float)).any():
+            panels.append("drawdown")
+    if summary_rows:
+        panels.append("summary")
 
     weights = {"price": 1.0, "macd": 0.25, "atr": 0.25, "mfi": 0.2, "er": 0.2,
-               "target": 0.2, "equity": 0.4}
+               "target": 0.2, "equity": 0.4, "drawdown": 0.25, "summary": 0.45}
     for name in adx_entry_panels:
         weights[name] = 0.25
     for name in adx_panels:
@@ -621,6 +692,53 @@ def build_backtest_figure(
                 if mask.any():
                     fig.add_trace(_marker_trace(sig_x[mask], y[mask], label, symbol, color, 9),
                                   row=r, col=1)
+        for rejected_column, reasons_column, y, label, color in (
+            ("cross_up_rejected", "entry_rejection_reasons_long",
+             bars_low - 3 * pad, "cruce LONG rechazado", "#ff9800"),
+            ("cross_down_rejected", "entry_rejection_reasons_short",
+             bars_high + 6 * pad, "cruce SHORT rechazado", "#ab47bc"),
+        ):
+            if rejected_column in signals:
+                mask = _flag(signals[rejected_column])
+                if mask.any():
+                    reasons = (
+                        signals[reasons_column].fillna("").astype(str)
+                        if reasons_column in signals else pd.Series("", index=signals.index)
+                    )
+                    texts = [
+                        f"{label}<br>Motivo: {reasons.iloc[i] or 'filtro de entrada'}"
+                        for i in np.flatnonzero(mask)
+                    ]
+                    fig.add_trace(_marker_trace(
+                        sig_x[mask], y[mask], label, "x", color, 10, text=texts,
+                    ), row=r, col=1)
+
+    if (not execution_events.empty
+            and {"execution_rejection_time", "execution_rejection_target",
+                 "execution_rejection"}.issubset(execution_events.columns)):
+        event_times = pd.DatetimeIndex(execution_events["execution_rejection_time"])
+        event_indices = bars.index.get_indexer(event_times)
+        valid_events = event_indices >= 0
+        if valid_events.any():
+            event_rows = execution_events.iloc[np.flatnonzero(valid_events)]
+            event_indices = event_indices[valid_events]
+            event_targets = event_rows["execution_rejection_target"].to_numpy(int)
+            event_y = np.where(
+                event_targets > 0,
+                bars_low[event_indices] - 4 * pad,
+                bars_high[event_indices] + 7 * pad,
+            )
+            event_text = [
+                f"ENTRADA NO EJECUTADA<br>Señal: {'LONG' if target > 0 else 'SHORT'}"
+                f"<br>Motivo: {reason}"
+                for target, reason in zip(
+                    event_targets, event_rows["execution_rejection"].astype(str)
+                )
+            ]
+            fig.add_trace(_marker_trace(
+                _x_ms(event_rows["execution_rejection_time"]), event_y, "entrada bloqueada",
+                "circle-x", "#ff7043", 11, text=event_text,
+            ), row=r, col=1)
     for mask, y, symbol, color, label in (
         (adx_flags, bars_high + 2 * pad, "x", ADX_EXIT_COLOR, "salida ADX"),
         (weak_flags, bars_high + 3 * pad, "diamond", WEAK_EXIT_COLOR, "salida weakening"),
@@ -648,6 +766,46 @@ def build_backtest_figure(
     # -- Trades (conectores y niveles fusionados) --------------------------
     if trades is not None and not trades.empty:
         spans = _position_spans(trades)
+        position_stats_by_id = positions_from_trades(trades).set_index("position_id")
+
+        def _trade_detail_text(trade, entry: bool = False) -> str:
+            risk = float(getattr(trade, "position_risk", 0.0) or 0.0)
+            pnl = float(getattr(trade, "pnl_net", 0.0) or 0.0)
+            r_value = pnl / risk if risk > 0 else None
+            position_r = position_stats_by_id.loc[trade.position_id, "r_multiple"]
+            position_r_text = (
+                f"{float(position_r):+.3f}R" if pd.notna(position_r) else "n/d"
+            )
+            initial_qty = float(getattr(
+                trade, "position_initial_quantity", getattr(trade, "quantity", 0.0)
+            ) or 0.0)
+            base_qty = float(getattr(
+                trade, "quantity_without_entry_scaling", initial_qty
+            ) or 0.0)
+            mfi_mult = float(getattr(trade, "entry_mfi_multiplier", 1.0) or 1.0)
+            er_mult = float(getattr(trade, "entry_er_multiplier", 1.0) or 1.0)
+            adaptive_mult = float(getattr(trade, "entry_adaptive_multiplier", 1.0) or 1.0)
+            size_mult = float(getattr(
+                trade, "entry_size_multiplier", mfi_mult * er_mult * adaptive_mult
+            ) or 1.0)
+            sizing = (
+                f"<br>Riesgo inicial: {risk:,.2f}"
+                f"<br>Cantidad inicial: {initial_qty:,.6g}"
+                f"<br>Cantidad sin MFI/ER: {base_qty:,.6g}"
+                f"<br>Multiplicadores MFI×{mfi_mult:.3f} · ER×{er_mult:.3f}"
+                f" · adaptativo×{adaptive_mult:.3f} · total×{size_mult:.3f}"
+            )
+            if entry:
+                return sizing
+            fees = float(getattr(trade, "fees", 0.0) or 0.0)
+            gross = float(getattr(trade, "pnl_gross", 0.0) or 0.0)
+            r_text = f"{r_value:+.3f}R" if r_value is not None else "n/d"
+            return (
+                f"<br>Cantidad del tramo: {float(trade.quantity):,.6g}"
+                f"<br>PnL bruto: {gross:+,.2f} · comisiones: {fees:,.2f}"
+                f"<br>PnL neto: {pnl:+,.2f} · R tramo: {r_text} · R posición: {position_r_text}"
+                + sizing
+            )
 
         for won, color in ((True, UP_COLOR), (False, DOWN_COLOR)):
             xs, ys = [], []
@@ -669,12 +827,14 @@ def build_backtest_figure(
             if win_start is not None:
                 sub = sub[(sub["entry_time"] >= win_start) & (sub["entry_time"] < win_end)]
             if not sub.empty:
-                texts = [
-                    f"ENTRADA {s}<br>#{int(p)} · {t:%Y-%m-%d %H:%M}<br>precio {pr:,.4f}"
-                    for s, p, t, pr in zip(
-                        sub["side"], sub["position_id"], sub["entry_time"], sub["entry_price"]
+                texts = []
+                for trade in sub.itertuples():
+                    texts.append(
+                        f"ENTRADA {trade.side}<br>#{int(trade.position_id)} · "
+                        f"{trade.entry_time:%Y-%m-%d %H:%M}<br>"
+                        f"precio {trade.entry_price:,.4f}"
+                        f"{_trade_detail_text(trade, entry=True)}"
                     )
-                ]
                 fig.add_trace(_marker_trace(_x_ms(sub["entry_time"]), sub["entry_price"],
                                             f"entrada {side}", symbol, color, 13, text=texts),
                               row=r, col=1)
@@ -686,7 +846,7 @@ def build_backtest_figure(
             if not sub.empty:
                 texts = [
                     f"SALIDA {t.side} · {t.reason}<br>{t.exit_time:%Y-%m-%d %H:%M}<br>"
-                    f"precio {t.exit_price:,.4f}<br>PnL {t.pnl_net:+,.2f}"
+                    f"precio {t.exit_price:,.4f}{_trade_detail_text(t)}"
                     for t in sub.itertuples()
                 ]
                 fig.add_trace(_marker_trace(_x_ms(sub["exit_time"]), sub["exit_price"],
@@ -701,7 +861,7 @@ def build_backtest_figure(
         if not touch.empty:
             touch_texts = [
                 f"SALIDA {t.side} · {t.reason}<br>{t.exit_time:%Y-%m-%d %H:%M}<br>"
-                f"precio {t.exit_price:,.4f}<br>PnL {t.pnl_net:+,.2f}"
+                f"precio {t.exit_price:,.4f}{_trade_detail_text(t)}"
                 for t in touch.itertuples()
             ]
             fig.add_trace(_marker_trace(_x_ms(touch["exit_time"]), touch["exit_price"],
@@ -728,9 +888,6 @@ def build_backtest_figure(
                     showlegend=True, line=dict(color=color, width=1, dash=dash),
                     hovertemplate=f"{name} %{{y:,.4f}}<extra></extra>"), row=r, col=1)
 
-        if cfg.stop_loss_pct > 0:
-            _level_trace("stop-loss", STOP_COLOR, "solid",
-                         lambda s, sign: s["entry_price"] * (1 - sign * cfg.stop_loss_pct))
         if cfg.partial_tp_enabled and cfg.partial_tp_r > 0 and cfg.stop_loss_pct > 0:
             _level_trace(f"TP {cfg.partial_tp_r:g}R", TARGET_COLOR, "dash",
                          lambda s, sign: s["entry_price"] * (1 + sign * cfg.partial_tp_r * cfg.stop_loss_pct))
@@ -752,8 +909,30 @@ def build_backtest_figure(
         if cfg.partial_tp7_r > 0 and cfg.stop_loss_pct > 0:
             _level_trace(f"TP7 {cfg.partial_tp7_r:g}R", TARGET_COLOR, "longdash",
                          lambda s, sign: s["entry_price"] * (1 + sign * cfg.partial_tp7_r * cfg.stop_loss_pct))
-        if cfg.move_stop_to_breakeven:
-            _level_trace("breakeven", BREAKEVEN_COLOR, "dot", lambda s, sign: s["entry_price"])
+
+    if equity is not None and not equity.empty and "effective_stop_price" in equity:
+        stop_values = equity["effective_stop_price"].to_numpy(float)
+        stop_mask = np.isfinite(stop_values)
+        if stop_mask.any():
+            stop_step = np.where(stop_mask, stop_values, np.nan)
+            fig.add_trace(
+                _line_trace(_x_ms(equity["timestamp"]), stop_step, "stop efectivo",
+                            STOP_COLOR, width=1.5, shape="hv"),
+                row=r, col=1, secondary_y=False,
+            )
+        if {"breakeven_activated", "breakeven_price"}.issubset(equity.columns):
+            be_mask = _flag(equity["breakeven_activated"]).copy()
+            be_prices = equity["breakeven_price"].to_numpy(float)
+            be_mask &= np.isfinite(be_prices)
+            if be_mask.any():
+                be_text = [
+                    f"BREAKEVEN ACTIVADO<br>{ts:%Y-%m-%d %H:%M}<br>stop efectivo {price:,.4f}"
+                    for ts, price in zip(equity.loc[be_mask, "timestamp"], be_prices[be_mask])
+                ]
+                fig.add_trace(_marker_trace(
+                    _x_ms(equity.loc[be_mask, "timestamp"]), be_prices[be_mask],
+                    "activación breakeven", "diamond", BREAKEVEN_COLOR, 11, text=be_text,
+                ), row=r, col=1, secondary_y=False)
 
     # -- Panel MACD --------------------------------------------------------
     if "macd" in row:
@@ -789,12 +968,6 @@ def build_backtest_figure(
 
     # -- Paneles ADX de entrada (uno por timeframe) -------------------------
     adx_colors = (NEUTRAL_COLOR, "#ffca28", "#ab47bc", "#26a69a")
-    entry_adx_series = [
-        (timeframe, f"adx_entry_{timeframe}" if f"adx_entry_{timeframe}" in signals else "adx_entry")
-        for timeframe in cfg.entry_adx_timeframes
-    ]
-    if not entry_adx_series:
-        entry_adx_series = [(None, "adx_entry")]
     for panel_idx, (timeframe, column) in enumerate(entry_adx_series):
         panel_name = f"adx_entry_tf_{panel_idx}"
         if panel_name not in row:
@@ -940,9 +1113,28 @@ def build_backtest_figure(
     # -- Panel target ------------------------------------------------------
     if "target" in row:
         rr = row["target"]
-        fig.add_trace(_line_trace(sig_x, signals["target"].to_numpy(float), "target", FAST_COLOR,
-                                  width=1.3, shape="hv"), row=rr, col=1)
-        fig.update_yaxes(title_text="señal", tickvals=[-1, 0, 1], ticktext=["short", "flat", "long"],
+        if signals is not None and "target" in signals:
+            fig.add_trace(_line_trace(
+                sig_x, signals["target"].to_numpy(float), "señal objetivo (filtrada)",
+                FAST_COLOR, width=1.3, shape="hv",
+            ), row=rr, col=1)
+        if (cfg.streak_trend_only and signals is not None and "trend_bias" in signals
+                and np.isfinite(signals["trend_bias"].to_numpy(float)).any()):
+            fig.add_trace(_line_trace(
+                sig_x, signals["trend_bias"].to_numpy(float),
+                "sesgo tendencia (tras pérdida)", "#ab47bc",
+                width=1.1, dash="dot", shape="hv",
+            ), row=rr, col=1)
+        if (equity is not None and not equity.empty and "position_side" in equity):
+            actual_position = equity["position_side"].map(
+                {"SHORT": -1, "FLAT": 0, "LONG": 1}
+            ).fillna(0).to_numpy(float)
+            fig.add_trace(_line_trace(
+                _x_ms(equity["timestamp"]), actual_position, "posición real",
+                "#29b6f6", width=1.6, shape="hv",
+            ), row=rr, col=1)
+        fig.update_yaxes(title_text="señal / posición", tickvals=[-1, 0, 1],
+                         ticktext=["short", "flat", "long"],
                          row=rr, col=1)
 
     # -- Timeframes de ADX (uno por timeframe configurado) ----------------
@@ -1022,19 +1214,64 @@ def build_backtest_figure(
                               row=rr, col=1)
         fig.update_yaxes(title_text="equity", row=rr, col=1)
 
+    if "drawdown" in row:
+        rr = row["drawdown"]
+        drawdown = equity["drawdown_pct"].to_numpy(float)
+        fig.add_trace(_line_trace(
+            _x_ms(equity["timestamp"]), drawdown, "drawdown", DOWN_COLOR,
+            width=1.3, fill="tozeroy", fillcolor="rgba(239,83,80,0.18)",
+        ), row=rr, col=1)
+        fig.add_hline(y=0, line=dict(color="#90a4ae", width=0.9, dash="dash"),
+                      row=rr, col=1)
+        fig.update_yaxes(title_text="drawdown %", ticksuffix="%", row=rr, col=1)
+
+    if "summary" in row:
+        rr = row["summary"]
+        labels = [item[0] for item in summary_rows]
+        pnl_values = [item[1] for item in summary_rows]
+        detail = [[item[2], item[3]] for item in summary_rows]
+        colors = [UP_COLOR if value >= 0 else DOWN_COLOR for value in pnl_values]
+        fig.add_trace(go.Bar(
+            x=pnl_values, y=labels, orientation="h", name="PnL neto",
+            marker=dict(color=colors, opacity=0.88),
+            customdata=detail,
+            hovertemplate=(
+                "%{y}<br>PnL neto: %{x:+,.2f}<br>"
+                "tramos: %{customdata[0]} · posiciones: %{customdata[1]}<extra></extra>"
+            ),
+        ), row=rr, col=1)
+        fig.add_vline(x=0, line=dict(color="#90a4ae", width=0.9, dash="dash"),
+                      row=rr, col=1)
+        fig.update_xaxes(title_text="PnL neto", row=rr, col=1, zeroline=False)
+        fig.update_yaxes(title_text="lado / motivo de salida", row=rr, col=1,
+                         categoryorder="array", categoryarray=labels)
+
     # -- Layout ------------------------------------------------------------
-    for name in (["macd", "atr", "mfi", "er", "target"] + adx_entry_panels):
+    for name in (["macd", "atr", "mfi", "er", "target", "equity", "drawdown"]
+                 + adx_entry_panels):
         if name in row:
             fig.update_xaxes(matches="x", row=row[name], col=1)
-    fig.update_xaxes(rangeslider_visible=False, type="date")
+    for name in panels:
+        fig.update_xaxes(
+            rangeslider_visible=False,
+            type="linear" if name == "summary" else "date",
+            row=row[name],
+            col=1,
+        )
 
     base_title = title or (f"{source or 'backtest'} · {cfg.timeframe} · {len(bars):,} velas · "
                            f"{trade_count} posiciones")
+    base_height = max(_MIN_HEIGHT, _PANEL_HEIGHT * len(panels))
+    if summary_rows:
+        base_height = max(
+            base_height,
+            _PANEL_HEIGHT * (len(panels) - 1) + 180 + 30 * len(summary_rows),
+        )
     fig.update_layout(
-        title=base_title,
-        template="plotly_dark", height=max(_MIN_HEIGHT, _PANEL_HEIGHT * len(panels)),
-        margin=dict(l=60, r=20, t=80, b=40), hovermode="closest",
-        legend=dict(orientation="h", y=1.02,
+        title=dict(text=base_title, x=0.5, xanchor="center"),
+        template="plotly_dark", height=base_height, autosize=True,
+        margin=dict(l=84, r=84, t=90, b=50), hovermode="closest",
+        legend=dict(orientation="h", x=0.5, xanchor="center", y=1.02,
                     title=dict(text="● entrada · ■ salida")), bargap=0.15,
     )
 
@@ -1129,13 +1366,18 @@ def _write_paginated_backtest_html(
     .pager-button:disabled {{ color:#637282; cursor:not-allowed; opacity:.62; }}
     .page-label {{ min-width:10rem; padding:0 .35rem; color:#c8d4df; text-align:center;
                    font-size:.82rem; font-variant-numeric:tabular-nums; }}
-    main {{ padding:1rem clamp(.65rem,2vw,1.5rem) 1.5rem; }}
+    main {{ display:flex; justify-content:center; width:100%;
+            padding:1rem clamp(.65rem,2vw,1.5rem) 1.5rem; }}
     .chart-shell {{
-      width:100%; overflow:hidden; border:1px solid var(--border); border-radius:.85rem;
+      display:block; width:100%; max-width:1800px; margin-inline:auto; overflow:hidden;
+      border:1px solid var(--border); border-radius:.85rem;
       background:var(--surface); box-shadow:0 18px 45px rgba(0,0,0,.22);
     }}
-    #chart {{ width:100%; min-height:75vh; }}
-    #chart .js-plotly-plot, #chart .plot-container, #chart .svg-container {{
+    #chart {{ display:block; width:100%; min-height:75vh; margin:0 auto; }}
+    #chart .js-plotly-plot {{
+      display:block !important; width:100% !important; margin:0 auto !important;
+    }}
+    #chart .plot-container, #chart .svg-container {{
       width:100% !important;
     }}
     @media (max-width:700px) {{

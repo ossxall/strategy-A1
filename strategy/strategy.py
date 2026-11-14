@@ -254,12 +254,37 @@ class EMACrossStrategy:
         # Usar la línea principal MACD, no la línea de señal ni el histograma.
         macd_line = self._macd_line(bars, raw)
         prev_fast, prev_slow = np.r_[np.nan, fast[:-1]], np.r_[np.nan, slow[:-1]]
-        up = (fast > slow) & (prev_fast <= prev_slow)
-        down = (fast < slow) & (prev_fast >= prev_slow)
+        raw_up = (fast > slow) & (prev_fast <= prev_slow)
+        raw_down = (fast < slow) & (prev_fast >= prev_slow)
+        up, down = raw_up.copy(), raw_down.copy()
         valid = np.isfinite(fast) & np.isfinite(slow) & np.isfinite(prev_fast) & np.isfinite(prev_slow)
+        unconfirmed_up = np.zeros(len(bars), dtype=bool)
+        unconfirmed_down = np.zeros(len(bars), dtype=bool)
         if cfg.confirm_bars:
+            for raw_crosses, side_ok, rejected in (
+                (raw_up, fast > slow, unconfirmed_up),
+                (raw_down, fast < slow, unconfirmed_down),
+            ):
+                for cross_index in np.flatnonzero(raw_crosses):
+                    end = cross_index + cfg.confirm_bars
+                    if end >= len(bars) or not side_ok[cross_index : end + 1].all():
+                        rejected[cross_index] = True
             up = confirmed_crosses(up, fast > slow, cfg.confirm_bars)
             down = confirmed_crosses(down, fast < slow, cfg.confirm_bars)
+        candidate_up, candidate_down = up.copy(), down.copy()
+        rejected_long_reasons: list[list[str]] = [[] for _ in range(len(bars))]
+        rejected_short_reasons: list[list[str]] = [[] for _ in range(len(bars))]
+
+        def record_rejection(long_mask: np.ndarray, short_mask: np.ndarray, reason: str) -> None:
+            for index in np.flatnonzero(long_mask):
+                rejected_long_reasons[index].append(reason)
+            for index in np.flatnonzero(short_mask):
+                rejected_short_reasons[index].append(reason)
+
+        record_rejection(candidate_up & ~valid, candidate_down & ~valid, "indicadores no disponibles")
+        record_rejection(
+            unconfirmed_up, unconfirmed_down, "confirmación EMA no completada"
+        )
         entry_adx_values = (
             adx(bars, cfg.entry_adx_len, cfg.entry_adx_len)
             if cfg.entry_adx_enabled
@@ -317,6 +342,11 @@ class EMACrossStrategy:
                 cfg.entry_rsi_divergence_lookback,
             )
             # Divergencia alcista (+) anticipa subida → bloquea SHORT; bajista (-) anticipa caída → bloquea LONG.
+            record_rejection(
+                candidate_up & entry_rsi_bear_divergence_blocked,
+                candidate_down & entry_rsi_bull_divergence_blocked,
+                "divergencia RSI",
+            )
             up &= ~entry_rsi_bear_divergence_blocked
             down &= ~entry_rsi_bull_divergence_blocked
         else:
@@ -326,18 +356,41 @@ class EMACrossStrategy:
             allowed = np.ones(len(bars), dtype=bool)
             for values in entry_adx_by_timeframe.values():
                 allowed &= np.isfinite(values) & (values > cfg.entry_adx_min)
+            record_rejection(candidate_up & ~allowed, candidate_down & ~allowed, "ADX")
             up, down = up & allowed, down & allowed
+        if cfg.entry_atr_enabled:
+            record_rejection(
+                candidate_up & ~atr_allowed,
+                candidate_down & ~atr_allowed,
+                "ATR fuera de rango",
+            )
         up, down = up & atr_allowed, down & atr_allowed
-        up, down = up & (macd_line > 0), down & (macd_line < 0)
+        macd_up_allowed = macd_line > 0
+        macd_down_allowed = macd_line < 0
+        record_rejection(
+            candidate_up & ~macd_up_allowed,
+            candidate_down & ~macd_down_allowed,
+            "MACD",
+        )
+        up, down = up & macd_up_allowed, down & macd_down_allowed
         if cfg.entry_price_ema_filter_enabled:
             # Tras un cruce alcista no se entra si el precio queda por debajo
             # de ambas EMAs; tras un bajista, no se entra si queda por encima.
             price = bars.close.to_numpy(float)
-            up &= ~((price < fast) & (price < slow))
-            down &= ~((price > fast) & (price > slow))
+            long_price_blocked = (price < fast) & (price < slow)
+            short_price_blocked = (price > fast) & (price > slow)
+            record_rejection(
+                candidate_up & long_price_blocked,
+                candidate_down & short_price_blocked,
+                "precio al lado incorrecto de las EMAs",
+            )
+            up &= ~long_price_blocked
+            down &= ~short_price_blocked
         bias = self.trend_bias(bars) if cfg.streak_trend_only else None
         up &= valid
         down &= valid
+        long_rejected = (candidate_up & ~up) | unconfirmed_up
+        short_rejected = (candidate_down & ~down) | unconfirmed_down
         output = {
             "ema_fast": fast, "ema_slow": slow, "macd_line": macd_line,
             "adx_entry": entry_adx,
@@ -350,6 +403,16 @@ class EMACrossStrategy:
             "entry_rsi_bear_divergence_blocked": entry_rsi_bear_divergence_blocked,
             # Alias histórico del filtro LONG (ahora la divergencia bajista bloquea LONG).
             "entry_rsi_divergence_blocked": entry_rsi_bear_divergence_blocked,
+            "cross_up_candidate": candidate_up | unconfirmed_up,
+            "cross_down_candidate": candidate_down | unconfirmed_down,
+            "cross_up_rejected": long_rejected,
+            "cross_down_rejected": short_rejected,
+            "entry_rejection_reasons_long": [
+                "; ".join(reasons) for reasons in rejected_long_reasons
+            ],
+            "entry_rejection_reasons_short": [
+                "; ".join(reasons) for reasons in rejected_short_reasons
+            ],
             "cross_up": up, "cross_down": down, "valid": valid,
             "trend_bias": bias if bias is not None else np.zeros(len(bars), int),
             "target": np.select([up, down], [1, -1], default=0),
@@ -479,6 +542,13 @@ class Backtester:
         self.opened: list[dict] = []
         self.trade_id = self.position_id = 0
         self.eq_time, self.eq_cash, self.eq_value, self.eq_side, self.eq_qty = [], [], [], [], []
+        self.eq_signal_time, self.eq_signal_target, self.eq_execution_rejection = [], [], []
+        self.eq_execution_rejection_time, self.eq_execution_rejection_target = [], []
+        self.eq_stop_price, self.eq_entry_price, self.eq_position_id = [], [], []
+        self.eq_breakeven_activated, self.eq_breakeven_price = [], []
+        self._breakeven_activated_this_bar = False
+        self._breakeven_activation_price = np.nan
+        self._stop_trigger_price_this_bar = np.nan
         # Estado del límite mensual y pnl acumulado de la posición abierta.
         self.halt_until: Optional[pd.Timestamp] = None
         self._bar_index = -1
@@ -508,13 +578,18 @@ class Backtester:
             return
         pct_sl = self.cfg.stop_loss_pct
         risk_unit = self._risk_per_unit(side, price, pct_sl) if pct_sl > 0 else 0.0
-        by_risk = (
-            self.cash * self.cfg.risk_pct * self._risk_multiplier()
-            * self._entry_mfi_risk_multiplier(side) * self._entry_er_risk_multiplier()
-            / risk_unit
+        adaptive_multiplier = self._risk_multiplier()
+        mfi_multiplier = self._entry_mfi_risk_multiplier(side)
+        er_multiplier = self._entry_er_risk_multiplier()
+        unscaled_by_risk = (
+            self.cash * self.cfg.risk_pct * adaptive_multiplier / risk_unit
             if risk_unit > 0 else np.inf
         )
+        by_risk = (
+            unscaled_by_risk * mfi_multiplier * er_multiplier
+        )
         by_lev = self.cash * self.cfg.max_leverage / price
+        quantity_without_entry_scaling = min(unscaled_by_risk, by_lev)
         qty_total = min(by_risk, by_lev)
         if not np.isfinite(qty_total) or qty_total <= 0:
             return
@@ -535,6 +610,11 @@ class Backtester:
             breakeven=False,
             partial_done=False,
             partial2_done=False,
+            entry_mfi_multiplier=mfi_multiplier,
+            entry_er_multiplier=er_multiplier,
+            entry_adaptive_multiplier=adaptive_multiplier,
+            entry_size_multiplier=adaptive_multiplier * mfi_multiplier * er_multiplier,
+            quantity_without_entry_scaling=quantity_without_entry_scaling,
             partial3_done=False,
             partial4_done=False,
             partial5_done=False,
@@ -568,7 +648,13 @@ class Backtester:
         self.trades.append(Trade(self.trade_id, pos.position_id, "LONG" if side == 1 else "SHORT",
             pos.entry_time, ts, pos.entry_price, price, qty, gross, fees, net,
             net / (pos.entry_price * qty) * 100 if pos.entry_price * qty else 0.0,
-            reason, pos.risk_amount))
+            reason, pos.risk_amount,
+            position_initial_quantity=pos.initial_quantity,
+            quantity_without_entry_scaling=pos.quantity_without_entry_scaling,
+            entry_mfi_multiplier=pos.entry_mfi_multiplier,
+            entry_er_multiplier=pos.entry_er_multiplier,
+            entry_adaptive_multiplier=pos.entry_adaptive_multiplier,
+            entry_size_multiplier=pos.entry_size_multiplier))
         remaining = pos.quantity - qty
         if percent >= 100 or remaining <= max(1e-12, pos.initial_quantity * 1e-12):
             self.position = None
@@ -807,20 +893,24 @@ class Backtester:
                 if pos_after is not None:
                     pos_after.partial_done = True
                     if cfg.move_stop_to_breakeven:
-                        pos_after.breakeven = True
+                        if not pos_after.breakeven:
+                            pos_after.breakeven = True
+                            self._breakeven_activated_this_bar = True
+                            self._breakeven_activation_price = pos_after.entry_price
     def _stop(self, i: int) -> bool:
         pos = self.position
         if pos is None or pos.stop_pct <= 0: return False
         stop = pos.entry_price if pos.breakeven else self._stop_price(pos.side, pos.entry_price, pos.stop_pct)
         hit = self.l[i] <= stop if pos.side == 1 else self.h[i] >= stop
         if not hit: return False
+        self._stop_trigger_price_this_bar = stop
         fill = min(self.o[i], stop) if pos.side == 1 else max(self.o[i], stop)
         reason = "BREAKEVEN" if pos.breakeven else f"STOP_LOSS_{pos.stop_pct*100:.2f}%"
         self.close_position(100, fill, self.times[i], reason)
         if self.verbose: print(f"[STOP] {self.times[i]} fill={fill:.8f}", flush=True)
         return True
 
-    def _execute_target(self, i: int, target: int, signal_bias: int = 0):
+    def _execute_target(self, i: int, target: int, signal_bias: int = 0) -> str | None:
         if self.position is not None and self.position.side != target:
             self.close_position(100, self.o[i], self.times[i], CROSS_REASON)
         if self.position is None:
@@ -832,8 +922,9 @@ class Backtester:
                 if self.verbose:
                     print(f"[RACHA] {self.times[i]} reversión {target:+d} "
                           f"contra tendencia {signal_bias:+d}: ignorada", flush=True)
-                return
+                return f"filtro de tendencia (sesgo {signal_bias:+d})"
             self.open_position(target, self.o[i], self.times[i])
+        return None
 
     def _equity_value(self, close: float) -> float:
         """Equity mark-to-market al precio ``close`` (caja + posición a precio de liquidación)."""
@@ -844,12 +935,37 @@ class Backtester:
             value += (liq - pos.entry_price) * pos.quantity * pos.side - self._fee(liq * pos.quantity)
         return value
 
-    def _mark(self, ts: pd.Timestamp, close: float):
+    def _mark(self, ts: pd.Timestamp, close: float, signal_time: pd.Timestamp | None = None,
+              signal_target: int = 0, execution_rejection: str = "",
+              execution_rejection_time: pd.Timestamp | None = None,
+              execution_rejection_target: int = 0):
         pos = self.position
         value = self._equity_value(close)
         self.eq_time.append(ts); self.eq_cash.append(self.cash); self.eq_value.append(value)
         self.eq_side.append("FLAT" if pos is None else ("LONG" if pos.side == 1 else "SHORT"))
         self.eq_qty.append(0.0 if pos is None else pos.quantity)
+        self.eq_signal_time.append(signal_time)
+        self.eq_signal_target.append(signal_target)
+        self.eq_execution_rejection.append(execution_rejection)
+        self.eq_execution_rejection_time.append(execution_rejection_time)
+        self.eq_execution_rejection_target.append(execution_rejection_target)
+        effective_stop = (
+            self._stop_price(pos.side, pos.entry_price, pos.stop_pct)
+            if pos is not None and pos.stop_pct > 0 and not pos.breakeven
+            else pos.entry_price if pos is not None and pos.breakeven else np.nan
+        )
+        self.eq_stop_price.append(
+            self._stop_trigger_price_this_bar
+            if np.isfinite(self._stop_trigger_price_this_bar)
+            else effective_stop
+        )
+        self.eq_entry_price.append(pos.entry_price if pos is not None else np.nan)
+        self.eq_position_id.append(pos.position_id if pos is not None else np.nan)
+        self.eq_breakeven_activated.append(self._breakeven_activated_this_bar)
+        self.eq_breakeven_price.append(self._breakeven_activation_price)
+        self._breakeven_activated_this_bar = False
+        self._breakeven_activation_price = np.nan
+        self._stop_trigger_price_this_bar = np.nan
 
     def run(self) -> tuple[pd.DataFrame, pd.DataFrame]:
         n, cfg = len(self.bars), self.cfg
@@ -877,6 +993,9 @@ class Backtester:
         month_start_equity = cfg.initial_capital
         for i in range(n):
             self._bar_index = i
+            execution_reasons: list[str] = []
+            rejection_time: pd.Timestamp | None = None
+            rejection_target = 0
             # Reinicio del límite mensual en cada mes calendario.
             key = (self.times[i].year, self.times[i].month)
             if key != month_key:
@@ -885,10 +1004,15 @@ class Backtester:
                 month_start_equity = self._equity_value(self.c[i - 1]) if i else cfg.initial_capital
             # 1) Ejecutar target/exit pendientes (decididos al cierre anterior)
             if self.pending_target is not None:
+                pending_target = self.pending_target
                 signal_bias = (
                     int(self.signals["trend_bias"].iloc[i - 1]) if i > 0 else 0
                 )
-                self._execute_target(i, self.pending_target, signal_bias)
+                rejection = self._execute_target(i, pending_target, signal_bias)
+                if rejection is not None:
+                    execution_reasons.append(rejection)
+                    rejection_time = self.times[i - 1] if i > 0 else self.times[i]
+                    rejection_target = pending_target
                 self.pending_target = None
                 self.pending_exit = None
             elif self.pending_exit is not None:
@@ -933,34 +1057,68 @@ class Backtester:
                           f"-{cfg.monthly_loss_limit_pct:g}% alcanzado; sin entradas hasta "
                           f"{scope}", flush=True)
 
-            if not stop_hit and bool(self.signals["valid"].iloc[i]):
-                target = int(self.signals["target"].iloc[i])
+            signal_valid = bool(self.signals["valid"].iloc[i])
+            signal_target = int(self.signals["target"].iloc[i]) if signal_valid else 0
+            target = signal_target
+            if stop_hit and signal_target:
+                execution_reasons.append("stop prioritario en la misma vela")
+                rejection_time = self.times[i]
+                rejection_target = signal_target
+            elif not stop_hit and signal_valid:
+                rejected_before_execution = False
                 if cfg.entry_atr_enabled and not self.entry_atr_allowed[i]:
+                    execution_reasons.append("filtro ATR")
                     target = 0
+                    rejected_before_execution = True
                 if target == 1 and cfg.entry_rsi_divergence_enabled \
                         and self.entry_rsi_bear_divergence_blocked[i]:
+                    execution_reasons.append("divergencia RSI")
                     target = 0
+                    rejected_before_execution = True
                 if target == -1 and cfg.entry_rsi_divergence_enabled \
                         and self.entry_rsi_bull_divergence_blocked[i]:
+                    execution_reasons.append("divergencia RSI")
                     target = 0
-                if target == 1 and not cfg.allow_long: target = 0
-                if target == -1 and not cfg.allow_short: target = 0
+                    rejected_before_execution = True
+                if target == 1 and not cfg.allow_long:
+                    execution_reasons.append("LONG deshabilitado")
+                    target = 0
+                    rejected_before_execution = True
+                if target == -1 and not cfg.allow_short:
+                    execution_reasons.append("SHORT deshabilitado")
+                    target = 0
+                    rejected_before_execution = True
+                if rejected_before_execution:
+                    rejection_time = self.times[i]
+                    rejection_target = signal_target
                 current = self.position.side if self.position else 0
-                if target and target != current and not self.entries_blocked():
+                skip_exit_checks = False
+                if target and target != current and self.entries_blocked():
+                    execution_reasons.append("protección mensual")
+                    rejection_time = self.times[i]
+                    rejection_target = signal_target
+                elif target and target != current:
                     bias_val = int(self.signals["trend_bias"].iloc[i])
                     if cfg.streak_trend_only and self.streak_in_loss and bias_val != target:
                         # Tras una pérdida sólo se entra con la tendencia mayor.
+                        execution_reasons.append(
+                            f"filtro de tendencia (sesgo {bias_val:+d})"
+                        )
+                        rejection_time = self.times[i]
+                        rejection_target = signal_target
+                        skip_exit_checks = True
                         if self.verbose:
                             print(f"[RACHA] {self.times[i]} señal {target:+d} "
-                                  f"contra tendencia {int(self.signals['trend_bias'].iloc[i]):+d}: ignorada",
+                                  f"contra tendencia {bias_val:+d}: ignorada",
                                   flush=True)
                     else:
                         self.pending_target = target
-                elif self.position is not None and self.weak_exit[i]:
+                        skip_exit_checks = True
+                if not skip_exit_checks and self.position is not None and self.weak_exit[i]:
                     self.pending_exit = (weak_reason, cfg.ema_weakening_exit_pct)
-                elif self.position is not None and self.adx_exit[i]:
+                elif not skip_exit_checks and self.position is not None and self.adx_exit[i]:
                     self.pending_exit = (adx_reason, cfg.adx_exit_pct)
-                elif self.position is not None:
+                elif not skip_exit_checks and self.position is not None:
                     # Primero se atiende la divergencia RSI confirmada.
                     div_reason = self._rsi_divergence_reason(i)
                     if div_reason is not None:
@@ -977,7 +1135,13 @@ class Backtester:
                             self.position.volume_exit_done = True
                             self.pending_exit = (volume_reason, cfg.volume_exit_pct)
 
-            self._mark(self.times[i] + pd.Timedelta(cfg.timeframe), self.c[i])
+            self._mark(
+                self.times[i] + pd.Timedelta(cfg.timeframe), self.c[i],
+                signal_time=self.times[i], signal_target=signal_target,
+                execution_rejection="; ".join(execution_reasons),
+                execution_rejection_time=rejection_time,
+                execution_rejection_target=rejection_target,
+            )
             if (i + 1) % max(1, n // 10) == 0 or i == n - 1:
                 print(f"[BACKTEST] {(i+1)/n:6.1%} | {i+1:,}/{n:,} velas | trades={len(self.trades)}", flush=True)
 
@@ -986,8 +1150,23 @@ class Backtester:
             self.close_position(100, self.c[-1], ts, "END_OF_DATA")
             self._mark(ts, self.c[-1])
         trades = pd.DataFrame([asdict(t) for t in self.trades]) if self.trades else empty_trades()
-        equity = pd.DataFrame({"timestamp": self.eq_time, "cash": self.eq_cash, "equity": self.eq_value,
-                               "position_side": self.eq_side, "position_quantity": self.eq_qty})
+        equity = pd.DataFrame({
+            "timestamp": self.eq_time,
+            "cash": self.eq_cash,
+            "equity": self.eq_value,
+            "position_side": self.eq_side,
+            "position_quantity": self.eq_qty,
+            "signal_time": self.eq_signal_time,
+            "signal_target": self.eq_signal_target,
+            "execution_rejection": self.eq_execution_rejection,
+            "execution_rejection_time": self.eq_execution_rejection_time,
+            "execution_rejection_target": self.eq_execution_rejection_target,
+            "effective_stop_price": self.eq_stop_price,
+            "position_entry_price": self.eq_entry_price,
+            "position_id": self.eq_position_id,
+            "breakeven_activated": self.eq_breakeven_activated,
+            "breakeven_price": self.eq_breakeven_price,
+        })
         print(f"[BACKTEST] Finalizado en {time.perf_counter()-started:.2f}s | tramos={len(trades):,}", flush=True)
         return trades, equity
 

@@ -76,11 +76,14 @@ def test_losing_reversal_obeys_streak_trend_filter():
         entry_bar_index=0,
     )
 
-    trades, _ = engine.run()
+    trades, equity = engine.run()
 
     assert trades.pnl_net.tolist() == [-10.0]
     assert engine.streak_in_loss
     assert engine.position is None
+    assert equity.position_side.tolist() == ["LONG", "FLAT"]
+    assert "filtro de tendencia" in equity.execution_rejection.iloc[1]
+    assert equity.execution_rejection_time.iloc[1] == bars.index[0]
 
 
 def test_higher_timeframe_rsi_exit_is_aligned_as_a_single_event(monkeypatch):
