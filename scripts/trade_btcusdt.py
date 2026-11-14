@@ -18,7 +18,7 @@ LIVE_DIR = REPO_DIR / "live"
 if str(LIVE_DIR) not in sys.path:
     sys.path.insert(0, str(LIVE_DIR))
 
-from bot.binance_usdm import BinanceUsdmClient, response_data
+from bot.execution.binance_usdm import BinanceUsdmClient, response_data
 
 SYMBOL = "BTCUSDT"
 LEVERAGE = 10

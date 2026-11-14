@@ -12,8 +12,8 @@ el paquete desde el directorio live con `python -m bot`; no hay opciones CLI.
 - `events.py`: conversión de la ejecución del backtester a eventos live.
 - `health.py`: endpoints JSON de salud y sondeo en segundo plano de `signal.db`.
 - `app.py`: ciclo de polling y coordinación de los componentes.
-- `executor.py`: consumidor persistente de señales para USDⓈ-M Futures.
-- `binance_usdm.py`: adaptador del SDK oficial de Binance.
+- `execution/`: worker, adaptador de Binance y autopruebas offline de ejecución.
+- `executor.py`: ruta de compatibilidad del worker para consumidores existentes.
 - `__main__.py`: entrypoint sin opciones de CLI.
 
 La configuración operativa se toma de `live/.env` y de las variables de
@@ -67,7 +67,7 @@ contrato quedan rechazados y no generan órdenes.
 
 ## Executor USDⓈ-M Futures
 
-Compose ejecuta `python -m bot.executor`, pero **no envía órdenes por defecto**:
+Compose ejecuta `python -m bot.execution`, pero **no envía órdenes por defecto**:
 `BINANCE_TRADING_ENABLED=false`. Usa el SDK oficial
 `binance-sdk-derivatives-trading-usds-futures`; el entorno predeterminado es
 testnet. Producción requiere `BINANCE_ENVIRONMENT=production`,

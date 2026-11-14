@@ -95,7 +95,7 @@ services:
 
   executor:
     <<: *common
-    command: ["python", "-m", "bot.executor"]
+    command: ["python", "-m", "bot.execution"]
     volumes:
       - bot_data:/data
     depends_on:

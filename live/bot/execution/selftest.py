@@ -7,9 +7,9 @@ import time
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from ..storage import SignalStore
 from .binance_usdm import BinanceOrderNotFound
-from .executor import ExecutionWorker, ExecutorSettings
-from .storage import SignalStore
+from .worker import ExecutionWorker, ExecutorSettings
 
 
 class _ScenarioAPIError(RuntimeError):

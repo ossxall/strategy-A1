@@ -21,6 +21,7 @@ RUN rm -rf \
         /app/legacy/bot1/__pycache__ /app/legacy/bot1/.ruff_cache \
         /app/legacy/bot1/feed/__pycache__ \
         /app/legacy/bot1/bot/__pycache__ \
+        /app/legacy/bot1/bot/execution/__pycache__ \
         /app/legacy/strategy/__pycache__ /app/legacy/strategy/.ruff_cache \
     && mkdir -p /data
 

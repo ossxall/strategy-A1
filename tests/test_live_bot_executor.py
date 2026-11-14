@@ -3,9 +3,9 @@ from decimal import Decimal
 
 import pytest
 
-from live.bot.binance_usdm import BinanceOrderNotFound, BinanceUsdmClient
-from live.bot.executor import ExecutionWorker, ExecutorSettings
-from live.bot.executor_selftest import run_executor_self_tests
+from live.bot.execution.binance_usdm import BinanceOrderNotFound, BinanceUsdmClient
+from live.bot.execution.selftest import run_executor_self_tests
+from live.bot.execution.worker import ExecutionWorker, ExecutorSettings
 from live.bot.storage import SignalStore
 from strategy.config import Config
 
