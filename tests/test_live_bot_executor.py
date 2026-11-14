@@ -5,6 +5,8 @@ import pytest
 
 from live.bot.execution.binance_usdm import BinanceOrderNotFound, BinanceUsdmClient
 from live.bot.execution.selftest import run_executor_self_tests
+from live.bot.execution.test_mode import ExecutionTestMode
+from live.bot.execution.test_mode_policy import calculate_test_entry_quantity
 from live.bot.execution.worker import ExecutionWorker, ExecutorSettings
 from live.bot.storage import SignalStore
 from strategy.config import Config
@@ -766,7 +768,8 @@ def test_test_mode_runs_bounded_long_lifecycle_and_alternates_side(tmp_path):
             clock_ms=lambda: 1_000_000,
         )
 
-        worker.run_test_sequence()
+        test_mode = ExecutionTestMode(worker)
+        test_mode.run_sequence()
 
         assert [order["side"] for order in gateway.orders] == [
             "BUY", "SELL", "SELL",
@@ -777,7 +780,7 @@ def test_test_mode_runs_bounded_long_lifecycle_and_alternates_side(tmp_path):
         assert gateway.position_amt == pytest.approx(0.0)
         assert gateway.stops == {}
         assert gateway.leverage == 10
-        assert worker._test_next_side == "SHORT"
+        assert test_mode.next_side == "SHORT"
         assert [client_id[2:4] for client_id, _ in gateway.stop_placements] == [
             "sl", "be",
         ]
@@ -806,7 +809,7 @@ def test_test_mode_keeps_original_stop_if_breakeven_would_trigger(tmp_path):
             clock_ms=lambda: 1_000_000,
         )
 
-        worker.run_test_sequence()
+        ExecutionTestMode(worker).run_sequence()
 
         assert gateway.position_amt == pytest.approx(0.0)
         assert [client_id[2:4] for client_id, _ in gateway.stop_placements] == [
@@ -848,7 +851,7 @@ def test_test_mode_restores_original_stop_if_breakeven_order_is_rejected(tmp_pat
             clock_ms=lambda: 1_000_000,
         )
 
-        worker.run_test_sequence()
+        ExecutionTestMode(worker).run_sequence()
 
         assert gateway.position_amt == pytest.approx(0.0)
         assert [client_id[2:4] for client_id, _ in gateway.stop_placements] == [
@@ -889,7 +892,8 @@ def test_test_mode_refuses_minimum_quantity_over_margin_cap(tmp_path):
         worker._rules_cache["BTCUSDT"] = worker._symbol_rules("BTCUSDT")
 
         with pytest.raises(ValueError, match="límite es 11.00 USDT"):
-            worker._test_mode_entry_quantity(
+            calculate_test_entry_quantity(
+                worker._rules_cache["BTCUSDT"],
                 Decimal(100000), Decimal(100), Decimal(10)
             )
 
@@ -922,7 +926,8 @@ def test_test_mode_accepts_minimum_partial_order_within_eleven_usdt_cap(tmp_path
             "min_notional": Decimal(0),
         }
 
-        quantity = worker._test_mode_entry_quantity(
+        quantity = calculate_test_entry_quantity(
+            worker._rules_cache["BTCUSDT"],
             Decimal(52500), Decimal(100), Decimal(10)
         )
 
@@ -981,7 +986,7 @@ def test_test_mode_recovers_prepared_entry_after_confirming_not_found(tmp_path):
             clock_ms=lambda: 1_000_000,
         )
 
-        worker._recover_test_inflight()
+        ExecutionTestMode(worker).recover_inflight()
 
         state = store.get_execution_state(
             "test-account", normalized["signal_id"]
@@ -1049,7 +1054,7 @@ def test_test_mode_restores_stop_for_confirmed_fill_without_resubmitting(tmp_pat
             "tick_size": Decimal("0.1"),
         }
 
-        recovered = worker._recover_test_inflight()
+        recovered = ExecutionTestMode(worker).recover_inflight()
 
         assert recovered == {
             "position_id": normalized["position_id"],
@@ -1120,7 +1125,7 @@ def test_test_mode_reconciles_confirmed_fill_when_position_is_already_flat(tmp_p
             "tick_size": Decimal("0.1"),
         }
 
-        recovered = worker._recover_test_inflight()
+        recovered = ExecutionTestMode(worker).recover_inflight()
 
         assert recovered == {
             "position_id": normalized["position_id"],
@@ -1184,7 +1189,9 @@ def test_test_mode_recovers_filled_position_and_confirms_protective_stop(tmp_pat
             "test-account", "BTCUSDT"
         )
 
-        recovered = worker._recover_test_active_position(active[0], snapshot)
+        recovered = ExecutionTestMode(worker).recover_active_position(
+            active[0], snapshot
+        )
 
         assert recovered["position_id"] == normalized["position_id"]
         assert recovered["side"] == "LONG"
@@ -1282,7 +1289,7 @@ def test_test_mode_recovers_filled_partial_without_resubmitting_it(tmp_path):
             "tick_size": Decimal("0.1"),
         }
 
-        recovered = worker._recover_test_inflight()
+        recovered = ExecutionTestMode(worker).recover_inflight()
 
         assert recovered["position_id"] == entry["position_id"]
         assert recovered["side"] == "LONG"
@@ -1411,7 +1418,7 @@ def test_test_mode_recovers_filled_full_close_after_stop_was_already_removed(
             "tick_size": Decimal("0.1"),
         }
 
-        recovered = worker._recover_test_inflight()
+        recovered = ExecutionTestMode(worker).recover_inflight()
 
         assert recovered["already_flat"] is True
         assert recovered["partial_completed"] is True

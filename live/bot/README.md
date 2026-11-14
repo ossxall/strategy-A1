@@ -12,7 +12,13 @@ el paquete desde el directorio live con `python -m bot`; no hay opciones CLI.
 - `events.py`: conversión de la ejecución del backtester a eventos live.
 - `health.py`: endpoints JSON de salud y sondeo en segundo plano de `signal.db`.
 - `app.py`: ciclo de polling y coordinación de los componentes.
-- `execution/`: worker, adaptador de Binance y autopruebas offline de ejecución.
+- `execution/worker.py`: consumo y lógica de negocio compartida para las señales.
+- `execution/test_mode.py`: secuencia y recuperación del modo de prueba; envía
+  señales sintéticas por el mismo `run_once()` del worker.
+- `execution/test_mode_policy.py`: sizing y límites de seguridad propios del
+  modo de prueba.
+- `execution/selftest.py`: escenarios offline con gateway simulado.
+- `execution/binance_usdm.py`: adaptador del SDK oficial de Binance.
 - `executor.py`: ruta de compatibilidad del worker para consumidores existentes.
 - `__main__.py`: entrypoint sin opciones de CLI.
 
