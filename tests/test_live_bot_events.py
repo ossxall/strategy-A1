@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from live import bot as bot_module
+from live.bot import app as bot_app
 from live.bot import (
     SignalBot,
     SignalStore,
@@ -72,14 +72,15 @@ def make_config(**overrides):
 
 def test_bot_rejects_terminal_arguments_instead_of_parsing_cli():
     result = subprocess.run(
-        [sys.executable, str(Path(bot_module.__file__)), "--help"],
+        [sys.executable, "-m", "bot", "--help"],
+        cwd=Path(bot_app.__file__).resolve().parent.parent,
         capture_output=True,
         text=True,
         check=False,
     )
 
     assert result.returncode == 2
-    assert "no acepta argumentos de terminal" in result.stderr
+    assert "no acepta argumentos" in result.stderr
 
 
 def test_strategy_parameters_continue_to_load_from_environment(monkeypatch):
@@ -339,7 +340,7 @@ def test_live_only_includes_event_actionable_at_start_even_if_signal_bar_started
         "prepare_exits",
         lambda raw, frame: (None, None, None),
     )
-    monkeypatch.setattr(bot_module, "build_events", lambda *args: [event])
+    monkeypatch.setattr(bot_app, "build_events", lambda *args: [event])
 
     assert signal_bot.process_once() == 1
     assert store.inserted == [event]

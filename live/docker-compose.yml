@@ -4,7 +4,7 @@
 # - `feed` escribe feed.db (WAL); `bot` solo lee feed.db y escribe signal.db.
 # - Resiliencia: `restart: unless-stopped`, `init: true`, healthchecks reales
 #   y límites de log. El bot solo espera a que el contenedor del feed ARRANQUE
-#   (`service_started`), no a que esté sano: bot.py tolera que feed.db falte o
+#   (`service_started`), no a que esté sano: el paquete bot tolera que feed.db falte o
 #   esté vacío y reintenta cada POLL_SECONDS, así que nunca queda bloqueado si
 #   el feed tarda o queda unhealthy.
 #
@@ -21,8 +21,8 @@ name: blacker-bot1
 x-common: &common
   build:
     context: .
-    # Se pasa la estrategia como contexto extra para no enviar al daemon todo
-    # el directorio padre (incluye data/).
+    # Se pasan solo los paquetes de estrategia y bot; no se envía al daemon
+    # todo el directorio padre (incluye data/).
     additional_contexts:
       strategy: ../strategy
   image: blacker-bot1:latest
@@ -50,7 +50,7 @@ services:
     ports:
       - "127.0.0.1:8787:8787"
     environment:
-      # Absoluto para que el colector y bot.py compartan la base de datos.
+      # Absoluto para que el colector y el paquete bot compartan la base de datos.
       DB_PATH: /data/feed.db
       FEED_DB_PATH: /data/feed.db
       FEED_STATUS_HOST: 0.0.0.0
@@ -64,7 +64,7 @@ services:
 
   bot:
     <<: *common
-    command: ["python", "bot.py"]
+    command: ["python", "-m", "bot"]
     depends_on:
       feed:
         # Solo orden de arranque, no salud: el bot arranca igual y espera datos.

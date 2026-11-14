@@ -12,7 +12,7 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
 WORKDIR /app/legacy
 
-# Código del bot y paquete compartido de estrategia.
+# Lanzador del servicio, paquete del bot y paquete compartido de estrategia.
 COPY . /app/legacy/bot1/
 COPY --from=strategy . /app/legacy/strategy/
 
@@ -20,6 +20,7 @@ COPY --from=strategy . /app/legacy/strategy/
 RUN rm -rf \
         /app/legacy/bot1/__pycache__ /app/legacy/bot1/.ruff_cache \
         /app/legacy/bot1/feed/__pycache__ \
+        /app/legacy/bot1/bot/__pycache__ \
         /app/legacy/strategy/__pycache__ /app/legacy/strategy/.ruff_cache \
     && mkdir -p /data
 

@@ -7,7 +7,7 @@ o 1 (no sano). Solo usa la librería estándar, así que es rápido.
 
 Modos:
     python healthcheck.py feed   # feed.py: BD fresca y collector activo
-    python healthcheck.py bot    # bot.py: heartbeat reciente
+    python healthcheck.py bot    # paquete bot: heartbeat reciente
 
 Variables:
     FEED_DB_PATH           ruta a feed.db (mode feed; fallback DB_PATH)
