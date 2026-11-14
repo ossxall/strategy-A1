@@ -61,21 +61,29 @@ def calculate_metrics(trades: pd.DataFrame, equity: pd.DataFrame, capital: float
         peak_eq = trough_eq = capital
         peak_pct = trough_pct = sharpe = sortino = 0.0
     else:
+        equity = equity.sort_values("timestamp", kind="stable")
         eq = equity.equity.astype(float)
         final = float(eq.iloc[-1])
-        peak = eq.cummax()
+        peak = pd.Series(
+            np.maximum(eq.cummax().to_numpy(float), capital),
+            index=eq.index,
+        )
         dd = (eq / peak - 1) * 100
         max_dd = float(dd.min())
-        min_eq = float(eq.min())
-        min_pct = float((eq / capital - 1).min() * 100)
+        min_eq = min(float(eq.min()), float(capital))
+        min_pct = min(float((eq / capital - 1).min() * 100), 0.0)
         idx = int(np.argmin(dd.to_numpy()))
         peak_eq, trough_eq = float(peak.iloc[idx]), float(eq.iloc[idx])
         peak_pct, trough_pct = (peak_eq / capital - 1) * 100, (trough_eq / capital - 1) * 100
         daily = equity.set_index("timestamp").equity.resample("1D").last().dropna()
-        rets = daily.pct_change().dropna()
+        daily_changes = daily.pct_change().dropna().to_numpy(float)
+        rets = (
+            np.r_[float(daily.iloc[0]) / capital - 1, daily_changes]
+            if len(daily) else np.empty(0, dtype=float)
+        )
         vol = rets.std(ddof=1) if len(rets) > 1 else 0
         sharpe = float(rets.mean() / vol * math.sqrt(365)) if len(rets) > 1 and np.isfinite(vol) and vol > 0 else 0.0
-        downside = math.sqrt(float(np.mean(np.minimum(rets.to_numpy(float), 0) ** 2))) if len(rets) else 0
+        downside = math.sqrt(float(np.mean(np.minimum(rets, 0) ** 2))) if len(rets) else 0
         sortino = float(rets.mean() / downside * math.sqrt(365)) if downside > 0 else 0.0
     net = final - capital
     return {"initial_capital": capital, "final_equity": final, "net_pnl": net,
@@ -216,6 +224,10 @@ def _position_spans(trades: pd.DataFrame) -> list[dict]:
     spans = []
     for position_id, group in trades.sort_values("trade_id").groupby("position_id", sort=True):
         first, last = group.iloc[0], group.iloc[-1]
+        risk = float(first.get("position_risk", 0.0) or 0.0)
+        initial_quantity = float(first.get("position_initial_quantity", 0.0) or 0.0)
+        if not np.isfinite(initial_quantity) or initial_quantity <= 0:
+            initial_quantity = float(group["quantity"].sum())
         spans.append({
             "position_id": position_id,
             "side": str(first["side"]),
@@ -224,8 +236,63 @@ def _position_spans(trades: pd.DataFrame) -> list[dict]:
             "entry_price": float(first["entry_price"]),
             "exit_price": float(last["exit_price"]),
             "pnl_net": float(group["pnl_net"].sum()),
+            "risk_per_unit": risk / initial_quantity if risk > 0 and initial_quantity > 0 else None,
         })
     return spans
+
+
+def _executed_volume_exit_flags(
+    bars: pd.DataFrame,
+    trades: pd.DataFrame | None,
+    timeframe: str,
+) -> np.ndarray:
+    """Marca solo la vela que precede una salida real por volumen."""
+    flags = np.zeros(len(bars), dtype=bool)
+    if (
+        bars.empty
+        or trades is None
+        or trades.empty
+        or not {"reason", "exit_time"}.issubset(trades.columns)
+    ):
+        return flags
+
+    exits = trades[trades["reason"].astype(str).str.startswith("VOLUME_DECLINE")]
+    step = pd.Timedelta(timeframe)
+    for exit_time in exits["exit_time"]:
+        if pd.isna(exit_time):
+            continue
+        trigger_time = pd.Timestamp(exit_time) - step
+        index = bars.index.get_indexer([trigger_time])
+        if len(index) and index[0] >= 0:
+            flags[index[0]] = True
+    return flags
+
+
+def _configured_tp_levels(cfg: Config) -> list[tuple[str, float, str]]:
+    """Niveles TP que el motor puede ejecutar con la configuración actual."""
+    if not cfg.partial_tp_enabled or cfg.stop_loss_pct <= 0:
+        return []
+    return [
+        (label, multiple, dash)
+        for label, multiple, dash in (
+            ("TP", cfg.partial_tp_r, "dash"),
+            ("TP2", cfg.partial_tp2_r, "dashdot"),
+            ("TP3", cfg.partial_tp3_r, "dot"),
+            ("TP4", cfg.partial_tp4_r, "dashdot"),
+            ("TP5", cfg.partial_tp5_r, "longdash"),
+            ("TP6", cfg.partial_tp6_r, "longdashdot"),
+            ("TP7", cfg.partial_tp7_r, "longdash"),
+        )
+        if multiple > 0
+    ]
+
+
+def _r_target_price(span: dict, side_sign: int, multiple: float) -> float | None:
+    """Precio objetivo usando el mismo riesgo por unidad que el motor."""
+    risk_per_unit = span.get("risk_per_unit")
+    if risk_per_unit is None or not np.isfinite(risk_per_unit) or risk_per_unit <= 0:
+        return None
+    return float(span["entry_price"] + side_sign * multiple * risk_per_unit)
 
 
 def _higher_timeframes(raw: pd.DataFrame | None, cfg: Config) -> tuple[list[dict], list[dict]]:
@@ -301,6 +368,11 @@ def _x_ms(values) -> np.ndarray:
     ``date`` para que se sigan mostrando fechas.
     """
     return pd.DatetimeIndex(values).to_numpy(dtype="datetime64[ms]").astype("int64")
+
+
+def _closed_x_ms(index: pd.DatetimeIndex, timeframe: str) -> np.ndarray:
+    """Timestamps de cierre de velas con índices etiquetados por apertura."""
+    return _x_ms(pd.DatetimeIndex(index) + pd.Timedelta(timeframe))
 
 
 def _sig(values, digits: int = 9) -> np.ndarray:
@@ -454,8 +526,6 @@ def build_backtest_figure(
             weak_exit = np.asarray(weak_exit, bool)[keep]
         if rsi_div_exit is not None:
             rsi_div_exit = np.asarray(rsi_div_exit, int)[keep]
-        if volume_exit is not None:
-            volume_exit = np.asarray(volume_exit, bool)[keep]
         if trades is not None and not trades.empty:
             summary_trades = trades[
                 (trades["exit_time"] >= win_start) & (trades["exit_time"] < win_end)
@@ -486,32 +556,10 @@ def build_backtest_figure(
     if len(div_flags) != n:
         div_flags = np.zeros(n, int)
     div_bull, div_bear = div_flags > 0, div_flags < 0
-    if volume_exit is None and cfg.volume_exit_enabled and "volume" in bars:
-        from strategy.indicators import volume_decline_flags
-        volume_exit = volume_decline_flags(
-            bars["volume"].to_numpy(float), cfg.volume_exit_bars, cfg.volume_exit_min_drop_pct)
-    volume_flags = np.asarray(volume_exit, bool) if volume_exit is not None else np.zeros(n, bool)
-    if len(volume_flags) != n:
-        volume_flags = np.zeros(n, bool)
-    # Conserva únicamente las señales de volumen que realmente dispararon una
-    # salida parcial VOLUME_DECLINE (una por posición), no todas las barras en
-    # las que el volumen declina. Se derivan de los trades cerrados por ese
-    # motivo: el trigger ocurrió en la vela anterior a `exit_time`.
-    if trades is not None and not trades.empty and volume_flags.any():
-        triggered = np.zeros(n, bool)
-        try:
-            vol_trades = trades[trades["reason"].astype(str).str.startswith("VOLUME_DECLINE")]
-        except Exception:
-            vol_trades = pd.DataFrame()
-        if not vol_trades.empty:
-            step = pd.Timedelta(cfg.timeframe)
-            for exit_time in vol_trades["exit_time"]:
-                trigger_ts = pd.Timestamp(exit_time) - step
-                pos = bars.index.get_indexer([trigger_ts])
-                if len(pos) and pos[0] >= 0:
-                    triggered[pos[0]] = True
-        if triggered.any():
-            volume_flags = triggered & (np.asarray(volume_exit, bool) if volume_exit is not None and len(volume_exit) == n else True)
+    # Solo se marcan las velas que realmente provocaron una salida por volumen;
+    # `volume_exit` se conserva como argumento por compatibilidad; las señales
+    # candidatas sin trade ejecutado no son eventos de salida.
+    volume_flags = _executed_volume_exit_flags(bars, trades, cfg.timeframe)
     adx_tfs, weak_tfs = _higher_timeframes(raw, cfg)
     if window is not None:
         adx_tfs = [frame for frame in
@@ -888,27 +936,13 @@ def build_backtest_figure(
                     showlegend=True, line=dict(color=color, width=1, dash=dash),
                     hovertemplate=f"{name} %{{y:,.4f}}<extra></extra>"), row=r, col=1)
 
-        if cfg.partial_tp_enabled and cfg.partial_tp_r > 0 and cfg.stop_loss_pct > 0:
-            _level_trace(f"TP {cfg.partial_tp_r:g}R", TARGET_COLOR, "dash",
-                         lambda s, sign: s["entry_price"] * (1 + sign * cfg.partial_tp_r * cfg.stop_loss_pct))
-        if cfg.partial_tp2_r > 0 and cfg.stop_loss_pct > 0:
-            _level_trace(f"TP2 {cfg.partial_tp2_r:g}R", TARGET_COLOR, "dashdot",
-                         lambda s, sign: s["entry_price"] * (1 + sign * cfg.partial_tp2_r * cfg.stop_loss_pct))
-        if cfg.partial_tp3_r > 0 and cfg.stop_loss_pct > 0:
-            _level_trace(f"TP3 {cfg.partial_tp3_r:g}R", TARGET_COLOR, "dot",
-                         lambda s, sign: s["entry_price"] * (1 + sign * cfg.partial_tp3_r * cfg.stop_loss_pct))
-        if cfg.partial_tp4_r > 0 and cfg.stop_loss_pct > 0:
-            _level_trace(f"TP4 {cfg.partial_tp4_r:g}R", TARGET_COLOR, "dashdot",
-                         lambda s, sign: s["entry_price"] * (1 + sign * cfg.partial_tp4_r * cfg.stop_loss_pct))
-        if cfg.partial_tp5_r > 0 and cfg.stop_loss_pct > 0:
-            _level_trace(f"TP5 {cfg.partial_tp5_r:g}R", TARGET_COLOR, "longdash",
-                         lambda s, sign: s["entry_price"] * (1 + sign * cfg.partial_tp5_r * cfg.stop_loss_pct))
-        if cfg.partial_tp6_r > 0 and cfg.stop_loss_pct > 0:
-            _level_trace(f"TP6 {cfg.partial_tp6_r:g}R", TARGET_COLOR, "longdashdot",
-                         lambda s, sign: s["entry_price"] * (1 + sign * cfg.partial_tp6_r * cfg.stop_loss_pct))
-        if cfg.partial_tp7_r > 0 and cfg.stop_loss_pct > 0:
-            _level_trace(f"TP7 {cfg.partial_tp7_r:g}R", TARGET_COLOR, "longdash",
-                         lambda s, sign: s["entry_price"] * (1 + sign * cfg.partial_tp7_r * cfg.stop_loss_pct))
+        for label, multiple, dash in _configured_tp_levels(cfg):
+            _level_trace(
+                f"{label} {multiple:g}R",
+                TARGET_COLOR,
+                dash,
+                lambda span, sign, r=multiple: _r_target_price(span, sign, r),
+            )
 
     if equity is not None and not equity.empty and "effective_stop_price" in equity:
         stop_values = equity["effective_stop_price"].to_numpy(float)
@@ -1144,28 +1178,29 @@ def build_backtest_figure(
             continue
         rr = row[name]
         low = adx_tf["bars"]
-        low_x = _x_ms(low.index)
+        bar_x = _x_ms(low.index)
+        closed_x = _closed_x_ms(low.index, adx_tf["timeframe"])
         adx_values = np.asarray(adx_tf["adx"], float)
         if len(low) <= _MAX_CANDLES:
             fig.add_trace(go.Candlestick(
-                x=low_x, open=_sig(low["open"]), high=_sig(low["high"]),
+                x=bar_x, open=_sig(low["open"]), high=_sig(low["high"]),
                 low=_sig(low["low"]), close=_sig(low["close"]),
                 name=f"precio {adx_tf['timeframe']}", increasing_line_color=UP_COLOR,
                 decreasing_line_color=DOWN_COLOR, showlegend=False, opacity=0.6),
                 row=rr, col=1, secondary_y=False)
         else:
-            fig.add_trace(_line_trace(low_x, low["close"].to_numpy(float), f"cierre {adx_tf['timeframe']}",
+            fig.add_trace(_line_trace(closed_x, low["close"].to_numpy(float), f"cierre {adx_tf['timeframe']}",
                                       "#90a4ae", width=1.0, showlegend=False, opacity=0.7),
                           row=rr, col=1, secondary_y=False)
-        fig.add_trace(_line_trace(low_x, adx_values, f"ADX {adx_tf['timeframe']}", NEUTRAL_COLOR, width=1.5),
+        fig.add_trace(_line_trace(closed_x, adx_values, f"ADX {adx_tf['timeframe']}", NEUTRAL_COLOR, width=1.5),
                       row=rr, col=1, secondary_y=True)
         fig.add_trace(go.Scatter(
-            x=[int(low_x[0]), int(low_x[-1])], y=[adx_tf["key_level"], adx_tf["key_level"]],
+            x=[int(closed_x[0]), int(closed_x[-1])], y=[adx_tf["key_level"], adx_tf["key_level"]],
             mode="lines", name=f"nivel ADX {adx_tf['key_level']:g}", legendgroup="adx-key",
             line=dict(color=ADX_EXIT_COLOR, width=0.9, dash="dash")), row=rr, col=1, secondary_y=True)
         flags = adx_tf["reversal"]
         if flags.any():
-            fig.add_trace(_marker_trace(low_x[flags], adx_values[flags], "reversal ADX",
+            fig.add_trace(_marker_trace(closed_x[flags], adx_values[flags], "reversal ADX",
                                         "x", ADX_EXIT_COLOR, 9), row=rr, col=1, secondary_y=True)
         fig.update_yaxes(title_text="precio", row=rr, col=1, secondary_y=False)
         fig.update_yaxes(title_text="ADX", showgrid=False, row=rr, col=1, secondary_y=True)
@@ -1177,24 +1212,25 @@ def build_backtest_figure(
             continue
         rr = row[name]
         low = weak_tf["bars"]
-        low_x = _x_ms(low.index)
+        bar_x = _x_ms(low.index)
+        closed_x = _closed_x_ms(low.index, weak_tf["timeframe"])
         if len(low) <= _MAX_CANDLES:
             fig.add_trace(go.Candlestick(
-                x=low_x, open=_sig(low["open"]), high=_sig(low["high"]),
+                x=bar_x, open=_sig(low["open"]), high=_sig(low["high"]),
                 low=_sig(low["low"]), close=_sig(low["close"]),
                 name=f"precio {weak_tf['timeframe']}", increasing_line_color=UP_COLOR,
                 decreasing_line_color=DOWN_COLOR, showlegend=False, opacity=0.6), row=rr, col=1)
         else:
-            fig.add_trace(_line_trace(low_x, low["close"].to_numpy(float), f"cierre {weak_tf['timeframe']}",
+            fig.add_trace(_line_trace(closed_x, low["close"].to_numpy(float), f"cierre {weak_tf['timeframe']}",
                                       "#90a4ae", width=1.0, showlegend=False, opacity=0.7), row=rr, col=1)
-        fig.add_trace(_line_trace(low_x, weak_tf["ema_fast"], f"EMA {cfg.ema_fast} ({weak_tf['timeframe']})",
+        fig.add_trace(_line_trace(closed_x, weak_tf["ema_fast"], f"EMA {cfg.ema_fast} ({weak_tf['timeframe']})",
                                   FAST_COLOR, width=1.2), row=rr, col=1)
-        fig.add_trace(_line_trace(low_x, weak_tf["ema_slow"], f"EMA {cfg.ema_slow} ({weak_tf['timeframe']})",
+        fig.add_trace(_line_trace(closed_x, weak_tf["ema_slow"], f"EMA {cfg.ema_slow} ({weak_tf['timeframe']})",
                                   SLOW_COLOR, width=1.2), row=rr, col=1)
         flags = weak_tf["weakening"]
         if flags.any():
             hi = low["high"].to_numpy(float)
-            fig.add_trace(_marker_trace(low_x[flags], hi[flags], "weakening",
+            fig.add_trace(_marker_trace(closed_x[flags], hi[flags], "weakening",
                                         "diamond", WEAK_EXIT_COLOR, 8), row=rr, col=1)
         fig.update_yaxes(title_text=f"EMA {weak_tf['timeframe']}", row=rr, col=1)
 
