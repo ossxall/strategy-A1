@@ -16,7 +16,8 @@
 #   docker compose logs -f bot
 #   docker compose down            # detiene y mantiene el volumen de datos
 #
-# La raíz define FEED_*; live/.env conserva la configuración del bot.
+# Compose carga primero ../.env y después live/.env; ante claves repetidas,
+# prevalece live/.env. El servicio feed fija algunos valores de despliegue.
 
 name: blacker-bot1
 

@@ -5,13 +5,12 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
+ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
+
 try:
     from dotenv import load_dotenv
 
-    load_dotenv(
-        Path(__file__).resolve().parents[2] / ".env",
-        override=False,
-    )
+    load_dotenv(ENV_FILE, override=False)
 except ImportError:
     pass
 
@@ -21,7 +20,7 @@ WS_BASE_URL = "wss://fstream.binance.com/ws"
 SYMBOL = os.getenv("FEED_SYMBOL", "BTCUSDT").upper()
 INTERVAL = os.getenv("FEED_INTERVAL", "1m")
 DB_PATH = os.getenv("FEED_DB_PATH", "data/feed.db")
-START_DATE = os.getenv("FEED_START_DATE", "2026-11-01")
+START_DATE = os.getenv("FEED_START_DATE", "2026-08-01")
 
 REST_TIMEOUT_CONNECT = float(os.getenv("FEED_REST_TIMEOUT_CONNECT", "5"))
 REST_TIMEOUT_READ = float(os.getenv("FEED_REST_TIMEOUT_READ", "20"))
