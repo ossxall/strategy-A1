@@ -17,6 +17,18 @@ el paquete desde el directorio live con `python -m bot`; no hay opciones CLI.
 La configuración operativa se toma de `live/.env` y de las variables de
 entorno del contenedor. No se admiten argumentos de terminal.
 
+## Reinicio y recuperación
+
+`LIVE_ONLY` está activado por defecto. Deja `LIVE_SINCE` vacío para que el bot
+guarde su marca inicial en `SIGNAL_DB` y la reutilice tras reiniciarse. Conserva
+esa base de datos: en Docker Compose vive en el volumen persistente `bot_data`.
+No elimines el volumen al recrear los contenedores.
+
+Tras una caída, el bot vuelve a recorrer el feed y puede insertar eventos no
+procesados desde esa marca; la base de datos evita duplicados. `LIVE_ONLY` no es
+un filtro de antigüedad para el ejecutor: cualquier worker que actúe sobre las
+señales debe validar su vigencia e idempotencia antes de operar.
+
 ## Visor de backtest live
 
 El bot actualiza el visor mensual al cambiar una vela de estrategia. Escribe
