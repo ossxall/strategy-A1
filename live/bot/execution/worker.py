@@ -1066,6 +1066,11 @@ class ExecutionWorker:
                     )
                     return False
 
+        if final_status in {"FILLED", "PARTIALLY_FILLED"}:
+            # A following signal may be processed immediately (as in test mode).
+            # Do not compare the updated ledger against the pre-order snapshot.
+            self._last_account_poll = 0.0
+
         self._update_state(
             signal,
             final_status,
@@ -1509,6 +1514,7 @@ class ExecutionWorker:
                     },
                     reconciled_at_ms=self.clock_ms(),
                 )
+                self._last_account_poll = 0.0
             elif order_status in {"CANCELED", "EXPIRED", "REJECTED"}:
                 self.store.update_execution(
                     self.settings.account_id,
@@ -1559,6 +1565,7 @@ class ExecutionWorker:
                     },
                     reconciled_at_ms=self.clock_ms(),
                 )
+                self._last_account_poll = 0.0
                 blocked = True
         return blocked
 

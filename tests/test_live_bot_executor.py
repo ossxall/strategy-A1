@@ -821,6 +821,7 @@ def test_test_mode_persists_signals_in_isolated_db_and_uses_worker_pipeline(
     store = SignalStore(settings.signal_db)
     store.connect()
     gateway = FakeFuturesGateway()
+    gateway.mark_price_value = 101.0
     try:
         worker = ExecutionWorker(
             settings,
@@ -829,7 +830,9 @@ def test_test_mode_persists_signals_in_isolated_db_and_uses_worker_pipeline(
             clock_ms=lambda: 1_000_000,
         )
 
-        ExecutionTestMode(worker).run_sequence()
+        controller = ExecutionTestMode(worker)
+        controller.run_sequence()
+        controller.run_sequence()
 
         executions = store.conn.execute(
             """
@@ -843,9 +846,40 @@ def test_test_mode_persists_signals_in_isolated_db_and_uses_worker_pipeline(
             ("ENTRY", "OPEN", "EXECUTOR_TEST_ENTRY", "FILLED", "FILLED"),
             ("EXIT", "PARTIAL_CLOSE", "PARTIAL_TP_1R", "FILLED", "FILLED"),
             ("EXIT", "CLOSE", "EXECUTOR_TEST_CLOSE", "FILLED", "FILLED"),
+            ("ENTRY", "OPEN", "EXECUTOR_TEST_ENTRY", "FILLED", "FILLED"),
+            (
+                "EXIT",
+                "PARTIAL_CLOSE",
+                "EXECUTOR_TEST_PARTIAL",
+                "FILLED",
+                "FILLED",
+            ),
+            ("EXIT", "CLOSE", "EXECUTOR_TEST_CLOSE", "FILLED", "FILLED"),
         ]
-        assert len(gateway.orders) == 3
+        assert len(gateway.orders) == 6
+        assert [order["side"] for order in gateway.orders] == [
+            "BUY",
+            "SELL",
+            "SELL",
+            "SELL",
+            "BUY",
+            "BUY",
+        ]
+        assert [order["reduce_only"] for order in gateway.orders] == [
+            False,
+            True,
+            True,
+            False,
+            True,
+            True,
+        ]
+        assert [client_id[2:4] for client_id, _ in gateway.stop_placements] == [
+            "sl",
+            "be",
+            "sl",
+        ]
         assert gateway.position_amt == pytest.approx(0.0)
+        assert controller.next_side == "LONG"
         assert not (tmp_path / "signal.db").exists()
     finally:
         store.close()
@@ -1268,11 +1302,20 @@ def test_test_mode_recovers_filled_position_and_confirms_protective_stop(tmp_pat
         store.close()
 
 
-def test_test_mode_recovers_filled_partial_without_resubmitting_it(tmp_path):
+@pytest.mark.parametrize(
+    ("partial_reason", "mark_price"),
+    [
+        ("PARTIAL_TP_1R", 99.5),
+        ("EXECUTOR_TEST_PARTIAL", 101.0),
+    ],
+)
+def test_test_mode_recovers_filled_partial_without_resubmitting_it(
+    tmp_path, partial_reason, mark_price
+):
     store = SignalStore(tmp_path / "test-signal.db")
     store.connect()
     gateway = FakeFuturesGateway(position_amt=0.05)
-    gateway.mark_price_value = 99.5
+    gateway.mark_price_value = mark_price
     client_order_id = "b1_confirmed-partial"
     gateway.order_results[client_order_id] = {
         "status": "FILLED",
@@ -1306,7 +1349,7 @@ def test_test_mode_recovers_filled_partial_without_resubmitting_it(tmp_path):
             **entry,
             "event": "EXIT",
             "action": "PARTIAL_CLOSE",
-            "reason": "PARTIAL_TP_1R",
+            "reason": partial_reason,
             "payload": json.dumps(
                 {
                     "action": "PARTIAL_CLOSE",

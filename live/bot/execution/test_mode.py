@@ -175,13 +175,17 @@ class ExecutionTestMode:
             if (
                 len(exits) == 1
                 and exits[0][1] == "PARTIAL_CLOSE"
-                and exits[0][2] == "PARTIAL_TP_1R"
+                and exits[0][2] in {
+                    "PARTIAL_TP_1R",
+                    "EXECUTOR_TEST_PARTIAL",
+                }
                 and exits[0][3] in {"FILLED", "RECONCILIATION_REQUIRED"}
                 and exits[0][4] == "FILLED"
                 and float(exits[0][5] or 0) > 0
             ):
                 partial_execution = {
                     "signal_id": exits[0][0],
+                    "reason": exits[0][2],
                     "filled_qty": float(exits[0][5]),
                     "status": exits[0][3],
                 }
@@ -243,6 +247,7 @@ class ExecutionTestMode:
         stop_variant = "sl"
         if (
             partial_execution is not None
+            and partial_execution["reason"].startswith("PARTIAL_TP_")
             and (signal["payload"].get("sizing") or {}).get(
                 "move_stop_to_breakeven"
             )
@@ -301,7 +306,10 @@ class ExecutionTestMode:
     def _recover_test_partial_inflight(self, execution: dict) -> dict:
         if (
             execution["action"] != "PARTIAL_CLOSE"
-            or execution["reason"] != "PARTIAL_TP_1R"
+            or execution["reason"] not in {
+                "PARTIAL_TP_1R",
+                "EXECUTOR_TEST_PARTIAL",
+            }
             or execution["order_status"] != "FILLED"
             or not execution["client_order_id"]
             or float(execution["filled_qty"] or 0) <= 0
@@ -783,12 +791,17 @@ class ExecutionTestMode:
             recovered and recovered.get("partial_completed")
         )
         if not partial_completed:
+            partial_reason = (
+                "PARTIAL_TP_1R"
+                if side == "LONG"
+                else "EXECUTOR_TEST_PARTIAL"
+            )
             partial_state = self._run_test_signal(
                 event="EXIT",
                 action="PARTIAL_CLOSE",
                 side=side,
                 position_id=position_id,
-                reason="PARTIAL_TP_1R",
+                reason=partial_reason,
                 close_pct=50.0,
             )
             partial_result = partial_state.get("result") or {}

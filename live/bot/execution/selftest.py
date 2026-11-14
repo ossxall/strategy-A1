@@ -255,6 +255,9 @@ def _signal(
     reason: str,
     close_pct: float | None = None,
     signal_time: int | None = None,
+    move_stop_to_breakeven: bool = True,
+    scheduled: bool = False,
+    bar_time: int | None = None,
 ) -> dict:
     sizing = {
         "risk_pct": 0.001,
@@ -263,7 +266,7 @@ def _signal(
         "max_leverage": 10.0,
         "commission_bps": 0.0,
         "slippage_bps": 0.0,
-        "move_stop_to_breakeven": True,
+        "move_stop_to_breakeven": move_stop_to_breakeven,
     }
     payload = {
         "action": action,
@@ -274,20 +277,22 @@ def _signal(
         payload["entry_pct"] = 100.0
     else:
         payload["close_pct"] = close_pct
+    if scheduled:
+        payload["pending"] = True
     timestamp = now_ms if signal_time is None else signal_time
     return {
         "schema_version": 3,
         "symbol": "BTCUSDT",
         "interval": "selftest",
         "timeframe": "selftest",
-        "bar_time": timestamp,
+        "bar_time": timestamp if bar_time is None else bar_time,
         "signal_time": timestamp,
         "event": event,
         "action": action,
         "signal": side,
         "side": side,
         "position_id": position_id,
-        "scheduled": False,
+        "scheduled": scheduled,
         "reason": reason,
         "price": None,
         "ema_fast": None,
@@ -345,10 +350,17 @@ def _self_test_lifecycles(root: Path, now_ms: int) -> int:
         path, "selftest-lifecycles", gateway, now_ms
     )
     try:
-        for position_id, side, favorable_mark, expect_breakeven in (
-            (1, "LONG", 101.0, True),
-            (2, "SHORT", 99.0, True),
-            (3, "LONG", 99.5, False),
+        for (
+            position_id,
+            side,
+            favorable_mark,
+            move_stop_to_breakeven,
+            expect_breakeven,
+        ) in (
+            (1, "LONG", 101.0, True, True),
+            (2, "SHORT", 99.0, True, True),
+            (3, "LONG", 99.5, True, False),
+            (4, "LONG", 101.0, False, False),
         ):
             gateway.mark = 100.0
             entry = _run_signal(
@@ -361,6 +373,7 @@ def _self_test_lifecycles(root: Path, now_ms: int) -> int:
                     side=side,
                     position_id=position_id,
                     reason="SELFTEST_ENTRY",
+                    move_stop_to_breakeven=move_stop_to_breakeven,
                 ),
             )
             _check(entry["filled_qty"] > 0, f"{side} entry fill")
@@ -377,20 +390,48 @@ def _self_test_lifecycles(root: Path, now_ms: int) -> int:
                     position_id=position_id,
                     reason="PARTIAL_TP_1R",
                     close_pct=50.0,
+                    move_stop_to_breakeven=move_stop_to_breakeven,
                 ),
             )
             _check(gateway.orders[-1]["reduce_only"], f"{side} partial reduceOnly")
             stop_variant = "be" if expect_breakeven else "sl"
+            active_stops = gateway.open_algo_orders("BTCUSDT")
             _check(
-                partial["result"].get("protective_stop_client_algo_id")
+                len(active_stops) == 1
+                and active_stops[0]["clientAlgoId"]
                 == worker._algo_order_id(position_id, stop_variant),
                 f"{side} appropriate protective stop remains",
             )
-            if not expect_breakeven:
+            if move_stop_to_breakeven and not expect_breakeven:
                 _check(
                     "breakeven_stop_skipped" in partial["result"],
                     f"{side} unsafe breakeven is skipped",
                 )
+            _run_signal(
+                worker,
+                store,
+                _signal(
+                    now_ms,
+                    event="EXIT",
+                    action="PARTIAL_CLOSE",
+                    side=side,
+                    position_id=position_id,
+                    reason="VOLUME_DECLINE_20B_20%",
+                    close_pct=50.0,
+                    move_stop_to_breakeven=move_stop_to_breakeven,
+                ),
+            )
+            _check(
+                gateway.orders[-1]["reduce_only"],
+                f"{side} non-TP partial reduceOnly",
+            )
+            active_stops = gateway.open_algo_orders("BTCUSDT")
+            _check(
+                len(active_stops) == 1
+                and active_stops[0]["clientAlgoId"]
+                == worker._algo_order_id(position_id, stop_variant),
+                f"{side} non-TP partial preserves its protective stop",
+            )
             close = _run_signal(
                 worker,
                 store,
@@ -402,6 +443,7 @@ def _self_test_lifecycles(root: Path, now_ms: int) -> int:
                     position_id=position_id,
                     reason="SELFTEST_CLOSE",
                     close_pct=100.0,
+                    move_stop_to_breakeven=move_stop_to_breakeven,
                 ),
             )
             _check(close["status"] == "FILLED", f"{side} full close")
@@ -415,6 +457,173 @@ def _self_test_lifecycles(root: Path, now_ms: int) -> int:
     finally:
         store.close()
     return passed
+
+
+def _self_test_pending_reversal(root: Path, now_ms: int) -> int:
+    """Executes the producer's scheduled EXIT→ENTRY reversal through the worker."""
+    path = root / "pending-reversal.db"
+    gateway = _ScenarioFuturesGateway()
+    store, worker, clock = _open_worker(
+        path, "selftest-pending-reversal", gateway, now_ms
+    )
+    try:
+        _run_signal(
+            worker,
+            store,
+            _signal(
+                now_ms,
+                event="ENTRY",
+                action="OPEN",
+                side="LONG",
+                position_id=1,
+                reason="EMA_CROSS",
+            ),
+        )
+        due_partial_ms = now_ms + 1_000
+        pending_partial = _signal(
+            now_ms,
+            event="EXIT",
+            action="PARTIAL_CLOSE",
+            side="LONG",
+            position_id=1,
+            reason="EMA_WEAKENING_30MIN_50%",
+            close_pct=50.0,
+            signal_time=due_partial_ms,
+            scheduled=True,
+            bar_time=now_ms,
+        )
+        partial_signal = store._normalize_event(pending_partial)
+        _check(
+            store.insert([pending_partial]) == 1,
+            "scheduled partial exit is persisted",
+        )
+        order_count = len(gateway.orders)
+        worker.run_once()
+        _check(
+            len(gateway.orders) == order_count,
+            "scheduled partial waits until signal_time",
+        )
+        clock[0] = due_partial_ms
+        worker.run_once()
+        partial_state = store.get_execution_state(
+            worker.settings.account_id, partial_signal["signal_id"]
+        )
+        _check(
+            partial_state is not None and partial_state["status"] == "FILLED",
+            "scheduled partial exit is executed",
+        )
+        _check(
+            gateway.orders[-1]["reduce_only"],
+            "scheduled partial exit is reduce-only",
+        )
+
+        due_ms = due_partial_ms + 1_000
+        pending_exit = _signal(
+            now_ms,
+            event="EXIT",
+            action="CLOSE",
+            side="LONG",
+            position_id=1,
+            reason="EMA_CROSS_EXIT",
+            close_pct=100.0,
+            signal_time=due_ms,
+            scheduled=True,
+            bar_time=now_ms,
+        )
+        pending_entry = _signal(
+            now_ms,
+            event="ENTRY",
+            action="OPEN",
+            side="SHORT",
+            position_id=2,
+            reason="EMA_CROSS",
+            signal_time=due_ms,
+            scheduled=True,
+            bar_time=now_ms,
+        )
+        exit_signal = store._normalize_event(pending_exit)
+        entry_signal = store._normalize_event(pending_entry)
+        _check(
+            store.insert([pending_entry, pending_exit]) == 2,
+            "scheduled reversal signals are persisted",
+        )
+
+        order_count = len(gateway.orders)
+        worker.run_once()
+        _check(
+            len(gateway.orders) == order_count,
+            "scheduled signals wait until signal_time",
+        )
+        _check(
+            store.get_execution_state(
+                worker.settings.account_id, exit_signal["signal_id"]
+            ) is None
+            and store.get_execution_state(
+                worker.settings.account_id, entry_signal["signal_id"]
+            ) is None,
+            "future signals remain unclaimed",
+        )
+
+        clock[0] = due_ms
+        worker.run_once()
+        exit_state = store.get_execution_state(
+            worker.settings.account_id, exit_signal["signal_id"]
+        )
+        _check(
+            exit_state is not None and exit_state["status"] == "FILLED",
+            "scheduled reversal closes the old position first",
+        )
+        _check(
+            store.get_execution_state(
+                worker.settings.account_id, entry_signal["signal_id"]
+            ) is None,
+            "scheduled reversal entry waits for its exit",
+        )
+        worker.run_once()
+        entry_state = store.get_execution_state(
+            worker.settings.account_id, entry_signal["signal_id"]
+        )
+        _check(
+            entry_state is not None and entry_state["status"] == "FILLED",
+            "scheduled reversal opens the new position second",
+        )
+        _check(
+            [order["side"] for order in gateway.orders] == [
+                "BUY",
+                "SELL",
+                "SELL",
+                "SELL",
+            ],
+            "reversal market orders use the expected sides",
+        )
+        _check(
+            [order["reduce_only"] for order in gateway.orders] == [
+                False,
+                True,
+                True,
+                False,
+            ],
+            "reversal exit is reduce-only and new entry is not",
+        )
+
+        close = _signal(
+            due_ms,
+            event="EXIT",
+            action="CLOSE",
+            side="SHORT",
+            position_id=2,
+            reason="SELFTEST_CLOSE",
+            close_pct=100.0,
+        )
+        _run_signal(worker, store, close)
+        _check(gateway.position_amt == 0, "reversed position closes to flat")
+        _check(
+            not gateway.open_algo_orders("BTCUSDT"),
+            "reversal leaves no protective stops open",
+        )
+    finally:
+        store.close()
+    return 1
 
 
 def _self_test_stop_reconciliation(root: Path, now_ms: int) -> int:
@@ -659,6 +868,7 @@ def run_executor_self_tests(data_dir: Path | None = None) -> int:
             now_ms = int(time.time() * 1000)
             passed = (
                 _self_test_lifecycles(root, now_ms)
+                + _self_test_pending_reversal(root, now_ms)
                 + _self_test_stop_reconciliation(root, now_ms)
                 + _self_test_inflight_recovery(root, now_ms)
                 + _self_test_guards(root, now_ms)
