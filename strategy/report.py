@@ -964,36 +964,140 @@ def _month_ranges(index: pd.DatetimeIndex) -> list[tuple[str, pd.Timestamp, pd.T
     return ranges
 
 
-def _write_backtest_index(path: Path, source: str, cfg: Config, bars: pd.DataFrame,
-                          links: list[tuple[str, str, int]]) -> None:
-    """Escribe una página índice que enlaza los HTML mensuales."""
-    rows = "\n".join(
-        f'      <li><a href="{href}">{label}</a><span>{count} posiciones</span></li>'
-        for label, href, count in links
-    )
+def _write_paginated_backtest_html(
+    path: Path,
+    source: str,
+    cfg: Config,
+    bars: pd.DataFrame,
+    pages: list[dict],
+) -> None:
+    """Escribe un único HTML que reutiliza el mismo gráfico para cada mes."""
+    import html
+    from plotly.offline import get_plotlyjs_version
+
+    page_json = json.dumps(pages, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+    # Evita que contenido de los datos pueda cerrar la etiqueta <script>.
+    page_json = page_json.replace("&", "\\u0026").replace("<", "\\u003c").replace(">", "\\u003e")
+    safe_source = html.escape(source or "backtest")
+    title = html.escape(f"Backtest {source or 'backtest'} · {cfg.timeframe}")
+    plotly_js_version = get_plotlyjs_version()
     path.write_text(
         f"""<!doctype html>
 <html lang="es">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Backtest {source} · {cfg.timeframe}</title>
+  <title>{title}</title>
+  <script src="https://cdn.plot.ly/plotly-{plotly_js_version}.min.js"></script>
   <style>
-    body {{ font-family: system-ui, sans-serif; background:#101418; color:#e6e6e6; margin:0; padding:1.5rem; }}
-    h1 {{ font-weight:600; margin-bottom:.2rem; }}
-    p {{ color:#9aa0a6; }}
-    a {{ color:#4fc3f7; text-decoration:none; }}
-    a:hover {{ text-decoration:underline; }}
-    li {{ margin:.35rem 0; }}
-    span {{ color:#9aa0a6; font-size:.85rem; margin-left:.6rem; }}
+    :root {{
+      color-scheme:dark;
+      --page:#0b1118;
+      --surface:#111a24;
+      --surface-raised:#172330;
+      --border:#263544;
+      --text:#e8eef5;
+      --muted:#91a1b2;
+      --accent:#56c2d6;
+    }}
+    *, *::before, *::after {{ box-sizing:border-box; }}
+    html, body {{ width:100%; min-height:100%; margin:0; background:var(--page); color:var(--text); }}
+    body {{ overflow-x:hidden; font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+            line-height:1.45; -webkit-font-smoothing:antialiased; }}
+    .page-header {{
+      position:relative; z-index:2; display:flex; align-items:center; justify-content:space-between;
+      gap:1.5rem; padding:1.1rem clamp(1rem,3vw,2.5rem);
+      background:rgba(17,26,36,.96); border-bottom:1px solid var(--border);
+      box-shadow:0 8px 24px rgba(0,0,0,.16);
+    }}
+    .title-block {{ min-width:0; }}
+    .eyebrow {{ display:block; margin-bottom:.25rem; color:var(--accent); font-size:.68rem;
+                font-weight:700; letter-spacing:.14em; text-transform:uppercase; }}
+    h1 {{ margin:0; color:var(--text); font-size:clamp(1.1rem,2vw,1.45rem);
+          font-weight:650; letter-spacing:-.025em; overflow-wrap:anywhere; }}
+    .subtitle {{ margin:.3rem 0 0; color:var(--muted); font-size:.86rem; }}
+    .pager {{
+      display:grid; grid-template-columns:auto minmax(10rem,auto) auto; align-items:center;
+      gap:.45rem; padding:.35rem; border:1px solid var(--border); border-radius:.75rem;
+      background:var(--page); flex-shrink:0;
+    }}
+    .pager-button {{
+      min-height:2.45rem; padding:.55rem .85rem; border:1px solid transparent; border-radius:.5rem;
+      background:var(--surface-raised); color:var(--text); font:inherit; font-size:.85rem;
+      font-weight:600; cursor:pointer; transition:background .15s ease,border-color .15s ease,
+        color .15s ease,opacity .15s ease;
+    }}
+    .pager-button:hover:not(:disabled) {{ border-color:#3c5668; background:#203141; }}
+    .pager-button:focus-visible {{ outline:2px solid var(--accent); outline-offset:2px; }}
+    .pager-button:disabled {{ color:#637282; cursor:not-allowed; opacity:.62; }}
+    .page-label {{ min-width:10rem; padding:0 .35rem; color:#c8d4df; text-align:center;
+                   font-size:.82rem; font-variant-numeric:tabular-nums; }}
+    main {{ padding:1rem clamp(.65rem,2vw,1.5rem) 1.5rem; }}
+    .chart-shell {{
+      width:100%; overflow:hidden; border:1px solid var(--border); border-radius:.85rem;
+      background:var(--surface); box-shadow:0 18px 45px rgba(0,0,0,.22);
+    }}
+    #chart {{ width:100%; min-height:75vh; }}
+    #chart .js-plotly-plot, #chart .plot-container, #chart .svg-container {{
+      width:100% !important;
+    }}
+    @media (max-width:700px) {{
+      .page-header {{ align-items:stretch; flex-direction:column; gap:.9rem; padding:1rem; }}
+      .pager {{ width:100%; grid-template-columns:auto minmax(0,1fr) auto; }}
+      .page-label {{ min-width:0; }}
+      main {{ padding:.65rem; }}
+      .chart-shell {{ border-radius:.6rem; }}
+    }}
+    @media (max-width:390px) {{
+      .pager-button {{ padding:.5rem .6rem; font-size:.8rem; }}
+      .page-label {{ font-size:.75rem; }}
+    }}
   </style>
 </head>
 <body>
-  <h1>Backtest {source}</h1>
-  <p>{cfg.timeframe} · {len(bars):,} velas · {len(links)} meses</p>
-  <ul>
-{rows}
-  </ul>
+  <header class="page-header">
+    <div class="title-block">
+      <span class="eyebrow">Estrategia · Backtest</span>
+      <h1>Backtest {safe_source}</h1>
+      <p class="subtitle">{cfg.timeframe} · {len(bars):,} velas · {len(pages)} meses</p>
+    </div>
+    <nav class="pager" aria-label="Paginación mensual">
+      <button class="pager-button" id="previous" type="button">← Anterior</button>
+      <span class="page-label" id="page-label" aria-live="polite"></span>
+      <button class="pager-button" id="next" type="button">Siguiente →</button>
+    </nav>
+  </header>
+  <main><section class="chart-shell" aria-label="Gráfico mensual del backtest"><div id="chart"></div></section></main>
+  <script id="monthly-data" type="application/json">{page_json}</script>
+  <script>
+    const pages = JSON.parse(document.getElementById("monthly-data").textContent);
+    const chart = document.getElementById("chart");
+    const label = document.getElementById("page-label");
+    const previous = document.getElementById("previous");
+    const next = document.getElementById("next");
+    const config = {{responsive:true, displaylogo:false, scrollZoom:true,
+                     modeBarButtonsToRemove:["select2d","lasso2d"]}};
+    let current = 0;
+
+    function showPage(index) {{
+      if (!pages.length) {{
+        label.textContent = "No hay meses para mostrar";
+        previous.disabled = true;
+        next.disabled = true;
+        return;
+      }}
+      current = index;
+      const page = pages[current];
+      label.textContent = `${{page.label}} · ${{page.positions}} posiciones (${{current + 1}}/${{pages.length}})`;
+      previous.disabled = current === 0;
+      next.disabled = current === pages.length - 1;
+      Plotly.react(chart, page.figure.data, page.figure.layout, config);
+    }}
+
+    previous.addEventListener("click", () => showPage(current - 1));
+    next.addEventListener("click", () => showPage(current + 1));
+    showPage(0);
+  </script>
 </body>
 </html>
 """,
@@ -1016,36 +1120,37 @@ def build_monthly_backtest_htmls(
     output_dir: str | Path = DEFAULT_OUTPUT_DIR,
     index_path: str | Path | None = None,
 ) -> list[Path]:
-    """Genera **un HTML de Plotly por mes** y un índice que los enlaza.
+    """Genera un único HTML de Plotly con paginación por mes.
 
-    Cada archivo cubre un mes calendario, pero los indicadores se calculan sobre
+    Cada página cubre un mes calendario, pero los indicadores se calculan sobre
     la serie completa y solo se recortan al mostrar, así que no se pierde el
-    warmup de las EMAs/ADX. Los archivos se guardan en ``output_dir/html/`` con
-    nombres ``<stem>_<YYYY-MM>.html`` y el índice se escribe en ``index_path``
-    (por defecto ``output_dir/html/backtest.html``).
+    warmup de las EMAs/ADX. El archivo se guarda en ``index_path`` (por defecto
+    ``output_dir/html/backtest.html``) y actualiza el mismo gráfico al cambiar
+    de mes con los botones Anterior/Siguiente.
     """
     index_path = (Path(index_path) if index_path is not None
                   else Path(output_dir) / _PLOTLY_SUBDIR / "backtest.html")
     index_path.parent.mkdir(parents=True, exist_ok=True)
-    written: list[Path] = []
-    links: list[tuple[str, str, int]] = []
+    pages = []
     for label, start, end in _month_ranges(bars.index):
-        target = index_path.with_name(f"{index_path.stem}_{label}.html")
         month_positions = 0
         if trades is not None and not trades.empty:
             overlap = trades[(trades["entry_time"] < end) & (trades["exit_time"] >= start)]
             month_positions = int(overlap["position_id"].nunique())
-        build_backtest_figure(
+        figure = build_backtest_figure(
             bars, cfg, signals=signals, trades=trades, equity=equity,
             adx_exit=adx_exit, weak_exit=weak_exit, rsi_div_exit=rsi_div_exit, volume_exit=volume_exit, raw=raw, source=source,
             title=f"{source or 'backtest'} · {label} · {month_positions} posiciones",
-            window=(start, end), html_path=target,
+            window=(start, end),
         )
-        written.append(target)
-        links.append((label, target.name, month_positions))
-    _write_backtest_index(index_path, source, cfg, bars, links)
-    print(f"[PLOTLY] Índice mensual en {index_path.resolve()} ({len(written)} meses)", flush=True)
-    return written
+        pages.append({
+            "label": label,
+            "positions": month_positions,
+            "figure": json.loads(figure.to_json()),
+        })
+    _write_paginated_backtest_html(index_path, source, cfg, bars, pages)
+    print(f"[PLOTLY] HTML mensual en {index_path.resolve()} ({len(pages)} meses)", flush=True)
+    return [index_path]
 
 
 def generate_report(trades: pd.DataFrame, equity: pd.DataFrame, cfg: Config, data: pd.DataFrame,
@@ -1062,9 +1167,8 @@ def generate_report(trades: pd.DataFrame, equity: pd.DataFrame, cfg: Config, dat
 
     Punto de entrada único que unifica `calculate_metrics`, `print_report`,
     `equity_curve_from_trades`, `build_report`, `write_outputs`, `plot_equity` y
-    `build_monthly_backtest_htmls`. Por defecto escribe **un HTML por mes** en
-    `output_dir/html/backtest_<YYYY-MM>.html` más un índice
-    `output_dir/html/backtest.html`.
+    `build_monthly_backtest_htmls`. Por defecto escribe un único HTML paginado
+    por mes en `output_dir/html/backtest.html`.
     Devuelve el diccionario de métricas calculado.
     """
     metrics = calculate_metrics(trades, equity, cfg.initial_capital)
