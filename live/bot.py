@@ -53,31 +53,28 @@ backtest), `exit_price`, `pnl_net` y `r_multiple`. En salidas intrabar,
 
 Uso
 ---
-    python bot.py                 # bucle continuo (polling de feed.db)
-    python bot.py --once          # procesa lo disponible y termina
-    python bot.py --help
+El bot no acepta argumentos de terminal. Ejecuta `bot.py` desde el supervisor o
+el contenedor y configura sus valores en `live/.env`.
 
 Modo live-only
 --------------
-Con `--live-only` (o `LIVE_ONLY=true`) el bot ignora el histórico y publica
+Con `LIVE_ONLY=true` el bot ignora el histórico y publica
 solo las señales cuyo momento accionable (`signal_time`) es igual o posterior al arranque; así
 no vuelca de golpe todas las señales pasadas al ponerse en marcha. La marca de
 arranque se guarda en `signal.db` (`bot_state.live_since_ms`) para no perder
-señales entre reinicios. Para reanudar desde una fecha concreta:
-`--live-since 2026-09-01` (o epoch en ms).
+señales entre reinicios. `LIVE_SINCE` permite fijar una fecha ISO 8601 o epoch ms.
 
 Endpoint HTTP de debug
 ----------------------
 Expone el último cálculo de series de cada timeframe en JSON (ver `server.py`).
-Se configura con `--http-host` / `HTTP_HOST` (por defecto 127.0.0.1) y
-`--http-port` / `HTTP_PORT` (por defecto 8080; `0` lo desactiva).
+Se configura con `HTTP_HOST` (por defecto 127.0.0.1) y `HTTP_PORT` (por defecto
+8080; `0` lo desactiva).
 
 La configuración se toma de `.env` (mismas variables que `feed.py` más las
 de la estrategia con prefijo `STRATEGY_`).
 """
 from __future__ import annotations
 
-import argparse
 import contextlib
 import io
 import json
@@ -148,6 +145,17 @@ logging.basicConfig(
 logger = logging.getLogger("bot1")
 
 STOP_EVENT = threading.Event()
+
+# Defaults operativos; las variables del fichero `.env` pueden sobrescribirlos.
+DEFAULT_SYMBOL = "BTCUSDT"
+DEFAULT_INTERVAL = "1m"
+DEFAULT_FEED_DB = "data/feed.db"
+DEFAULT_SIGNAL_DB = "data/signal.db"
+DEFAULT_POLL_SECONDS = 30.0
+DEFAULT_RUN_ONCE = False
+DEFAULT_LIVE_ONLY = False
+DEFAULT_HTTP_HOST = "127.0.0.1"
+DEFAULT_HTTP_PORT = 8080
 
 
 def utc_now() -> datetime:
@@ -933,109 +941,60 @@ class SignalBot:
 
 
 # ===========================================================================
-# CLI / arranque
+# Arranque (configuración hardcodeada con overrides desde .env)
 # ===========================================================================
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Bot EMA Cross en vivo: replica el backtest y publica sus "
-        "acciones como eventos en signal.db."
-    )
-    parser.add_argument(
-        "--feed-db",
-        default=os.getenv("DB_PATH", "data/feed.db"),
-        help="Ruta a feed.db (por defecto DB_PATH o data/feed.db).",
-    )
-    parser.add_argument(
-        "--signal-db",
-        default=os.getenv("SIGNAL_DB", "data/signal.db"),
-        help="Ruta a signal.db (por defecto SIGNAL_DB o data/signal.db).",
-    )
-    parser.add_argument("--symbol", default=os.getenv("SYMBOL", "BTCUSDT"))
-    parser.add_argument("--interval", default=os.getenv("INTERVAL", "1m"))
-    parser.add_argument("--timeframe", default=None, help="Override de STRATEGY_TIMEFRAME.")
-    parser.add_argument(
-        "--poll-seconds",
-        type=float,
-        default=env_float("POLL_SECONDS", 30.0),
-        help="Intervalo de sondeo de feed.db en modo continuo.",
-    )
-    parser.add_argument("--once", action="store_true", help="Un solo ciclo y salir.")
-    parser.add_argument(
-        "--live-only",
-        action="store_true",
-        help="Publica solo señales desde el arranque (ignora el histórico).",
-    )
-    parser.add_argument(
-        "--live-since",
-        default=None,
-        help="Marca temporal (epoch ms o ISO 8601) desde la que publicar; "
-        "implica --live-only.",
-    )
-    parser.add_argument(
-        "--http-host",
-        default=os.getenv("HTTP_HOST", "127.0.0.1"),
-        help="Host del endpoint HTTP de series (por defecto HTTP_HOST o 127.0.0.1).",
-    )
-    parser.add_argument(
-        "--http-port",
-        type=int,
-        default=env_int("HTTP_PORT", 8080),
-        help="Puerto del endpoint HTTP de series (0 lo desactiva).",
-    )
-    return parser.parse_args()
-
-
 def request_stop(signum=None, frame=None) -> None:
     logger.info("Señal de parada recibida; cerrando bot…")
     STOP_EVENT.set()
 
 
 def main() -> int:
-    args = parse_args()
     cfg = build_strategy_config()
-    if args.timeframe:
-        cfg.timeframe = args.timeframe
-
-    symbol = args.symbol.upper()
-    interval = args.interval
-    feed_path = resolve_path(args.feed_db)
-    signal_path = resolve_path(args.signal_db)
+    symbol = env_str("SYMBOL", DEFAULT_SYMBOL).upper()
+    interval = env_str("INTERVAL", DEFAULT_INTERVAL)
+    feed_path = resolve_path(env_str("DB_PATH", DEFAULT_FEED_DB))
+    signal_path = resolve_path(env_str("SIGNAL_DB", DEFAULT_SIGNAL_DB))
+    poll_seconds = env_float("POLL_SECONDS", DEFAULT_POLL_SECONDS)
+    run_once = env_bool("BOT_RUN_ONCE", DEFAULT_RUN_ONCE)
+    live_since_value = env_str("LIVE_SINCE", "").strip()
+    live_since_ms = parse_live_since(live_since_value) if live_since_value else None
+    live_only = (
+        env_bool("LIVE_ONLY", DEFAULT_LIVE_ONLY) or live_since_ms is not None
+    )
+    http_host = env_str("HTTP_HOST", DEFAULT_HTTP_HOST)
+    http_port = env_int("HTTP_PORT", DEFAULT_HTTP_PORT)
 
     logger.info(
         "Bot iniciado: symbol=%s interval=%s timeframe=%s feed=%s signal=%s",
         symbol, interval, cfg.timeframe, feed_path, signal_path,
     )
 
-    live_only = args.live_only or args.live_since is not None or env_bool("LIVE_ONLY", False)
-    live_since_ms = parse_live_since(args.live_since) if args.live_since else None
-
     feed = FeedReader(feed_path, symbol, interval)
     store = SignalStore(signal_path)
     snapshot = (
         SeriesSnapshot(symbol, interval)
-        if args.http_port > 0 and HTTP_SERVER_AVAILABLE else None
+        if http_port > 0 and HTTP_SERVER_AVAILABLE else None
     )
     http_server = None
     try:
         store.connect()
-        if args.http_port > 0 and not HTTP_SERVER_AVAILABLE:
+        if http_port > 0 and not HTTP_SERVER_AVAILABLE:
             logger.warning(
                 "Módulo server no disponible; el endpoint HTTP de debug queda desactivado."
             )
         if snapshot is not None:
             try:
-                http_server = start_server(snapshot, args.http_host, args.http_port)
+                http_server = start_server(snapshot, http_host, http_port)
             except OSError:
                 logger.exception(
                     "No se pudo abrir el endpoint HTTP en %s:%d; el bot sigue sin él.",
-                    args.http_host, args.http_port,
+                    http_host, http_port,
                 )
                 snapshot = None
         SignalBot(
             cfg, feed, store, symbol, interval,
             live_only=live_only, live_since_ms=live_since_ms, snapshot=snapshot,
-        ).run(once=args.once, poll_seconds=args.poll_seconds)
+        ).run(once=run_once, poll_seconds=poll_seconds)
     finally:
         if http_server is not None:
             http_server.shutdown()
@@ -1047,6 +1006,12 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1:
+        logger.error(
+            "bot.py no acepta argumentos de terminal; configura live/.env."
+        )
+        raise SystemExit(2)
+
     signal.signal(signal.SIGINT, request_stop)
     if hasattr(signal, "SIGTERM"):
         signal.signal(signal.SIGTERM, request_stop)
