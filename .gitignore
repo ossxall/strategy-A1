@@ -15,4 +15,4 @@ __pycache__
 .ruff_cache
 .env
 .venv/
-report/backtest_out/html
+strategy/report

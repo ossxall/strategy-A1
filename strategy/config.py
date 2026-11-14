@@ -248,12 +248,12 @@ class Config:
     # Sixth partial take-profit, at a larger distance than TP5.
     #
     partial_tp6_r: float = 3.5
-    partial_tp6_pct: float = 15.0
+    partial_tp6_pct: float = 10.0
     #
     # Seventh partial take-profit, at a larger distance than TP6.
     #
     partial_tp7_r: float = 4.0
-    partial_tp7_pct: float = 15.0
+    partial_tp7_pct: float = 10.0
     #
     # After TP3, the remaining SHORT exits if price exceeds the slow EMA by
     # this %. 0 = touching it is enough.
