@@ -101,7 +101,7 @@ def check_bot() -> bool:
     heartbeat = Path(
         os.getenv("BOT_HEARTBEAT", str(LIVE_DATA_DIR / "bot1.heartbeat"))
     )
-    max_age = float(os.getenv("HEALTHCHECK_MAX_AGE", "180"))
+    max_age = float(os.getenv("BOT_HEALTHCHECK_MAX_AGE", "180"))
     if not heartbeat.exists():
         print(f"[bot] heartbeat aún no existe: {heartbeat}")
         return False
