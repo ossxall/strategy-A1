@@ -1,0 +1,101 @@
+name: Deploy to LightNode
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lightnode-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy main to LightNode VPS
+    if: >-
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.head.ref == 'dev' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      LIGHTNODE_HOST: ${{ secrets.LIGHTNODE_HOST }}
+      LIGHTNODE_USER: ${{ secrets.LIGHTNODE_USER }}
+      LIGHTNODE_SSH_KEY: ${{ secrets.LIGHTNODE_SSH_KEY }}
+      LIGHTNODE_KNOWN_HOSTS: ${{ secrets.LIGHTNODE_KNOWN_HOSTS }}
+      LIGHTNODE_DEPLOY_PATH: ${{ secrets.LIGHTNODE_DEPLOY_PATH }}
+      LIGHTNODE_PORT: ${{ secrets.LIGHTNODE_PORT || '22' }}
+
+    steps:
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${LIGHTNODE_HOST:?Configure the LIGHTNODE_HOST repository secret}"
+          : "${LIGHTNODE_USER:?Configure the LIGHTNODE_USER repository secret}"
+          : "${LIGHTNODE_SSH_KEY:?Configure the LIGHTNODE_SSH_KEY repository secret}"
+          : "${LIGHTNODE_KNOWN_HOSTS:?Configure the LIGHTNODE_KNOWN_HOSTS repository secret}"
+          : "${LIGHTNODE_DEPLOY_PATH:?Configure the LIGHTNODE_DEPLOY_PATH repository secret}"
+
+          if [[ ! "$LIGHTNODE_DEPLOY_PATH" =~ ^/[A-Za-z0-9_./-]+$ ||
+                "$LIGHTNODE_DEPLOY_PATH" == "/" ||
+                "$LIGHTNODE_DEPLOY_PATH" == *"/../"* ||
+                "$LIGHTNODE_DEPLOY_PATH" == */.. ]]; then
+            echo "LIGHTNODE_DEPLOY_PATH must be a safe absolute path." >&2
+            exit 1
+          fi
+          if [[ ! "$LIGHTNODE_PORT" =~ ^[0-9]+$ ]]; then
+            echo "LIGHTNODE_PORT must be numeric." >&2
+            exit 1
+          fi
+
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$LIGHTNODE_SSH_KEY" > "$HOME/.ssh/lightnode_deploy"
+          printf '%s\n' "$LIGHTNODE_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/lightnode_deploy" "$HOME/.ssh/known_hosts"
+
+      - name: Deploy main over SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh \
+            -i "$HOME/.ssh/lightnode_deploy" \
+            -p "$LIGHTNODE_PORT" \
+            -o BatchMode=yes \
+            -o ConnectTimeout=20 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$LIGHTNODE_USER@$LIGHTNODE_HOST" \
+            "bash -s -- '$LIGHTNODE_DEPLOY_PATH'" <<'REMOTE'
+          set -Eeuo pipefail
+
+          deploy_path="$1"
+          repository="https://github.com/ossxall/strategy-A1.git"
+
+          if [[ -d "$deploy_path/.git" ]]; then
+            current_remote="$(git -C "$deploy_path" remote get-url origin)"
+            if [[ "$current_remote" != "$repository" ]]; then
+              echo "The deployment directory has a different origin: $current_remote" >&2
+              exit 1
+            fi
+
+            git -C "$deploy_path" fetch --prune origin main
+            git -C "$deploy_path" checkout main
+            git -C "$deploy_path" merge --ff-only origin/main
+          else
+            if [[ -e "$deploy_path" ]] && [[ -n "$(ls -A "$deploy_path")" ]]; then
+              echo "Deployment directory exists and is not an empty Git checkout." >&2
+              exit 1
+            fi
+            mkdir -p "$(dirname "$deploy_path")"
+            git clone --single-branch --branch main "$repository" "$deploy_path"
+          fi
+
+          cd "$deploy_path/live"
+          docker compose up -d --build --remove-orphans
+          docker compose ps
+          REMOTE
