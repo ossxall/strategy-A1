@@ -76,7 +76,7 @@ def main() -> int:
     if str(live_dir) not in sys.path:
         sys.path.insert(0, str(live_dir))
 
-    from bot.env_profile import load_direct_profile
+    from bot.env import load_direct_profile
 
     load_direct_profile(live_dir)
 

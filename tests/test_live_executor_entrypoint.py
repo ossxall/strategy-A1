@@ -2,7 +2,7 @@ import sys
 import types
 from pathlib import Path
 
-from live.bot.env_profile import load_direct_profile
+from live.bot.env import load_direct_profile
 
 
 def test_direct_executor_loads_dev_profile_before_common_env(monkeypatch, tmp_path):
