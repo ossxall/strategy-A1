@@ -6,3 +6,6 @@ data/
 !/data/.gitkeep
 live/bot/data
 live/data
+/nginx/.htpasswd
+/nginx/tls/*
+!/nginx/tls/.gitkeep

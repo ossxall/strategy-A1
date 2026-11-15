@@ -39,6 +39,31 @@ Instala Docker Engine y Docker Compose 1.29.2; crea en
 Mantén `live/data/` en el host: contiene las bases SQLite persistentes y no debe
 eliminarse al actualizar el código.
 
+### Acceso externo a `/live`
+
+El servicio Nginx publica solo el puerto 80 y protege las rutas `/live/` con
+autenticación básica. **HTTP no cifra las credenciales ni las respuestas**;
+úsalo solo temporalmente y limita el puerto 80 en el firewall a tus IP de
+confianza, o accede mediante una VPN. No lo dejes abierto a Internet.
+
+Antes de iniciar Compose, instala `apache2-utils` y crea el usuario/contraseña
+(el comando solicita la contraseña sin incluirla en el historial):
+
+```bash
+sudo apt-get install apache2-utils
+cd /ruta/al/checkout/live
+sudo htpasswd -cB nginx/.htpasswd operador
+sudo chmod 644 nginx/.htpasswd
+```
+
+Abre el puerto TCP 80 solo para las IP necesarias en los firewalls del VPS y del
+proveedor; no publiques directamente los puertos 8787, 8080 ni 8081. Despliega
+como de costumbre. Las rutas del feed van a `feed`, las de
+`/live/bot/execution/` a `executor` y las demás `/live/bot/` a `bot`.
+
+El archivo de contraseña está excluido de Git. Para volver a HTTPS, instala un
+certificado TLS y configura Nginx antes de abrir el acceso públicamente.
+
 El trading está desactivado por defecto. No actives las opciones de trading real
 como parte del despliegue automático; consulta [PRODUCTION.md](PRODUCTION.md)
 antes de operar.
