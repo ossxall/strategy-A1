@@ -45,10 +45,13 @@ de cuenta o `RECONCILIATION_REQUIRED`, porque podría repetir una acción insegu
 Los fallos al enlazar los endpoints del bot o executor ahora abortan el proceso
 para que el problema no quede oculto.
 
-Los puertos publicados por Compose están ligados a `127.0.0.1`. Si se exponen
-mediante proxy, VPN o una interfaz distinta, añade TLS, autenticación,
-restricción de red y rate limiting: las rutas de estado no incorporan
-autenticación y contienen información operativa de la cuenta.
+Los puertos de feed, bot y executor siguen ligados a `127.0.0.1`. Por ahora
+Nginx publica solo el puerto 80 y enruta `/live/feed/`, `/live/bot/` y
+`/live/bot/execution/` al servicio correspondiente. Las rutas tienen
+autenticación básica y rate limiting, pero **HTTP transmite credenciales y
+respuestas sin cifrar**. Restringe el acceso a IP de confianza o a una VPN y
+habilita HTTPS antes de exponerlo públicamente. Consulta
+[DEPLOYMENT.md](DEPLOYMENT.md).
 
 ## Persistencia, copias y recuperación
 
