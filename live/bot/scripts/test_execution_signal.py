@@ -72,7 +72,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    live_dir = Path(__file__).resolve().parents[1]
+    live_dir = Path(__file__).resolve().parents[2]
     if str(live_dir) not in sys.path:
         sys.path.insert(0, str(live_dir))
 

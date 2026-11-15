@@ -163,11 +163,11 @@ ejecuta el executor con el perfil `dev`. Desde otra terminal, inserta una
 señal con:
 
 ```sh
-python live/bot/test_execution_signal.py --confirm
+python live/bot/scripts/test_execution_signal.py --confirm
 ```
 
-También se puede ejecutar `python test_execution_signal.py --confirm` desde
-`live/bot/`. El script inserta una sola ENTRY de bajo riesgo en la misma base
+También se puede ejecutar `python scripts/test_execution_signal.py --confirm`
+desde `live/bot/`. El script inserta una sola ENTRY de bajo riesgo en la misma base
 configurada para el executor y rechaza cualquier entorno que no sea testnet.
 Usa un riesgo objetivo del 0.12% del equity, leverage objetivo 1x y stop del
 1% (aproximadamente 12 USDT de notional por cada 100 USDT de equity); el límite

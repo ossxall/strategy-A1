@@ -1,7 +1,7 @@
 import json
 
 from live.bot.storage import SignalStore
-from live.bot.test_execution_signal import _test_entry_signal
+from live.bot.scripts.test_execution_signal import _test_entry_signal
 
 
 def test_manual_executor_signal_is_a_small_valid_v3_entry():
