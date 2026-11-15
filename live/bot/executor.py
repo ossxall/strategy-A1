@@ -11,6 +11,9 @@ if __package__ in {None, ""}:
     live_dir = Path(__file__).resolve().parents[1]
     if str(live_dir) not in sys.path:
         sys.path.insert(0, str(live_dir))
+    from bot.env import load_direct_profile
+
+    load_direct_profile(live_dir)
     from bot.execution.worker import ExecutionWorker, ExecutorSettings, main
 else:
     from .execution.worker import ExecutionWorker, ExecutorSettings, main

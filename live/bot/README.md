@@ -24,8 +24,10 @@ el paquete desde el directorio live con `python -m bot`; no hay opciones CLI.
 - `executor.py`: ruta de compatibilidad del worker para consumidores existentes.
 - `__main__.py`: entrypoint sin opciones de CLI.
 
-La configuración operativa se toma de `live/.env` y de las variables de
-entorno del contenedor. No se admiten argumentos de terminal.
+La configuración operativa se toma del perfil de Compose (`live/.env.dev` por
+defecto o `live/.env.prod` con `APP_ENV=prod`) y de las variables de entorno.
+Al ejecutar directamente `python live/bot/executor.py`, el perfil también se
+carga antes de iniciar el worker. No se admiten argumentos de terminal.
 
 ## Reinicio y recuperación
 
@@ -155,6 +157,22 @@ Para habilitar, comienza con claves de testnet y
 `BOT_BINANCE_TRADING_ENABLED=true`. No habilites producción hasta validar fills,
 órdenes reduce-only, stops y recuperación de reinicios en testnet. Usa claves
 sin permisos de retiro y restringidas por IP.
+
+Para una prueba manual del flujo normal, instala `live/requirements.txt` y
+ejecuta el executor con el perfil `dev`. Desde otra terminal, ejecuta:
+
+```sh
+python live/bot/scripts/test_execution_signal.py --confirm
+```
+
+También se puede ejecutar `python scripts/test_execution_signal.py --confirm`
+desde `live/bot/`. Comprueba que el executor esté sano, la cuenta testnet plana
+y sin órdenes, y usa el sizing de estrategia configurado. Después inserta una
+ENTRY, espera el fill y el stop protector, mantiene la posición unos segundos
+y crea una señal EXIT `reduceOnly` por el mismo flujo normal. Espera la
+confirmación de cierre y de cuenta plana; no cierres manualmente esta posición.
+Si un paso requiere reconciliación, el script se detiene y muestra el estado
+en vez de abrir otro ciclo.
 
 ## Visor de backtest live
 
