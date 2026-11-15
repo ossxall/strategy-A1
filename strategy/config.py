@@ -72,7 +72,7 @@ class Config:
     #
     # Maximum leverage applied to position sizing.
     #
-    max_leverage: float = 10.0
+    max_leverage: float = 1.0
     #
     # Stop-loss distance as a fraction of entry price.
     #
