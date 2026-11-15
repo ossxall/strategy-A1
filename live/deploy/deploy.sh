@@ -6,3 +6,5 @@ cd strategy-A1
 
 git checkout main
 
+sudo apt install docker-compose -y
+docker-compose --version
