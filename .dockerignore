@@ -1,0 +1,15 @@
+.git
+**/.git
+**/__pycache__/
+**/*.py[cod]
+**/.ruff_cache/
+**/.venv/
+.venv/
+.env
+.env.*
+**/.env
+**/.env.*
+live/data/
+live/bot/data/
+strategy/report/
+research/

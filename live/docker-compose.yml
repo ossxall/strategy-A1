@@ -10,33 +10,27 @@
 #   esté vacío y reintenta cada POLL_SECONDS, así que nunca queda bloqueado si
 #   el feed tarda o queda unhealthy.
 #
-# Uso (desde ./bot1):
-#   docker compose up -d --build
-#   docker compose ps
-#   docker compose logs -f bot
-#   docker compose down            # detiene servicios; conserva live/data
+# Uso (desde ./live):
+#   docker-compose -p blacker-bot1 up -d --build
+#   docker-compose -p blacker-bot1 ps
+#   docker-compose -p blacker-bot1 logs -f bot
+#   docker-compose -p blacker-bot1 down  # conserva live/data
 #
-# Compose carga primero ../.env y después el perfil según APP_ENV:
-# `prod` usa live/.env.prod; `dev` (valor predeterminado) usa live/.env.dev.
-# Ante claves repetidas, prevalece el perfil. El servicio feed fija algunos
-# valores de despliegue.
+# Compose 1.29 no admite env_file opcional: usa el perfil indicado por APP_ENV
+# (`live/.env.prod` o, por defecto, `live/.env.dev`). Pon ahí las variables que
+# deban llegar a los contenedores.
 # Los datos persistentes se guardan en live/data y no se incluyen en la imagen.
 
-name: blacker-bot1
+version: "2.4"
 
 x-common: &common
   build:
-    context: .
-    # El .dockerignore excluye live/data y otros artefactos locales.
-    additional_contexts:
-      strategy: ../strategy
+    context: ..
+    dockerfile: live/Dockerfile
   image: blacker-bot1:latest
   working_dir: /app/legacy/bot1
   env_file:
-    - path: ../.env
-      required: false
-    - path: .env.${APP_ENV:-dev}
-      required: true
+    - .env.${APP_ENV:-dev}
   volumes:
     - ./data:/data
   init: true
