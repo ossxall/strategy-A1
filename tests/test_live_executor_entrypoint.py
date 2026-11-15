@@ -2,7 +2,7 @@ import sys
 import types
 from pathlib import Path
 
-from live.bot.executor import _load_direct_profile
+from live.bot.env_profile import load_direct_profile
 
 
 def test_direct_executor_loads_dev_profile_before_common_env(monkeypatch, tmp_path):
@@ -19,7 +19,7 @@ def test_direct_executor_loads_dev_profile_before_common_env(monkeypatch, tmp_pa
     dotenv.load_dotenv = fake_load_dotenv
     monkeypatch.setitem(sys.modules, "dotenv", dotenv)
 
-    _load_direct_profile(tmp_path)
+    load_direct_profile(tmp_path)
 
     assert calls == [
         (tmp_path / ".env.dev", False),
@@ -40,6 +40,6 @@ def test_direct_executor_uses_profile_selected_by_app_env(monkeypatch, tmp_path)
     dotenv.load_dotenv = fake_load_dotenv
     monkeypatch.setitem(sys.modules, "dotenv", dotenv)
 
-    _load_direct_profile(tmp_path)
+    load_direct_profile(tmp_path)
 
     assert calls[0] == tmp_path / ".env.prod"
