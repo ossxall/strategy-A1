@@ -1,2 +1,2 @@
-export APP_ENV=production
+export APP_ENV=prod
 echo $APP_ENV
