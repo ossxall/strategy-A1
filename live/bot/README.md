@@ -24,8 +24,10 @@ el paquete desde el directorio live con `python -m bot`; no hay opciones CLI.
 - `executor.py`: ruta de compatibilidad del worker para consumidores existentes.
 - `__main__.py`: entrypoint sin opciones de CLI.
 
-La configuración operativa se toma de `live/.env` y de las variables de
-entorno del contenedor. No se admiten argumentos de terminal.
+La configuración operativa se toma del perfil de Compose (`live/.env.dev` por
+defecto o `live/.env.prod` con `APP_ENV=prod`) y de las variables de entorno.
+Al ejecutar directamente `python live/bot/executor.py`, el perfil también se
+carga antes de iniciar el worker. No se admiten argumentos de terminal.
 
 ## Reinicio y recuperación
 
