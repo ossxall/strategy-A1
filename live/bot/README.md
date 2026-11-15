@@ -13,6 +13,8 @@ el paquete desde el directorio live con `python -m bot`; no hay opciones CLI.
 - `health.py`: endpoints JSON de salud y sondeo en segundo plano de `signal.db`.
 - `app.py`: ciclo de polling y coordinación de los componentes.
 - `execution/worker.py`: consumo y lógica de negocio compartida para las señales.
+- `execution/status.py`: endpoint JSON del executor, servido desde una
+  instantánea en memoria.
 - `execution/test_mode.py`: secuencia y recuperación del modo de prueba; envía
   señales sintéticas por el mismo `run_once()` del worker.
 - `execution/test_mode_policy.py`: sizing y límites de seguridad propios del
@@ -178,6 +180,22 @@ de `signal.db`, los umbrales y los checks calculados. También se conservan
 
 `GET /live/bot/backtest/` sirve el visor estático live y los archivos de datos
 bajo el directorio generado del reporte.
+
+## Estado HTTP del executor
+
+El proceso executor publica `GET /live/bot/execution/status`; el alias es
+`GET /live/bot/execution/health`. Devuelve en JSON la configuración operativa
+(sin credenciales), los ciclos y errores recientes, el estado de reconciliación,
+la última señal y el último snapshot de cuenta. Responde HTTP 200 si está sano y
+503 si está degradado o no sano.
+
+El endpoint se atiende en un servidor separado, con concurrencia y timeout
+limitados. Solo lee una instantánea en memoria: no consulta SQLite ni Binance,
+por lo que no espera al ciclo de ejecución. Se configura con
+`BOT_EXECUTOR_HTTP_HOST` (por defecto `127.0.0.1`),
+`BOT_EXECUTOR_HTTP_PORT` (por defecto `8081`), `BOT_EXECUTOR_HTTP_MAX_CLIENTS`
+y `BOT_EXECUTOR_HTTP_REQUEST_TIMEOUT`. En Compose está publicado en
+`http://127.0.0.1:8081/live/bot/execution/status`.
 
 El servidor usa concurrencia limitada y solo lee una instantánea en memoria.
 El sondeo de SQLite ocurre en un hilo aparte con timeout, por lo que las

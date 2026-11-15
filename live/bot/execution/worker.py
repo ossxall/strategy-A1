@@ -9,6 +9,7 @@ import math
 import os
 import signal
 import socket
+import threading
 import time
 from dataclasses import dataclass
 from decimal import ROUND_DOWN, ROUND_UP, Decimal, InvalidOperation
@@ -33,6 +34,7 @@ from .test_mode_policy import (
     calculate_test_entry_quantity,
     validate_test_order_notional,
 )
+from .status import ExecutionHealth, start_execution_status_server
 
 LOG = logging.getLogger("bot1.executor")
 
@@ -129,6 +131,10 @@ class ExecutorSettings:
     production_audit_enabled: bool = False
     production_audit_api_key: str = ""
     production_audit_api_secret: str = ""
+    http_host: str = "127.0.0.1"
+    http_port: int = 8081
+    http_max_clients: int = 8
+    http_request_timeout: float = 1.0
 
     @classmethod
     def from_env(cls) -> ExecutorSettings:
@@ -194,6 +200,12 @@ class ExecutorSettings:
             production_audit_api_secret=env_str(
                 "BINANCE_PRODUCTION_AUDIT_API_SECRET", ""
             ).strip(),
+            http_host=env_str("EXECUTOR_HTTP_HOST", "127.0.0.1").strip(),
+            http_port=max(0, env_int("EXECUTOR_HTTP_PORT", 8081)),
+            http_max_clients=max(1, env_int("EXECUTOR_HTTP_MAX_CLIENTS", 8)),
+            http_request_timeout=max(
+                0.1, env_float("EXECUTOR_HTTP_REQUEST_TIMEOUT", 1.0)
+            ),
         )
 
 
@@ -218,6 +230,8 @@ class ExecutionWorker:
         self._last_account_poll = 0.0
         self._rules_cache: dict[str, dict] = {}
         self._heartbeat_path = self.settings.heartbeat_path
+        self.health = ExecutionHealth(self.settings)
+        self.health.set_worker_id(self.worker_id)
 
         if self.settings.environment not in {"testnet", "production"}:
             raise ValueError("BOT_BINANCE_ENVIRONMENT debe ser testnet o production")
@@ -297,6 +311,7 @@ class ExecutionWorker:
         )
         self._refresh_account_snapshot()
         self._started = True
+        self.health.record_worker_initialized(True)
         LOG.warning(
             "Executor conectado a Binance %s para %s; el envío de órdenes está "
             "habilitado explícitamente.",
@@ -403,6 +418,7 @@ class ExecutionWorker:
                 self.gateway.open_algo_orders(self.settings.symbol), "orders"
             )
         except Exception as exc:
+            self.health.record_account_snapshot(error=str(exc))
             self.store.save_account_snapshot(
                 self.settings.account_id,
                 self.settings.environment,
@@ -422,6 +438,7 @@ class ExecutionWorker:
             "open_orders": open_orders,
             "open_algo_orders": open_algo_orders,
         }
+        self.health.record_account_snapshot(snapshot)
         self.store.save_account_snapshot(
             self.settings.account_id,
             self.settings.environment,
@@ -904,6 +921,12 @@ class ExecutionWorker:
             result=result,
             error=error,
             reconciled_at_ms=self.clock_ms(),
+        )
+        self.health.record_execution(
+            signal,
+            status,
+            order_status=order_status,
+            error=error,
         )
 
     def _record_order_result(
@@ -1591,6 +1614,17 @@ class ExecutionWorker:
         return blocked
 
     def run_once(self) -> None:
+        self.health.begin_cycle()
+        try:
+            self._run_once()
+        except Exception as exc:
+            self.health.finish_cycle(status="error", error=str(exc))
+            raise
+        else:
+            self.health.record_worker_initialized(self._started)
+            self.health.finish_cycle(status="ok")
+
+    def _run_once(self) -> None:
         self._mark_heartbeat()
         if not self.settings.enabled:
             LOG.debug(
@@ -1599,13 +1633,16 @@ class ExecutionWorker:
             return
         self._initialize()
         if self._reconcile_inflight():
+            self.health.record_reconciliation_block(True)
             self.store.set_account_snapshot_error(
                 self.settings.account_id,
                 "Hay órdenes pendientes o requieren reconciliación",
             )
             return
+        self.health.record_reconciliation_block(False)
         snapshot = self._reconcile_protective_stops(self._account_snapshot())
         consistency_error = self._account_consistency_error(snapshot)
+        self.health.record_account_consistency(consistency_error)
         self.store.set_account_snapshot_error(
             self.settings.account_id, consistency_error
         )
@@ -1621,6 +1658,7 @@ class ExecutionWorker:
         )
         if signal is None:
             return
+        self.health.record_signal(signal)
         if int(signal["schema_version"]) < 3:
             self._update_state(
                 signal, "REJECTED", error="schema_version de señal no compatible"
@@ -1687,16 +1725,37 @@ def main() -> int:
         if hasattr(signal, "SIGTERM"):
             signal.signal(signal.SIGTERM, lambda *_: STOP_EVENT.set())
         worker = ExecutionWorker(settings, store)
+        health = worker.health
+        http_server = None
+        http_thread = None
+        health.mark_running()
+        if settings.http_port > 0:
+            try:
+                http_server, http_thread = start_execution_status_server(
+                    health,
+                    settings.http_host,
+                    settings.http_port,
+                    max_clients=settings.http_max_clients,
+                    request_timeout=settings.http_request_timeout,
+                    worker_thread=threading.current_thread(),
+                )
+            except OSError:
+                LOG.exception(
+                    "No se pudo abrir el endpoint del executor en %s:%d; "
+                    "el worker sigue sin él.",
+                    settings.http_host,
+                    settings.http_port,
+                )
         if not settings.enabled:
             logger.warning(
                 "Executor iniciado en modo seguro: "
                 "BOT_BINANCE_TRADING_ENABLED=false; no se enviarán órdenes."
             )
-        if settings.test_mode:
-            from .test_mode import run_test_mode
+        try:
+            if settings.test_mode:
+                from .test_mode import run_test_mode
 
-            return run_test_mode(worker)
-        else:
+                return run_test_mode(worker)
             while not STOP_EVENT.is_set():
                 started = time.monotonic()
                 try:
@@ -1709,6 +1768,13 @@ def main() -> int:
                     0.0, settings.poll_seconds - (time.monotonic() - started)
                 )
                 STOP_EVENT.wait(delay)
+        finally:
+            health.mark_stopped()
+            if http_server is not None:
+                http_server.shutdown()
+                http_server.server_close()
+            if http_thread is not None:
+                http_thread.join(timeout=2)
     finally:
         store.close()
     return 0
