@@ -701,6 +701,191 @@ def test_signal_migration_preserves_parent_unique_index_for_foreign_keys(tmp_pat
         store.close()
 
 
+def test_signal_store_opens_existing_database_without_losing_live_state(tmp_path):
+    """A database from the deployed v3 schema must survive an application upgrade."""
+    path = tmp_path / "deployed-signal.db"
+    connection = sqlite3.connect(path)
+    connection.executescript(
+        """
+        CREATE TABLE signals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            signal_id TEXT NOT NULL,
+            schema_version INTEGER NOT NULL DEFAULT 3,
+            symbol TEXT NOT NULL,
+            interval TEXT NOT NULL,
+            timeframe TEXT NOT NULL,
+            bar_time INTEGER NOT NULL,
+            signal_time INTEGER NOT NULL,
+            event TEXT NOT NULL,
+            action TEXT NOT NULL CHECK (action IN ('OPEN', 'CLOSE', 'PARTIAL_CLOSE')),
+            signal TEXT NOT NULL,
+            side TEXT,
+            position_id INTEGER,
+            scheduled INTEGER NOT NULL DEFAULT 0 CHECK (scheduled IN (0, 1)),
+            reason TEXT NOT NULL,
+            price REAL,
+            ema_fast REAL,
+            ema_slow REAL,
+            adx_entry REAL,
+            executed INTEGER NOT NULL DEFAULT 0 CHECK (executed IN (0, 1)),
+            created_at TEXT NOT NULL,
+            payload TEXT NOT NULL DEFAULT '{}'
+        );
+        CREATE UNIQUE INDEX ux_signals_signal_id ON signals(signal_id);
+        CREATE TABLE signal_execution (
+            account_id TEXT NOT NULL,
+            signal_id TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'READY',
+            attempt_count INTEGER NOT NULL DEFAULT 0,
+            lease_owner TEXT,
+            lease_until_ms INTEGER,
+            client_order_id TEXT,
+            exchange_order_id TEXT,
+            filled_qty REAL NOT NULL DEFAULT 0,
+            average_fill_price REAL,
+            order_status TEXT,
+            result_json TEXT NOT NULL DEFAULT '{}',
+            last_reconciled_at_ms INTEGER,
+            last_error TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (account_id, signal_id),
+            FOREIGN KEY (signal_id) REFERENCES signals(signal_id)
+                ON UPDATE CASCADE ON DELETE RESTRICT
+        );
+        CREATE TABLE bot_state (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+        CREATE TABLE signal_consumer_state (
+            account_id TEXT PRIMARY KEY,
+            activation_cutoff_ms INTEGER NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE binance_account_snapshot (
+            account_id TEXT PRIMARY KEY,
+            environment TEXT NOT NULL,
+            observed_at_ms INTEGER NOT NULL,
+            wallet_balance REAL,
+            available_balance REAL,
+            positions_json TEXT NOT NULL DEFAULT '[]',
+            open_orders_json TEXT NOT NULL DEFAULT '[]',
+            last_error TEXT
+        );
+        CREATE TABLE execution_adjustments (
+            account_id TEXT NOT NULL,
+            symbol TEXT NOT NULL,
+            position_id INTEGER NOT NULL,
+            adjustment_id TEXT NOT NULL,
+            quantity REAL NOT NULL CHECK (quantity >= 0),
+            price REAL,
+            reason TEXT NOT NULL,
+            observed_at_ms INTEGER NOT NULL,
+            PRIMARY KEY (account_id, symbol, position_id, adjustment_id)
+        );
+        PRAGMA user_version = 3;
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO signals (
+            signal_id, schema_version, symbol, interval, timeframe, bar_time,
+            signal_time, event, action, signal, side, position_id, scheduled,
+            reason, executed, created_at, payload
+        ) VALUES (
+            'persisted-signal', 3, 'BTCUSDT', '1m', '30min', 1000, 1000,
+            'ENTRY', 'OPEN', 'LONG', 'LONG', 17, 0, 'EMA_CROSS', 0,
+            '2026-01-01T00:00:00+00:00', '{"action":"OPEN","position_id":17}'
+        )
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO signal_execution (
+            account_id, signal_id, status, attempt_count, filled_qty,
+            average_fill_price, order_status, result_json
+        ) VALUES (
+            'production', 'persisted-signal', 'FILLED', 1, 2.5, 100.25,
+            'FILLED', '{"exchange":"binance"}'
+        )
+        """
+    )
+    connection.execute(
+        "INSERT INTO bot_state(key, value) VALUES ('live_since_ms', '123456')"
+    )
+    connection.execute(
+        """
+        INSERT INTO signal_consumer_state(account_id, activation_cutoff_ms)
+        VALUES ('production', 900)
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO binance_account_snapshot(
+            account_id, environment, observed_at_ms, wallet_balance,
+            available_balance, positions_json, open_orders_json
+        ) VALUES ('production', 'live', 1200, 500, 450, '[{"symbol":"BTCUSDT"}]', '[]')
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO execution_adjustments(
+            account_id, symbol, position_id, adjustment_id, quantity,
+            price, reason, observed_at_ms
+        ) VALUES ('production', 'BTCUSDT', 17, 'adjustment-1', 0.25, 100,
+                  'manual-close', 1300)
+        """
+    )
+    connection.commit()
+    connection.close()
+
+    store = SignalStore(path)
+    store.connect()
+    try:
+        signal = store.list_due_signals(now_ms=2_000)
+        assert len(signal) == 1
+        assert signal[0]["signal_id"] == "persisted-signal"
+        assert signal[0]["position_id"] == 17
+
+        assert store.get_execution_state(
+            "production", "persisted-signal"
+        ) == {
+            "status": "FILLED",
+            "client_order_id": None,
+            "order_status": "FILLED",
+            "result": {"exchange": "binance"},
+            "filled_qty": 2.5,
+            "average_fill_price": 100.25,
+            "error": None,
+        }
+        assert store.get_state("live_since_ms") == "123456"
+        assert store.initialize_signal_consumer(
+            "production", now_ms=100_000, initial_backfill_ms=50_000
+        ) == 900
+        assert store.get_active_execution_positions(
+            "production", "BTCUSDT"
+        ) == [
+            {
+                "position_id": 17,
+                "side": "LONG",
+                "entered_qty": 2.5,
+                "exited_qty": 0.0,
+                "adjusted_qty": 0.25,
+                "open_qty": 2.25,
+                "has_entry": True,
+            }
+        ]
+        assert store.conn.execute(
+            "SELECT wallet_balance FROM binance_account_snapshot "
+            "WHERE account_id='production'"
+        ).fetchone()[0] == 500
+        assert store.conn.execute(
+            "SELECT COUNT(*) FROM execution_adjustments"
+        ).fetchone()[0] == 1
+    finally:
+        store.close()
+
+
 def test_events_to_trades_orders_same_open_by_source_bar_then_exit_priority():
     events = [
         {
