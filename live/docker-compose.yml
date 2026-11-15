@@ -3,7 +3,7 @@
 # - Los servicios comparten ./data (live/data en el host), montado como /data.
 # - `feed` escribe feed.db (WAL); `bot` solo lee feed.db y escribe signal.db.
 # - `executor` consume signal.db y registra su estado por cuenta; trading está
-#   desactivado por defecto en `live/.env`.
+#   desactivado por defecto en `live/.env.dev`.
 # - Resiliencia: `restart: unless-stopped`, `init: true`, healthchecks reales
 #   y límites de log. El bot solo espera a que el contenedor del feed ARRANQUE
 #   (`service_started`), no a que esté sano: el paquete bot tolera que feed.db falte o
@@ -16,8 +16,8 @@
 #   docker compose logs -f bot
 #   docker compose down            # detiene servicios; conserva live/data
 #
-# Compose carga primero ../.env y después live/.env; ante claves repetidas,
-# prevalece live/.env. El servicio feed fija algunos valores de despliegue.
+# Compose carga primero ../.env y después live/.env.dev; ante claves repetidas,
+# prevalece live/.env.dev. El servicio feed fija algunos valores de despliegue.
 # Los datos persistentes se guardan en live/data y no se incluyen en la imagen.
 
 name: blacker-bot1
@@ -33,7 +33,7 @@ x-common: &common
   env_file:
     - path: ../.env
       required: false
-    - path: .env
+    - path: .env.dev
       required: false
   volumes:
     - ./data:/data
