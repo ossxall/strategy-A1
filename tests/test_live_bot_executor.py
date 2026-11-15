@@ -868,7 +868,11 @@ def test_worker_does_not_close_untracked_binance_position(tmp_path):
         last_error = store.conn.execute(
             "SELECT last_error FROM binance_account_snapshot"
         ).fetchone()[0]
-        assert "sin ENTRY ejecutada" in last_error
+        assert last_error is None
+        health = worker.health.build_payload("127.0.0.1", 8081, 1.0)
+        assert "sin ENTRY ejecutada" in health["executor"][
+            "account_consistency_error"
+        ]
     finally:
         store.close()
 

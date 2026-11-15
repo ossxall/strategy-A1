@@ -159,20 +159,20 @@ Para habilitar, comienza con claves de testnet y
 sin permisos de retiro y restringidas por IP.
 
 Para una prueba manual del flujo normal, instala `live/requirements.txt` y
-ejecuta el executor con el perfil `dev`. Desde otra terminal, inserta una
-señal con:
+ejecuta el executor con el perfil `dev`. Desde otra terminal, ejecuta:
 
 ```sh
 python live/bot/scripts/test_execution_signal.py --confirm
 ```
 
 También se puede ejecutar `python scripts/test_execution_signal.py --confirm`
-desde `live/bot/`. El script inserta una sola ENTRY de bajo riesgo en la misma base
-configurada para el executor y rechaza cualquier entorno que no sea testnet.
-Usa un riesgo objetivo del 0.12% del equity, leverage objetivo 1x y stop del
-1% (aproximadamente 12 USDT de notional por cada 100 USDT de equity); el límite
-de exposición del executor sigue aplicándose. La entrada puede dejar una
-posición testnet abierta; revisa el estado y ciérrala antes de repetir.
+desde `live/bot/`. Comprueba que el executor esté sano, la cuenta testnet plana
+y sin órdenes, y usa el sizing de estrategia configurado. Después inserta una
+ENTRY, espera el fill y el stop protector, mantiene la posición unos segundos
+y crea una señal EXIT `reduceOnly` por el mismo flujo normal. Espera la
+confirmación de cierre y de cuenta plana; no cierres manualmente esta posición.
+Si un paso requiere reconciliación, el script se detiene y muestra el estado
+en vez de abrir otro ciclo.
 
 ## Visor de backtest live
 

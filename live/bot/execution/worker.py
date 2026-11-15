@@ -1634,18 +1634,11 @@ class ExecutionWorker:
         self._initialize()
         if self._reconcile_inflight():
             self.health.record_reconciliation_block(True)
-            self.store.set_account_snapshot_error(
-                self.settings.account_id,
-                "Hay órdenes pendientes o requieren reconciliación",
-            )
             return
         self.health.record_reconciliation_block(False)
         snapshot = self._reconcile_protective_stops(self._account_snapshot())
         consistency_error = self._account_consistency_error(snapshot)
         self.health.record_account_consistency(consistency_error)
-        self.store.set_account_snapshot_error(
-            self.settings.account_id, consistency_error
-        )
         if consistency_error:
             LOG.error("Cuenta Binance fuera de sincronía: %s", consistency_error)
             return
