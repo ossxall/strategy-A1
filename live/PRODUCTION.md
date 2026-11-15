@@ -24,10 +24,10 @@
 Desde `live/`:
 
 ```bash
-docker compose config
-docker compose up -d --build
-docker compose ps
-docker compose logs --tail=200 feed bot executor
+docker-compose -p blacker-bot1 config
+docker-compose -p blacker-bot1 up -d --build
+docker-compose -p blacker-bot1 ps
+docker-compose -p blacker-bot1 logs --tail=200 feed bot executor
 ```
 
 Los healthchecks consultan ahora las rutas `/live/feed/health`,
@@ -39,7 +39,7 @@ snapshots de SQLite cuando aplica.
 
 **Docker Compose no reinicia automáticamente un contenedor solo por estar
 `unhealthy`.** `restart: unless-stopped` cubre salidas del proceso, no fallos de
-readiness. Supervisa `docker compose ps` y configura alertas/acción operativa
+readiness. Supervisa `docker-compose -p blacker-bot1 ps` y configura alertas/acción operativa
 para `unhealthy`; no reinicies automáticamente el executor ante una discrepancia
 de cuenta o `RECONCILIATION_REQUIRED`, porque podría repetir una acción insegura.
 Los fallos al enlazar los endpoints del bot o executor ahora abortan el proceso

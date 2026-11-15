@@ -1,4 +1,4 @@
-# syntax no requerido: los named build contexts funcionan con BuildKit estándar.
+# El contexto de build es la raíz del repositorio para incluir live/ y strategy/.
 FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
@@ -7,14 +7,14 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
 # Dependencias del bot y del colector.
-COPY requirements.txt /tmp/requirements.txt
+COPY live/requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
 WORKDIR /app/legacy
 
 # Lanzador del servicio, paquete del bot y paquete compartido de estrategia.
-COPY . /app/legacy/bot1/
-COPY --from=strategy . /app/legacy/strategy/
+COPY live/ /app/legacy/bot1/
+COPY strategy/ /app/legacy/strategy/
 
 # Limpieza de artefactos locales que no deben ir a la imagen.
 RUN rm -rf \
