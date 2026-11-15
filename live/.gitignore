@@ -9,3 +9,4 @@ live/data
 /nginx/.htpasswd
 /nginx/tls/*
 !/nginx/tls/.gitkeep
+/data

@@ -23,5 +23,7 @@ def test_write_outputs_copies_report_template_inside_strategy_without_moving_it(
 
     copied_report = tmp_path / "strategy" / "report" / "index.html"
     assert copied_report.read_bytes() == original_content
+    generated_report = tmp_path / "strategy" / "report" / "report.html"
+    assert generated_report.read_bytes() == original_content
     assert template.is_file()
     assert template.read_bytes() == original_content

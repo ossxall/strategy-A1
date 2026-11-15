@@ -98,6 +98,81 @@ def test_strategy_parameters_continue_to_load_from_environment(monkeypatch):
     assert config.ema_slow == 21
 
 
+def test_backtest_mode_generates_report_without_publishing_signals(
+    tmp_path, monkeypatch
+):
+    bars = make_bars(3)
+
+    class Feed:
+        def load_closed(self):
+            return bars
+
+    class Store:
+        def insert(self, events):
+            raise AssertionError("el backtest no debe publicar eventos live")
+
+    class Engine:
+        def __init__(self, *args):
+            self.volume_exit = np.array([False, False, False])
+
+        def run(self):
+            return pd.DataFrame(), pd.DataFrame(
+                {"timestamp": bars.index, "equity": [100.0, 100.0, 100.0]}
+            )
+
+    calls = []
+    monkeypatch.setattr(bot_app, "Backtester", Engine)
+    monkeypatch.setattr(
+        "strategy.report.generate_report",
+        lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+
+    bot = SignalBot(
+        make_config(),
+        feed=Feed(),
+        store=Store(),
+        symbol="BTCUSDT",
+        interval="1m",
+        min_bars=2,
+        backtest_report_dir=tmp_path / "backtest_out",
+        mode="backtest",
+    )
+    monkeypatch.setattr(
+        bot.strategy,
+        "generate_signals",
+        lambda frame, raw: make_signals(frame, [0, 0, 0]),
+    )
+    monkeypatch.setattr(
+        bot.strategy,
+        "prepare_exits",
+        lambda raw, frame: (None, None, None),
+    )
+
+    assert bot.process_once() == 0
+    assert bot._backtest_complete is True
+    assert len(calls) == 1
+    assert calls[0][1]["output_dir"] == tmp_path / "backtest_out"
+    assert calls[0][1]["volume_exit"].tolist() == [False, False, False]
+    assert calls[0][0][2] is bot.cfg
+    assert calls[0][0][4] == "BTCUSDT 1m feed.db"
+
+
+def test_bot_rejects_unknown_mode():
+    try:
+        SignalBot(
+            make_config(),
+            feed=None,
+            store=None,
+            symbol="BTCUSDT",
+            interval="1m",
+            mode="replay",
+        )
+    except ValueError as exc:
+        assert "BOT_MODE" in str(exc)
+    else:
+        raise AssertionError("el modo desconocido debe rechazarse")
+
+
 def test_last_closed_bar_entry_is_published_for_next_open_without_waiting_next_close():
     bars = make_bars(2)
     events = build_events(

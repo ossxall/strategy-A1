@@ -8,6 +8,7 @@ from pathlib import Path
 from .config import (
     DB_PATH,
     INTERVAL,
+    INTERVAL_MS,
     STATUS_DB_PROBE_INTERVAL,
     STATUS_DB_TIMEOUT,
     SYMBOL,
@@ -117,6 +118,47 @@ def get_latest_open_time():
                 (SYMBOL, INTERVAL),
             ).fetchone()
             return row[0] if row and row[0] is not None else None
+        finally:
+            conn.close()
+
+
+def get_first_missing_candle_range(start_time_ms):
+    """Devuelve el primer rango de velas ausente desde la fecha configurada."""
+    with STATE.db_lock:
+        conn = db_connect()
+        try:
+            first = conn.execute(
+                """
+                SELECT MIN(open_time)
+                FROM candles
+                WHERE symbol=? AND interval=? AND open_time >= ?
+                """,
+                (SYMBOL, INTERVAL, start_time_ms),
+            ).fetchone()[0]
+            if first is None:
+                return None
+            if first > start_time_ms:
+                return start_time_ms, first - INTERVAL_MS
+
+            gap = conn.execute(
+                """
+                SELECT open_time, next_open_time
+                FROM (
+                    SELECT
+                        open_time,
+                        LEAD(open_time) OVER (ORDER BY open_time) AS next_open_time
+                    FROM candles
+                    WHERE symbol=? AND interval=? AND open_time >= ?
+                )
+                WHERE next_open_time > open_time + ?
+                ORDER BY open_time
+                LIMIT 1
+                """,
+                (SYMBOL, INTERVAL, start_time_ms, INTERVAL_MS),
+            ).fetchone()
+            if gap is None:
+                return None
+            return gap[0] + INTERVAL_MS, gap[1] - INTERVAL_MS
         finally:
             conn.close()
 

@@ -12,7 +12,7 @@ import time
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
 from .config import logger
 
@@ -24,6 +24,7 @@ except ImportError:  # ejecución como paquete top-level desde live/
 HEALTH_ROUTE = "/live/bot/health"
 STATUS_ROUTE = "/live/bot/status"
 BACKTEST_ROUTE = "/live/bot/backtest"
+REPORT_ROUTE = "/live/bot/report"
 LEGACY_ROUTES = ("/health", "/status")
 HEALTH_ROUTES = (HEALTH_ROUTE, STATUS_ROUTE, *LEGACY_ROUTES)
 _INTERVAL_SECONDS = {"s": 1, "m": 60, "h": 3600, "d": 86_400, "w": 604_800}
@@ -101,6 +102,7 @@ class BotHealth:
         live_only: bool,
         live_since_ms: int | None,
         probe_interval_seconds: float,
+        mode: str = "live",
     ):
         self.symbol = symbol
         self.interval = interval
@@ -111,6 +113,7 @@ class BotHealth:
         self.min_bars = min_bars
         self.live_only = live_only
         self.live_since_ms = live_since_ms
+        self.mode = mode
         self.probe_interval_seconds = probe_interval_seconds
         self.started_monotonic = time.monotonic()
         self.stop_event = threading.Event()
@@ -139,6 +142,7 @@ class BotHealth:
                 "check_duration_seconds": None,
                 "last_signal_time_ms": None,
                 "last_error": "sondeo pendiente",
+                "required": self.mode != "backtest",
             },
         }
 
@@ -159,6 +163,9 @@ class BotHealth:
             loop_status="running",
             last_heartbeat_monotonic=time.monotonic(),
         )
+
+    def heartbeat(self) -> None:
+        self._update(last_heartbeat_monotonic=time.monotonic())
 
     def begin_cycle(self) -> None:
         now = time.monotonic()
@@ -272,13 +279,19 @@ class BotHealth:
             "last_cycle_ok": state["last_cycle_status"] == "ok",
             "feed_data_available": state["feed_rows"] > 0,
             "feed_candle_fresh": (
-                latest_candle_age is not None
+                True
+                if self.mode == "backtest"
+                else latest_candle_age is not None
                 and latest_candle_age <= candle_max_age
             ),
             "strategy_ready": state["strategy_ready"],
-            "signal_database_available": bool(database["available"]),
+            "signal_database_available": (
+                True if self.mode == "backtest" else bool(database["available"])
+            ),
             "signal_database_probe_fresh": (
-                database_age is not None and database_age <= database_max_age
+                True
+                if self.mode == "backtest"
+                else database_age is not None and database_age <= database_max_age
             ),
             "database_probe_thread_alive": database_probe_alive,
             "http_server_alive": http_server_alive,
@@ -307,6 +320,7 @@ class BotHealth:
 
         database["check_age_seconds"] = database_age
         database["check_max_age_seconds"] = database_max_age
+        database["required"] = self.mode != "backtest"
         database["last_signal_time"] = (
             datetime.fromtimestamp(
                 database["last_signal_time_ms"] / 1000, timezone.utc
@@ -345,6 +359,7 @@ class BotHealth:
                 "min_bars": self.min_bars,
                 "live_only": self.live_only,
                 "live_since_ms": self.live_since_ms,
+                "mode": self.mode,
                 "status_endpoint": {
                     "host": host,
                     "port": port,
@@ -425,6 +440,7 @@ def _make_handler(
     configured_port: int,
     request_timeout: float,
     backtest_dir: Path | None = None,
+    report_dir: Path | None = None,
 ):
     class _BotHealthHandler(BaseHTTPRequestHandler):
         server_version = "bot-health/1.0"
@@ -489,8 +505,66 @@ def _make_handler(
             except (OSError, RuntimeError, ValueError):
                 self.send_error(404, "archivo no encontrado")
 
+        def serve_report_file(self, request_path: str):
+            if report_dir is None:
+                self.send_error(404, "reporte no disponible")
+                return
+            query = parse_qs(urlparse(self.path).query)
+            if request_path == REPORT_ROUTE or (
+                request_path == f"{REPORT_ROUTE}/" and not query.get("data")
+            ):
+                data_dir = quote(Path(report_dir).name + "/", safe="/")
+                self.send_response(308)
+                self.send_header(
+                    "Location", f"{REPORT_ROUTE}/?data={data_dir}"
+                )
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+
+            data_root = Path(report_dir).resolve()
+            root = data_root.parent
+            relative = unquote(request_path[len(REPORT_ROUTE):]).lstrip("/")
+            try:
+                if not relative or relative == "index.html":
+                    target = root / "report.html"
+                    if not target.is_file():
+                        target = root / "index.html"
+                    target.resolve().relative_to(root)
+                else:
+                    target = (root / relative).resolve()
+                    target.relative_to(data_root)
+                if not target.is_file():
+                    self.send_error(404, "archivo no encontrado")
+                    return
+                with target.open("rb") as content:
+                    size = os.fstat(content.fileno()).st_size
+                    content_type, _ = mimetypes.guess_type(target.name)
+                    content_type = content_type or "application/octet-stream"
+                    if content_type.startswith("text/") or content_type in {
+                        "application/json",
+                        "application/javascript",
+                    }:
+                        content_type += "; charset=utf-8"
+                    self.send_response(200)
+                    self.send_header("Content-Type", content_type)
+                    self.send_header("Content-Length", str(size))
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("X-Content-Type-Options", "nosniff")
+                    self.send_header("Connection", "close")
+                    self.end_headers()
+                    shutil.copyfileobj(content, self.wfile)
+            except (OSError, RuntimeError, ValueError):
+                self.send_error(404, "archivo no encontrado")
+
         def do_GET(self):
             path = urlparse(self.path).path
+            if path == REPORT_ROUTE or path.startswith(f"{REPORT_ROUTE}/"):
+                try:
+                    self.serve_report_file(path)
+                except OSError:
+                    pass
+                return
             if path == BACKTEST_ROUTE or path.startswith(f"{BACKTEST_ROUTE}/"):
                 try:
                     self.serve_backtest_file(path)
@@ -507,6 +581,7 @@ def _make_handler(
                                 HEALTH_ROUTE,
                                 STATUS_ROUTE,
                                 f"{BACKTEST_ROUTE}/",
+                                f"{REPORT_ROUTE}/",
                             ],
                         },
                     )
@@ -556,8 +631,11 @@ def start_health_server(
     probe_interval: float = 5.0,
     probe_timeout: float = 0.2,
     backtest_dir: Path | None = None,
+    report_dir: Path | None = None,
 ):
-    handler = _make_handler(health, host, port, request_timeout, backtest_dir)
+    handler = _make_handler(
+        health, host, port, request_timeout, backtest_dir, report_dir
+    )
     server = _BotHealthHTTPServer(
         (host, port), handler, max_clients=max(1, max_clients)
     )
@@ -570,9 +648,21 @@ def start_health_server(
 
     def probe_worker():
         while not health.stop_event.is_set():
-            health.record_database_probe(
-                probe_signal_database(signal_path, probe_timeout)
-            )
+            if health.mode == "backtest":
+                health.record_database_probe(
+                    {
+                        "available": True,
+                        "checked_at": _utc_iso(),
+                        "check_duration_seconds": 0.0,
+                        "last_signal_time_ms": None,
+                        "last_error": None,
+                        "required": False,
+                    }
+                )
+            else:
+                health.record_database_probe(
+                    probe_signal_database(signal_path, probe_timeout)
+                )
             health.stop_event.wait(max(0.1, probe_interval))
 
     probe_thread = threading.Thread(

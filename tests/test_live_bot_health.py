@@ -125,6 +125,49 @@ def test_backtest_route_serves_html_and_data_without_escaping_report_dir(tmp_pat
         probe_thread.join(timeout=1)
 
 
+def test_report_route_serves_dashboard_and_only_its_data(tmp_path):
+    report_dir = tmp_path / "history"
+    report_dir.mkdir()
+    (tmp_path / "report.html").write_text(
+        "<h1>reporte</h1>", encoding="utf-8"
+    )
+    (report_dir / "metrics.json").write_text('{"positions":1}', encoding="utf-8")
+    secret = tmp_path / "secret.txt"
+    secret.write_text("no publicar", encoding="utf-8")
+
+    health = _make_health(tmp_path)
+    server, http_thread, probe_thread = start_health_server(
+        health,
+        "127.0.0.1",
+        0,
+        tmp_path / "signal.db",
+        report_dir=report_dir,
+    )
+    base_url = f"http://127.0.0.1:{server.server_address[1]}/live/bot/report"
+    try:
+        with urlopen(base_url + "/", timeout=1) as response:
+            assert response.status == 200
+            assert response.headers["Content-Type"].startswith("text/html")
+            assert response.read() == b"<h1>reporte</h1>"
+            assert response.geturl().endswith("?data=history/")
+
+        with urlopen(base_url + "/history/metrics.json", timeout=1) as response:
+            assert json.load(response) == {"positions": 1}
+
+        try:
+            urlopen(base_url + "/secret.txt", timeout=1)
+        except HTTPError as response:
+            assert response.code == 404
+        else:
+            raise AssertionError("la ruta no debe servir archivos ajenos al reporte")
+    finally:
+        health.stop()
+        server.shutdown()
+        server.server_close()
+        http_thread.join(timeout=1)
+        probe_thread.join(timeout=1)
+
+
 def test_health_endpoint_returns_promptly_if_snapshot_lock_is_held(tmp_path):
     health = _make_health(tmp_path)
     server, http_thread, probe_thread = start_health_server(

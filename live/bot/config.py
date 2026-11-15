@@ -47,6 +47,7 @@ STOP_EVENT = threading.Event()
 # Defaults operativos; live/.env puede sobrescribirlos con claves BOT_.
 DEFAULT_SYMBOL = "BTCUSDT"
 DEFAULT_INTERVAL = "1m"
+DEFAULT_MODE = "live"
 DEFAULT_FEED_DB = "data/feed.db"
 DEFAULT_SIGNAL_DB = "data/signal.db"
 DEFAULT_BACKTEST_REPORT_DIR = "bot/data/backtest_out"

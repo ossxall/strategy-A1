@@ -26,8 +26,9 @@ el paquete desde el directorio live con `python -m bot`; no hay opciones CLI.
 
 La configuración operativa se toma del perfil de Compose (`live/.env.dev` por
 defecto o `live/.env.prod` con `APP_ENV=prod`) y de las variables de entorno.
-Al ejecutar directamente `python live/bot/executor.py`, el perfil también se
-carga antes de iniciar el worker. No se admiten argumentos de terminal.
+Al ejecutar directamente `python live/bot.py`, `python -m bot` o
+`python live/bot/executor.py`, el perfil también se carga antes de iniciar el
+proceso. No se admiten argumentos de terminal.
 
 ## Reinicio y recuperación
 
@@ -198,6 +199,31 @@ de `signal.db`, los umbrales y los checks calculados. También se conservan
 
 `GET /live/bot/backtest/` sirve el visor estático live y los archivos de datos
 bajo el directorio generado del reporte.
+
+## Modo de backtest histórico
+
+`BOT_MODE=backtest` hace una simulación completa con todas las velas cerradas que
+existan en `feed.db` para `BOT_SYMBOL` y `BOT_INTERVAL`. Aplica la configuración
+actual de `strategy.Config`, genera métricas, CSV/JSON y el dashboard resumen en
+el directorio persistente del reporte. El informe se sirve en
+`/live/bot/report/`; el visor mensual continúa en `/live/bot/backtest/`.
+
+El modo ejecuta el backtest una vez al arrancar y mantiene el proceso HTTP vivo.
+Si `feed.db` todavía no existe, está vacío o no tiene suficientes velas, espera
+y vuelve a intentarlo. No inserta ni modifica señales en `signal.db`; no es un
+modo de trading ni un reemplazo del modo `live`. `BOT_RUN_ONCE` no termina este
+modo, para que los reportes sigan disponibles por HTTP.
+
+`strategy/report.html` es la plantilla fuente y no se sobrescribe. El generador
+la copia como `report.html` (y como `index.html` por compatibilidad) junto a la
+carpeta configurada en `BOT_BACKTEST_REPORT_DIR`. Con el valor predeterminado
+`backtest_out`, la página resumen carga los datos de esa carpeta. En Compose,
+los resultados permanecen en el volumen `bot_reports`.
+
+Antes de cambiar un despliegue al modo histórico, confirma que el executor no
+tenga señales live pendientes que deban procesarse. Cambia el modo con
+`BOT_MODE=backtest` en el perfil `.env` que usa Compose; vuelve a `BOT_MODE=live`
+para reanudar la generación normal de señales.
 
 ## Estado HTTP del executor
 
