@@ -18,17 +18,26 @@ Variables:
     BOT_HEALTHCHECK_MAX_AGE segundos máximos de antigüedad (mode bot)
     BOT_EXECUTOR_HEALTHCHECK_MAX_AGE segundos máximos (mode executor)
     BOT_EXECUTOR_ACCOUNT_HEALTH_MAX_AGE segundos máximos del snapshot de cuenta
+    FEED_STATUS_PORT / BOT_HTTP_PORT / BOT_EXECUTOR_HTTP_PORT puertos internos
+        para los diagnósticos HTTP (los puertos del bot/executor pueden ser 0
+        para desactivarlos fuera de Compose).
 """
 from __future__ import annotations
 
+import json
+import math
 import os
 import sqlite3
 import sys
 import time
 from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.request import urlopen
 
 _UNIT_SECONDS = {"s": 1, "m": 60, "h": 3600, "d": 86_400, "w": 604_800}
 LIVE_DATA_DIR = Path(__file__).resolve().parent / "data"
+HTTP_HEALTH_TIMEOUT_SECONDS = 2.0
+HTTP_HEALTH_MAX_BYTES = 65_536
 
 try:
     from .db.sqlite_config import connect_sqlite
@@ -50,6 +59,67 @@ def interval_seconds(raw: str | None, default: float = 60.0) -> float:
     if factor is None or amount <= 0:
         return default
     return amount * factor
+
+
+def check_http_health(port: int, route: str, label: str) -> bool:
+    """Comprueba que la aplicación responde y se declara sana, con timeout."""
+    if not 1 <= port <= 65535:
+        print(f"[{label}] puerto HTTP de salud no válido: {port}")
+        return False
+
+    url = f"http://127.0.0.1:{port}{route}"
+    try:
+        with urlopen(url, timeout=HTTP_HEALTH_TIMEOUT_SECONDS) as response:
+            status_code = response.status
+            body = response.read(HTTP_HEALTH_MAX_BYTES)
+    except HTTPError as exc:
+        status_code = exc.code
+        try:
+            body = exc.read(HTTP_HEALTH_MAX_BYTES)
+        except OSError as read_error:
+            print(f"[{label}] no se pudo leer la respuesta de salud: {read_error}")
+            return False
+        finally:
+            exc.close()
+    except (OSError, URLError, TimeoutError, ValueError) as exc:
+        print(f"[{label}] endpoint de salud no disponible: {exc}")
+        return False
+
+    try:
+        payload = json.loads(body)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        print(f"[{label}] endpoint de salud devolvió JSON no válido")
+        return False
+
+    healthy = (
+        status_code == 200
+        and isinstance(payload, dict)
+        and payload.get("healthy") is True
+        and payload.get("status") == "healthy"
+    )
+    print(
+        f"[{label}] http_status={status_code} "
+        f"application_status={payload.get('status') if isinstance(payload, dict) else 'invalid'}"
+    )
+    return healthy
+
+
+def check_heartbeat(heartbeat: Path, max_age_raw: str, label: str) -> bool:
+    """Valida frescura del heartbeat y rechaza umbrales inválidos o relojes futuros."""
+    try:
+        max_age = float(max_age_raw)
+        if not math.isfinite(max_age) or max_age < 0:
+            raise ValueError("el límite debe ser finito y no negativo")
+        age = time.time() - heartbeat.stat().st_mtime
+    except FileNotFoundError:
+        print(f"[{label}] heartbeat aún no existe: {heartbeat}")
+        return False
+    except (OSError, ValueError, OverflowError) as exc:
+        print(f"[{label}] heartbeat o límite no válido: {exc}")
+        return False
+
+    print(f"[{label}] heartbeat_hace={age:.1f}s limite={max_age:.0f}s")
+    return 0 <= age <= max_age
 
 
 def check_feed() -> bool:
@@ -93,51 +163,70 @@ def check_feed() -> bool:
         f"[feed] status={status} vela_mas_reciente_hace={age_txt} "
         f"limite={max_age_ms / 1000:.0f}s"
     )
-    return status == "running" and age_ms is not None and age_ms <= max_age_ms
+    database_healthy = (
+        status == "running"
+        and age_ms is not None
+        and 0 <= age_ms <= max_age_ms
+    )
+    endpoint_healthy = check_http_health(
+        int(os.getenv("FEED_STATUS_PORT", "8787")),
+        "/live/feed/health",
+        "feed",
+    )
+    return database_healthy and endpoint_healthy
 
 
 def check_bot() -> bool:
-    """Sano si el bot actualizó su heartbeat hace poco."""
+    """Sano si el ciclo del bot y su diagnóstico de aplicación están sanos."""
     heartbeat = Path(
         os.getenv("BOT_HEARTBEAT", str(LIVE_DATA_DIR / "bot1.heartbeat"))
     )
-    max_age = float(os.getenv("BOT_HEALTHCHECK_MAX_AGE", "180"))
-    if not heartbeat.exists():
-        print(f"[bot] heartbeat aún no existe: {heartbeat}")
+    heartbeat_healthy = check_heartbeat(
+        heartbeat,
+        os.getenv("BOT_HEALTHCHECK_MAX_AGE", "180"),
+        "bot",
+    )
+    if not heartbeat_healthy:
         return False
-    age = time.time() - heartbeat.stat().st_mtime
-    print(f"[bot] heartbeat_hace={age:.1f}s limite={max_age:.0f}s")
-    return age <= max_age
+    port = int(os.getenv("BOT_HTTP_PORT", "8080"))
+    if port == 0:
+        print("[bot] endpoint HTTP desactivado; solo se valida el heartbeat")
+        return True
+    return check_http_health(port, "/live/bot/health", "bot")
 
 
 def check_executor() -> bool:
-    """Sano si el consumidor de señales actualiza su heartbeat."""
+    """Sano si el executor progresa y su diagnóstico no detecta fallos."""
     heartbeat = Path(
         os.getenv(
             "BOT_EXECUTOR_HEARTBEAT",
             str(LIVE_DATA_DIR / "executor.heartbeat"),
         )
     )
-    max_age = float(os.getenv("BOT_EXECUTOR_HEALTHCHECK_MAX_AGE", "60"))
-    if not heartbeat.exists():
-        print(f"[executor] heartbeat aún no existe: {heartbeat}")
-        return False
-    age = time.time() - heartbeat.stat().st_mtime
-    print(
-        f"[executor] heartbeat_hace={age:.1f}s limite={max_age:.0f}s "
-        f"trading_enabled={os.getenv('BOT_BINANCE_TRADING_ENABLED', 'false')}"
+    heartbeat_healthy = check_heartbeat(
+        heartbeat,
+        os.getenv("BOT_EXECUTOR_HEALTHCHECK_MAX_AGE", "60"),
+        "executor",
     )
-    if age > max_age:
+    if not heartbeat_healthy:
         return False
+    port = int(os.getenv("BOT_EXECUTOR_HTTP_PORT", "8081"))
+    if port == 0:
+        print("[executor] endpoint HTTP desactivado; solo se valida el heartbeat")
+        return True
     if os.getenv("BOT_BINANCE_TRADING_ENABLED", "false").strip().lower() not in {
         "1", "true", "yes", "y", "on"
     }:
-        return True
+        return check_http_health(
+            port, "/live/bot/execution/status", "executor"
+        )
 
     db_path = Path(
         os.getenv("BOT_SIGNAL_DB", str(LIVE_DATA_DIR / "signal.db"))
     )
     environment = os.getenv("BOT_BINANCE_ENVIRONMENT", "testnet").strip().lower()
+    if environment == "mainnet":
+        environment = "production"
     account_id = os.getenv("BOT_BINANCE_ACCOUNT_ID", f"binance-{environment}")
     try:
         conn = connect_sqlite(db_path, read_only=True, query_only=True)
@@ -173,7 +262,9 @@ def check_executor() -> bool:
         f"snapshot_hace={snapshot_age / 1000:.1f}s "
         f"error={last_error or 'none'}"
     )
-    return healthy
+    return healthy and check_http_health(
+        port, "/live/bot/execution/status", "executor"
+    )
 
 
 def main(argv: list[str]) -> int:
@@ -185,7 +276,10 @@ def main(argv: list[str]) -> int:
     }
     check = checks.get(mode)
     if check is None:
-        print(f"[healthcheck] modo desconocido: '{mode}'. Usa 'feed' o 'bot'.")
+        print(
+            f"[healthcheck] modo desconocido: '{mode}'. "
+            "Usa 'feed', 'bot' o 'executor'."
+        )
         return 2
     return 0 if check() else 1
 

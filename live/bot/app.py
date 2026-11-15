@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
+import math
 import time
+from pathlib import Path
 
 from strategy.strategy import Config, EMACrossStrategy
 
@@ -310,6 +311,9 @@ def main() -> int:
         env_str("BACKTEST_REPORT_DIR", DEFAULT_BACKTEST_REPORT_DIR)
     )
     poll_seconds = env_float("POLL_SECONDS", DEFAULT_POLL_SECONDS)
+    if not math.isfinite(poll_seconds) or poll_seconds <= 0:
+        raise ValueError("BOT_POLL_SECONDS debe ser un número finito mayor que 0")
+    poll_seconds = max(0.1, poll_seconds)
     run_once = env_bool("BOT_RUN_ONCE", DEFAULT_RUN_ONCE)
     live_since_value = env_str("LIVE_SINCE", "").strip()
     live_since_ms = parse_live_since(live_since_value) if live_since_value else None
@@ -317,9 +321,11 @@ def main() -> int:
     http_host = env_str("HTTP_HOST", DEFAULT_HTTP_HOST)
     http_port = env_int("HTTP_PORT", DEFAULT_HTTP_PORT)
     http_max_clients = env_int("HTTP_MAX_CLIENTS", 8)
-    http_request_timeout = env_float("HTTP_REQUEST_TIMEOUT", 1.0)
-    health_probe_interval = env_float("HEALTH_DB_PROBE_INTERVAL", 5.0)
-    health_probe_timeout = env_float("HEALTH_DB_PROBE_TIMEOUT", 0.2)
+    http_request_timeout = max(0.1, env_float("HTTP_REQUEST_TIMEOUT", 1.0))
+    health_probe_interval = max(0.1, env_float("HEALTH_DB_PROBE_INTERVAL", 5.0))
+    health_probe_timeout = max(0.05, env_float("HEALTH_DB_PROBE_TIMEOUT", 0.2))
+    if not 0 <= http_port <= 65535:
+        raise ValueError("BOT_HTTP_PORT debe estar entre 0 y 65535")
 
     logger.info(
         "Bot iniciado: symbol=%s interval=%s timeframe=%s feed=%s signal=%s",
@@ -350,25 +356,17 @@ def main() -> int:
     probe_thread = None
     try:
         if http_port > 0:
-            try:
-                http_server, http_thread, probe_thread = start_health_server(
-                    health,
-                    http_host,
-                    http_port,
-                    signal_path,
-                    max_clients=http_max_clients,
-                    request_timeout=http_request_timeout,
-                    probe_interval=health_probe_interval,
-                    probe_timeout=health_probe_timeout,
-                    backtest_dir=backtest_report_dir / "html",
-                )
-            except OSError:
-                logger.exception(
-                    "No se pudo abrir el endpoint de salud en %s:%d; "
-                    "el bot sigue sin él.",
-                    http_host,
-                    http_port,
-                )
+            http_server, http_thread, probe_thread = start_health_server(
+                health,
+                http_host,
+                http_port,
+                signal_path,
+                max_clients=http_max_clients,
+                request_timeout=http_request_timeout,
+                probe_interval=health_probe_interval,
+                probe_timeout=health_probe_timeout,
+                backtest_dir=backtest_report_dir / "html",
+            )
 
         store.connect()
         SignalBot(

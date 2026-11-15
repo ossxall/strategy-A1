@@ -89,10 +89,10 @@ services:
       BOT_LIVE_ONLY: "true"
     healthcheck:
       test: ["CMD", "python", "healthcheck.py", "bot"]
-      interval: 60s
+      interval: 30s
       timeout: 10s
-      retries: 5
-      start_period: 120s
+      retries: 3
+      start_period: 300s
 
   executor:
     <<: *common
@@ -114,7 +114,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 30s
+      start_period: 120s
 
 volumes:
   bot_reports:

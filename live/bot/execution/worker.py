@@ -1730,22 +1730,14 @@ def main() -> int:
         http_thread = None
         health.mark_running()
         if settings.http_port > 0:
-            try:
-                http_server, http_thread = start_execution_status_server(
-                    health,
-                    settings.http_host,
-                    settings.http_port,
-                    max_clients=settings.http_max_clients,
-                    request_timeout=settings.http_request_timeout,
-                    worker_thread=threading.current_thread(),
-                )
-            except OSError:
-                LOG.exception(
-                    "No se pudo abrir el endpoint del executor en %s:%d; "
-                    "el worker sigue sin él.",
-                    settings.http_host,
-                    settings.http_port,
-                )
+            http_server, http_thread = start_execution_status_server(
+                health,
+                settings.http_host,
+                settings.http_port,
+                max_clients=settings.http_max_clients,
+                request_timeout=settings.http_request_timeout,
+                worker_thread=threading.current_thread(),
+            )
         if not settings.enabled:
             logger.warning(
                 "Executor iniciado en modo seguro: "
