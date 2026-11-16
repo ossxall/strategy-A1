@@ -10,12 +10,12 @@ a otra ruta de su dominio. La autenticación y los sistemas usan la partición
 persistente `strategy-a1`, por lo que las cookies y los datos persistentes del
 navegador (como `localStorage` e IndexedDB) se conservan entre ejecuciones.
 
-En desarrollo, la aplicación lee directamente `desktop/config.json`. En la
-versión empaquetada, copia ese archivo una vez a
-`app.getPath('userData')/config.json` y lee la copia local; su ruta aparece en el
-tooltip de «Aplicación de escritorio» en el header. Después de editarlo, reinicia
-la aplicación. Si una instalación anterior no tiene `authUrl`, se añade desde
-el archivo de configuración incluido en la actualización.
+En desarrollo, la aplicación lee directamente `desktop/config.json`. En Linux
+empaquetado, primero busca `config.json` junto al AppImage/ejecutable; si no está,
+usa `app.getPath('userData')/config.json` y copia ahí la configuración incluida
+solo la primera vez. La ruta activa aparece en el tooltip de «Aplicación de
+escritorio» del header. Después de editarla, reinicia la aplicación. Si una
+instalación anterior no tiene `authUrl`, se añade desde la configuración incluida.
 
 Cada entrada necesita un `id` único, un nombre visible y una URL `http` o
 `https`:

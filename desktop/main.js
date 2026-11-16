@@ -14,9 +14,7 @@ let configurationError = ''
 
 function loadConfiguration () {
   const templatePath = path.join(__dirname, 'config.json')
-  configPath = app.isPackaged
-    ? path.join(app.getPath('userData'), 'config.json')
-    : templatePath
+  configPath = getConfigurationPath(templatePath)
 
   try {
     if (app.isPackaged) {
@@ -63,6 +61,16 @@ function loadConfiguration () {
     configuration = { authUrl: '', systems: [] }
     configurationError = error.message
   }
+}
+
+function getConfigurationPath (templatePath) {
+  if (!app.isPackaged) return templatePath
+
+  const binaryPath = process.env.APPIMAGE || app.getPath('exe')
+  const adjacentConfigPath = path.join(path.dirname(binaryPath), 'config.json')
+
+  if (fs.existsSync(adjacentConfigPath)) return adjacentConfigPath
+  return path.join(app.getPath('userData'), 'config.json')
 }
 
 function isValidWebUrl (value) {
