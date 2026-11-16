@@ -16,7 +16,7 @@ el JSON, por lo que tolera cambios en el esquema.
 4. Para ejecutarlo directamente, instala las dependencias desde `live/`:
 
    ```sh
-   python -m pip install -r monitor/requirements.txt
+   python -m pip install -r requirements.txt
    ```
 
 5. Arranca todos los servicios desde `live/`:

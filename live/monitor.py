@@ -14,7 +14,7 @@ try:
 except ModuleNotFoundError as exc:
     raise SystemExit(
         "Faltan dependencias del monitor. Desde live/, ejecuta: "
-        "python -m pip install -r monitor/requirements.txt"
+        "python -m pip install -r requirements.txt"
     ) from exc
 
 main = importlib.import_module("monitor.__main__").main
