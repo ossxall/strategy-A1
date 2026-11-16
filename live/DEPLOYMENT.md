@@ -5,8 +5,10 @@ fusiona un pull request **desde `dev` hacia `main`** en este repositorio.
 Accede al VPS por SSH, clona el repositorio público la primera vez y, en
 despliegues posteriores, actualiza el checkout solo mediante avance rápido.
 Después ejecuta
-`APP_ENV=prod docker-compose --env-file .env.prod -p blacker-bot1 up -d --build --remove-orphans`
+`APP_ENV=prod docker-compose --env-file .env.prod -f docker-compose.yml -f docker-compose.runtime.yml -p blacker-bot1 up -d --build --remove-orphans`
 desde `live/`. Este Compose es compatible con Docker Compose 1.29.2.
+Para detener/eliminar el stack no cargues perfiles ni secretos:
+`docker-compose -f docker-compose.yml -p blacker-bot1 down`.
 
 ## Secretos de GitHub
 

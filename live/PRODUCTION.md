@@ -25,10 +25,13 @@
 Desde `live/`:
 
 ```bash
-APP_ENV=prod docker-compose --env-file .env.prod -p blacker-bot1 up -d --build
-APP_ENV=prod docker-compose --env-file .env.prod -p blacker-bot1 ps
-APP_ENV=prod docker-compose --env-file .env.prod -p blacker-bot1 logs --tail=200 feed bot executor monitor
+APP_ENV=prod docker-compose --env-file .env.prod -f docker-compose.yml -f docker-compose.runtime.yml -p blacker-bot1 up -d --build
+APP_ENV=prod docker-compose --env-file .env.prod -f docker-compose.yml -f docker-compose.runtime.yml -p blacker-bot1 ps
+APP_ENV=prod docker-compose --env-file .env.prod -f docker-compose.yml -f docker-compose.runtime.yml -p blacker-bot1 logs --tail=200 feed bot executor monitor
 ```
+
+Para detener el stack sin `.env.prod` ni secretos:
+`docker-compose -f docker-compose.yml -p blacker-bot1 down`.
 
 El contenedor `monitor` se inicia con el stack, sin publicar puertos entrantes.
 Antes del despliegue, define `MONITOR_TELEGRAM_BOT_TOKEN` y una contraseña
@@ -46,7 +49,7 @@ snapshots de SQLite cuando aplica.
 
 **Docker Compose no reinicia automáticamente un contenedor solo por estar
 `unhealthy`.** `restart: unless-stopped` cubre salidas del proceso, no fallos de
-readiness. Supervisa `APP_ENV=prod docker-compose --env-file .env.prod -p blacker-bot1 ps`
+readiness. Supervisa `APP_ENV=prod docker-compose --env-file .env.prod -f docker-compose.yml -f docker-compose.runtime.yml -p blacker-bot1 ps`
 y configura alertas/acción operativa
 para `unhealthy`; no reinicies automáticamente el executor ante una discrepancia
 de cuenta o `RECONCILIATION_REQUIRED`, porque podría repetir una acción insegura.
