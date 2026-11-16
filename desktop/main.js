@@ -163,6 +163,17 @@ ipcMain.handle('systems:select', (event, systemId) => {
   return true
 })
 
+ipcMain.handle('systems:reload-current', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  const state = win && windowStates.get(win)
+  const selected = state?.systems.get(state.selectedId)
+
+  if (!selected || selected.view.webContents.isDestroyed()) return false
+
+  selected.view.webContents.reload()
+  return true
+})
+
 app.whenReady().then(() => {
   loadConfiguration()
   createWindow()

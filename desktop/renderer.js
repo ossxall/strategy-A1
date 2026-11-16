@@ -6,6 +6,7 @@ const configPathElement = document.getElementById('config-path')
 const localIndicator = document.querySelector('.local-indicator')
 const themeToggle = document.getElementById('theme-toggle')
 const themeToggleLabel = document.getElementById('theme-toggle-label')
+const reloadButton = document.getElementById('reload-current')
 const THEME_STORAGE_KEY = 'strategy-a1-theme'
 
 function setTheme (theme, persist = false) {
@@ -31,9 +32,9 @@ function setTheme (theme, persist = false) {
 function loadSavedTheme () {
   try {
     const savedTheme = localStorage.getItem(THEME_STORAGE_KEY)
-    return savedTheme === 'dark' ? 'dark' : 'light'
+    return savedTheme === 'light' ? 'light' : 'dark'
   } catch {
-    return 'light'
+    return 'dark'
   }
 }
 
@@ -49,6 +50,14 @@ function showMessage (title, text, configPath = '') {
   configPathElement.textContent = configPath
   message.classList.add('visible')
 }
+
+reloadButton.addEventListener('click', async () => {
+  try {
+    await window.systems.reloadCurrent()
+  } catch (error) {
+    showMessage('No se pudo recargar la página', error.message)
+  }
+})
 
 async function selectSystem (systemId, buttons) {
   const selected = await window.systems.select(systemId)
@@ -83,6 +92,7 @@ async function initialize () {
   }
 
   localIndicator.title = `Archivo de configuración: ${configuration.configPath}`
+  reloadButton.disabled = false
 
   const buttons = configuration.systems.map((system) => {
     const button = document.createElement('button')
