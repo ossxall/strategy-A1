@@ -253,6 +253,16 @@ durabilidad de señales y estado de recuperación, y un `busy_timeout` de 5 s.
 El autocheckpoint se configura en 1000 páginas y el límite de tamaño de WAL de
 64 MiB es orientativo, no un tope duro.
 
+Al arrancar en modo live, el bot valida `feed.db` en solo lectura y
+valida/migra de forma transaccional `signal.db`; el executor también valida el
+esquema compartido de `signal.db` antes de consumir señales. Se comprueban
+tablas, columnas, tipos, claves, índices, `user_version` de `signal.db` e
+integridad SQLite. Solo se aceptan las migraciones históricas explícitamente
+soportadas por el almacén. Si la estructura es desconocida, está dañada o es de
+una versión futura, el proceso falla antes de publicar endpoints o procesar
+órdenes. No se borran ni reinicializan bases automáticamente: conserva una copia
+y revisa el diagnóstico de arranque.
+
 La configuración común de conexiones está en `live/db/sqlite_config.py` y se
 reaplica al abrir cada base. Borrar `signal.db` no afecta a la configuración del
 código, pero sí elimina las señales, la deduplicación y `live_since_ms`; detén

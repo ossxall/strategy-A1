@@ -24,6 +24,11 @@ al iniciar que SQLite haya devuelto `wal`. Las conexiones del colector usan
 páginas y un objetivo de truncado del WAL de 64 MiB. El límite del WAL no es
 duro y depende de que el checkpoint pueda completarse.
 
+Antes de iniciar el colector, se valida en solo lectura la integridad SQLite y
+el esquema de `candles`, `collector_state`, sus columnas, tipos, claves e índices.
+Una base incompatible detiene el arranque con un error; el colector no crea
+tablas encima de una base parcial ni borra datos automáticamente.
+
 Al borrar y recrear `feed.db`, el colector vuelve a aplicar esta política al
 iniciar. El archivo eliminado también contenía las velas persistidas.
 

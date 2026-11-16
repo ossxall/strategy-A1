@@ -12,9 +12,27 @@ import pandas as pd
 from .config import logger, opt_float
 
 try:
-    from ..db.sqlite_config import connect_sqlite
+    from ..db.sqlite_config import (
+        SQLiteSchemaError,
+        connect_sqlite,
+        sqlite_user_tables,
+        validate_index,
+        validate_index_set,
+        validate_no_views_or_triggers,
+        validate_quick_check,
+        validate_table,
+    )
 except ImportError:  # ejecución como paquete top-level desde live/
-    from db.sqlite_config import connect_sqlite
+    from db.sqlite_config import (
+        SQLiteSchemaError,
+        connect_sqlite,
+        sqlite_user_tables,
+        validate_index,
+        validate_index_set,
+        validate_no_views_or_triggers,
+        validate_quick_check,
+        validate_table,
+    )
 
 SIGNAL_SCHEMA_VERSION = 3
 SIGNAL_ID_FIELDS = (
@@ -237,6 +255,405 @@ WHERE signal_id = :signal_id
 """
 
 
+SIGNAL_TABLES = {
+    "signals",
+    "signal_execution",
+    "bot_state",
+    "binance_account_snapshot",
+    "signal_consumer_state",
+    "execution_adjustments",
+}
+SIGNAL_COLUMNS = {
+    "id": "INTEGER",
+    "signal_id": "TEXT",
+    "schema_version": "INTEGER",
+    "symbol": "TEXT",
+    "interval": "TEXT",
+    "timeframe": "TEXT",
+    "bar_time": "INTEGER",
+    "signal_time": "INTEGER",
+    "event": "TEXT",
+    "action": "TEXT",
+    "signal": "TEXT",
+    "side": "TEXT",
+    "position_id": "INTEGER",
+    "scheduled": "INTEGER",
+    "reason": "TEXT",
+    "price": "REAL",
+    "ema_fast": "REAL",
+    "ema_slow": "REAL",
+    "adx_entry": "REAL",
+    "executed": "INTEGER",
+    "created_at": "TEXT",
+    "payload": "TEXT",
+}
+SIGNAL_EXECUTION_COLUMNS = {
+    "account_id": "TEXT",
+    "signal_id": "TEXT",
+    "status": "TEXT",
+    "attempt_count": "INTEGER",
+    "lease_owner": "TEXT",
+    "lease_until_ms": "INTEGER",
+    "client_order_id": "TEXT",
+    "exchange_order_id": "TEXT",
+    "filled_qty": "REAL",
+    "average_fill_price": "REAL",
+    "order_status": "TEXT",
+    "result_json": "TEXT",
+    "last_reconciled_at_ms": "INTEGER",
+    "last_error": "TEXT",
+    "created_at": "TEXT",
+    "updated_at": "TEXT",
+}
+
+
+def validate_signal_schema(connection) -> None:
+    """Valida el contrato SQLite compartido por el bot y el executor."""
+    validate_no_views_or_triggers(connection, "signal.db")
+    tables = sqlite_user_tables(connection)
+    if tables != SIGNAL_TABLES:
+        raise SQLiteSchemaError(
+            "signal.db contiene tablas "
+            f"{sorted(tables)!r}; se requieren exactamente "
+            f"{sorted(SIGNAL_TABLES)!r}"
+        )
+
+    validate_table(
+        connection,
+        "signals",
+        SIGNAL_COLUMNS,
+        primary_key=("id",),
+        exact_columns=True,
+        not_null={
+            "symbol": True,
+            "interval": True,
+            "timeframe": True,
+            "bar_time": True,
+            "signal_time": True,
+            "event": True,
+            "signal": True,
+            "reason": True,
+            "executed": True,
+            "created_at": True,
+            "payload": True,
+        },
+        defaults={
+            "scheduled": "0",
+            "executed": "0",
+            "payload": "'{}'",
+        },
+    )
+    validate_table(
+        connection,
+        "signal_execution",
+        SIGNAL_EXECUTION_COLUMNS,
+        primary_key=("account_id", "signal_id"),
+        exact_columns=True,
+        not_null={
+            "account_id": True,
+            "signal_id": True,
+            "status": True,
+            "attempt_count": True,
+            "filled_qty": True,
+            "result_json": True,
+            "created_at": True,
+            "updated_at": True,
+        },
+        defaults={
+            "status": "'READY'",
+            "attempt_count": "0",
+            "filled_qty": "0",
+            "result_json": "'{}'",
+            "created_at": "CURRENT_TIMESTAMP",
+            "updated_at": "CURRENT_TIMESTAMP",
+        },
+    )
+    validate_table(
+        connection,
+        "bot_state",
+        {"key": "TEXT", "value": "TEXT"},
+        primary_key=("key",),
+        exact_columns=True,
+        not_null={"value": True},
+    )
+    validate_table(
+        connection,
+        "binance_account_snapshot",
+        {
+            "account_id": "TEXT",
+            "environment": "TEXT",
+            "observed_at_ms": "INTEGER",
+            "wallet_balance": "REAL",
+            "available_balance": "REAL",
+            "positions_json": "TEXT",
+            "open_orders_json": "TEXT",
+            "last_error": "TEXT",
+        },
+        primary_key=("account_id",),
+        exact_columns=True,
+        not_null={
+            "environment": True,
+            "observed_at_ms": True,
+            "positions_json": True,
+            "open_orders_json": True,
+        },
+        defaults={
+            "positions_json": "'[]'",
+            "open_orders_json": "'[]'",
+        },
+    )
+    validate_table(
+        connection,
+        "signal_consumer_state",
+        {
+            "account_id": "TEXT",
+            "activation_cutoff_ms": "INTEGER",
+            "created_at": "TEXT",
+        },
+        primary_key=("account_id",),
+        exact_columns=True,
+        not_null={"activation_cutoff_ms": True, "created_at": True},
+        defaults={"created_at": "CURRENT_TIMESTAMP"},
+    )
+    validate_table(
+        connection,
+        "execution_adjustments",
+        {
+            "account_id": "TEXT",
+            "symbol": "TEXT",
+            "position_id": "INTEGER",
+            "adjustment_id": "TEXT",
+            "quantity": "REAL",
+            "price": "REAL",
+            "reason": "TEXT",
+            "observed_at_ms": "INTEGER",
+        },
+        primary_key=("account_id", "symbol", "position_id", "adjustment_id"),
+        exact_columns=True,
+        not_null={
+            "account_id": True,
+            "symbol": True,
+            "position_id": True,
+            "adjustment_id": True,
+            "quantity": True,
+            "reason": True,
+            "observed_at_ms": True,
+        },
+    )
+
+    for name, columns, unique in (
+        ("ux_signals_signal_id", ("signal_id",), True),
+        ("idx_signals_event_order", ("signal_time", "bar_time", "id"), False),
+        (
+            "idx_signals_identity",
+            (
+                "symbol",
+                "interval",
+                "timeframe",
+                "event",
+                "action",
+                "signal",
+                "reason",
+                "bar_time",
+                "position_id",
+            ),
+            False,
+        ),
+        ("idx_signals_bar_time", ("bar_time",), False),
+        ("idx_signals_signal_time", ("signal_time",), False),
+        ("idx_signals_executed", ("executed",), False),
+    ):
+        validate_index(connection, "signals", name, columns, unique=unique)
+    validate_index(
+        connection,
+        "signal_execution",
+        "idx_signal_execution_claim",
+        ("account_id", "status", "lease_until_ms"),
+    )
+    validate_index(
+        connection,
+        "signal_execution",
+        "ux_signal_execution_client_order",
+        ("account_id", "client_order_id"),
+        unique=True,
+        partial=True,
+        where_contains="WHERE client_order_id IS NOT NULL",
+    )
+    validate_index_set(
+        connection,
+        "signals",
+        {
+            "ux_signals_signal_id",
+            "idx_signals_event_order",
+            "idx_signals_identity",
+            "idx_signals_bar_time",
+            "idx_signals_signal_time",
+            "idx_signals_executed",
+        },
+    )
+    validate_index_set(
+        connection,
+        "signal_execution",
+        {
+            "idx_signal_execution_claim",
+            "ux_signal_execution_client_order",
+        },
+    )
+    for table in (
+        "bot_state",
+        "binance_account_snapshot",
+        "signal_consumer_state",
+        "execution_adjustments",
+    ):
+        validate_index_set(connection, table, set())
+
+    foreign_keys = connection.execute(
+        "PRAGMA foreign_key_list(signal_execution)"
+    ).fetchall()
+    if foreign_keys:
+        actual_foreign_keys = {
+            (
+                str(row[2]),
+                str(row[3]),
+                str(row[4]),
+                str(row[5]).upper(),
+                str(row[6]).upper(),
+            )
+            for row in foreign_keys
+        }
+        expected_foreign_keys = {
+            ("signals", "signal_id", "signal_id", "CASCADE", "RESTRICT")
+        }
+        if actual_foreign_keys != expected_foreign_keys:
+            raise SQLiteSchemaError(
+                "signal_execution tiene claves foráneas incompatibles: "
+                f"{sorted(actual_foreign_keys)!r}"
+            )
+    violations = connection.execute("PRAGMA foreign_key_check").fetchall()
+    if violations:
+        raise SQLiteSchemaError(
+            f"signal.db contiene referencias foráneas inválidas: {violations[:5]!r}"
+        )
+    version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+    if version != SIGNAL_SCHEMA_VERSION:
+        raise SQLiteSchemaError(
+            "signal.db tiene PRAGMA user_version incompatible; "
+            f"se esperaba {SIGNAL_SCHEMA_VERSION} y se encontró {version}"
+        )
+    validate_quick_check(connection, "signal.db")
+
+
+def _validate_existing_signal_database(path: Path) -> None:
+    """Revisa una base previa en solo lectura antes de migrarla o escribirla."""
+    if not path.exists() or path.stat().st_size == 0:
+        return
+    connection = connect_sqlite(path, read_only=True, query_only=True)
+    try:
+        version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+        if version > SIGNAL_SCHEMA_VERSION:
+            raise SQLiteSchemaError(
+                f"signal.db usa esquema futuro {version}; "
+                f"este código solo admite hasta {SIGNAL_SCHEMA_VERSION}"
+            )
+        tables = sqlite_user_tables(connection)
+        unknown = tables - SIGNAL_TABLES
+        if unknown:
+            raise SQLiteSchemaError(
+                f"signal.db tiene tablas desconocidas: {sorted(unknown)!r}"
+            )
+        if not tables:
+            if version != 0:
+                raise SQLiteSchemaError(
+                    f"signal.db no tiene tablas pero declara user_version={version}"
+                )
+            validate_quick_check(connection, "signal.db")
+            return
+        if "signals" not in tables:
+            raise SQLiteSchemaError(
+                "signal.db contiene tablas del bot/executor pero falta 'signals'"
+            )
+
+        # Se permiten las columnas históricas que las migraciones existentes
+        # saben actualizar. El contrato actual se exige antes del COMMIT.
+        legacy_signal_columns = {
+            name: SIGNAL_COLUMNS[name]
+            for name in (
+                "id",
+                "symbol",
+                "interval",
+                "timeframe",
+                "bar_time",
+                "signal_time",
+                "event",
+                "signal",
+                "side",
+                "reason",
+                "price",
+                "ema_fast",
+                "ema_slow",
+                "adx_entry",
+                "executed",
+                "created_at",
+                "payload",
+            )
+        }
+        validate_table(
+            connection,
+            "signals",
+            legacy_signal_columns,
+            primary_key=("id",),
+            exact_columns=False,
+        )
+        signal_columns = {
+            str(row[1])
+            for row in connection.execute("PRAGMA table_info(signals)")
+        }
+        if signal_columns - set(SIGNAL_COLUMNS):
+            raise SQLiteSchemaError(
+                "signals tiene columnas que esta versión no reconoce: "
+                f"{sorted(signal_columns - set(SIGNAL_COLUMNS))!r}"
+            )
+
+        if "signal_execution" in tables:
+            legacy_execution_columns = {
+                name: SIGNAL_EXECUTION_COLUMNS[name]
+                for name in (
+                    "account_id",
+                    "signal_id",
+                    "status",
+                    "attempt_count",
+                    "lease_owner",
+                    "lease_until_ms",
+                    "client_order_id",
+                    "exchange_order_id",
+                    "last_error",
+                    "created_at",
+                    "updated_at",
+                )
+            }
+            validate_table(
+                connection,
+                "signal_execution",
+                legacy_execution_columns,
+                primary_key=("account_id", "signal_id"),
+                exact_columns=False,
+            )
+            execution_columns = {
+                str(row[1])
+                for row in connection.execute(
+                    "PRAGMA table_info(signal_execution)"
+                )
+            }
+            if execution_columns - set(SIGNAL_EXECUTION_COLUMNS):
+                raise SQLiteSchemaError(
+                    "signal_execution tiene columnas desconocidas: "
+                    f"{sorted(execution_columns - set(SIGNAL_EXECUTION_COLUMNS))!r}"
+                )
+        validate_quick_check(connection, "signal.db")
+    finally:
+        connection.close()
+
+
 class SignalStore:
     """Almacén SQLite de eventos idempotentes y estado persistente del bot."""
 
@@ -246,6 +663,7 @@ class SignalStore:
 
     def connect(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        _validate_existing_signal_database(self.path)
         self.conn = connect_sqlite(
             self.path,
             synchronous="FULL",
@@ -266,8 +684,10 @@ class SignalStore:
             self.conn.execute(BINANCE_ACCOUNT_SNAPSHOT_DDL)
             self.conn.execute(SIGNAL_CONSUMER_STATE_DDL)
             self.conn.execute(EXECUTION_ADJUSTMENTS_DDL)
+            validate_signal_schema(self.conn)
             self.conn.commit()
         except Exception:
+            self.conn.rollback()
             self.conn.close()
             self.conn = None
             raise
@@ -1038,6 +1458,17 @@ class FeedReader:
             read_only=True,
             query_only=True,
         )
+        try:
+            try:
+                from ..feed.database import validate_feed_schema
+            except ImportError:  # ejecución como paquete top-level desde live/
+                from feed.database import validate_feed_schema
+
+            validate_feed_schema(self.conn)
+        except Exception:
+            self.conn.close()
+            self.conn = None
+            raise
 
     def load_closed(self) -> pd.DataFrame:
         """Devuelve las velas cerradas indexadas por timestamp UTC."""

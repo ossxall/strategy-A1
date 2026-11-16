@@ -438,6 +438,11 @@ def main() -> int:
     http_thread = None
     probe_thread = None
     try:
+        # Validar las bases antes de publicar health/status o procesar señales.
+        feed.connect()
+        if mode == "live":
+            store.connect()
+
         if http_port > 0:
             http_server, http_thread, probe_thread = start_health_server(
                 health,
@@ -452,8 +457,6 @@ def main() -> int:
                 report_dir=backtest_report_dir,
             )
 
-        if mode == "live":
-            store.connect()
         SignalBot(
             cfg,
             feed,
