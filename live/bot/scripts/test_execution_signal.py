@@ -442,7 +442,6 @@ def main() -> int:
         "risk_pct": strategy.risk_pct,
         "risk_multiplier": 1.0,
         "stop_loss_pct": strategy.stop_loss_pct,
-        "max_leverage": strategy.max_leverage,
         "commission_bps": strategy.commission_bps,
         "slippage_bps": strategy.slippage_bps,
         "move_stop_to_breakeven": strategy.move_stop_to_breakeven,
@@ -459,8 +458,7 @@ def main() -> int:
     )
     print(
         f"Sizing de estrategia: riesgo={sizing['risk_pct']:.4%}, "
-        f"stop={sizing['stop_loss_pct']:.4%}, "
-        f"leverage objetivo={sizing['max_leverage']:g}x."
+        f"stop={sizing['stop_loss_pct']:.4%}."
     )
     if not args.confirm:
         print(

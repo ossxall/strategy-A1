@@ -199,6 +199,7 @@ def test_last_closed_bar_entry_is_published_for_next_open_without_waiting_next_c
     assert entry["signal_id"].startswith("sig_v2_")
     assert payload["pending"] is True
     assert payload["action"] == "OPEN"
+    assert "max_leverage" not in payload["sizing"]
 
 
 def test_pending_reversal_publishes_exit_before_entry_at_next_open():
@@ -254,7 +255,6 @@ def test_monthly_limit_event_uses_the_bar_that_triggered_it():
     bars.iloc[1, bars.columns.get_loc("close")] = 90.0
     bars.iloc[1, bars.columns.get_loc("low")] = 90.0
     config = make_config(
-        max_leverage=1.0,
         stop_loss_pct=0.0,
         monthly_loss_limit_pct=5.0,
     )

@@ -172,7 +172,6 @@ def build_events_and_result(
             "mfi_multiplier": opened["mfi_multiplier"],
             "er_multiplier": opened["er_multiplier"],
             "stop_loss_pct": opened["stop_loss_pct"],
-            "max_leverage": opened["max_leverage"],
             "commission_bps": opened["commission_bps"],
             "slippage_bps": opened["slippage_bps"],
             "move_stop_to_breakeven": cfg.move_stop_to_breakeven,

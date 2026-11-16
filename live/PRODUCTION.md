@@ -12,8 +12,9 @@
   de un despliegue rutinario. Usa claves sin permisos de retiro, restringidas por
   IP, y guarda `.env` fuera del control de versiones con permisos de solo lectura
   para el usuario del servicio.
-- Revisa símbolo, timeframe, riesgo, leverage, saldo, modo One-way, stops y
-  límites del exchange con el operador responsable antes de habilitar órdenes.
+- Revisa símbolo, timeframe y riesgo de la estrategia; configura el leverage
+  exclusivamente en el executor. Verifica saldo, modo One-way, stops y límites
+  del exchange con el operador responsable antes de habilitar órdenes.
   No se garantiza equivalencia entre backtest y ejecución real.
 - Mantén sincronización NTP, conectividad estable a Binance y espacio libre en
   disco. Alerta antes de agotar disco: SQLite puede dejar de escribir cuando el

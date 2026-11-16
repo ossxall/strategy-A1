@@ -70,10 +70,6 @@ class Config:
     #
     risk_pct: float = 0.01
     #
-    # Maximum leverage applied to position sizing.
-    #
-    max_leverage: float = 1.0
-    #
     # Stop-loss distance as a fraction of entry price.
     #
     stop_loss_pct: float = 0.01
@@ -372,8 +368,8 @@ class Config:
         for timeframe in self.rsi_divergence_timeframes:
             if pd.Timedelta(timeframe) <= pd.Timedelta(0):
                 raise ValueError(f"invalid rsi_divergence_timeframe: {timeframe!r}.")
-        if self.initial_capital <= 0 or self.max_leverage <= 0:
-            raise ValueError("Capital and leverage must be positive.")
+        if self.initial_capital <= 0:
+            raise ValueError("Capital must be positive.")
         if not 0 < self.risk_pct <= 0.2:
             raise ValueError("risk_pct must be in (0, 0.2].")
         if min(self.commission_bps, self.slippage_bps, self.stop_loss_pct) < 0:

@@ -622,10 +622,9 @@ class ExecutionWorker:
         risk_pct = _decimal(sizing.get("risk_pct"), "risk_pct")
         multiplier = _decimal(sizing.get("risk_multiplier"), "risk_multiplier")
         stop_pct = _decimal(sizing.get("stop_loss_pct"), "stop_loss_pct")
-        strategy_leverage = _decimal(sizing.get("max_leverage"), "max_leverage")
         commission_bps = _decimal(sizing.get("commission_bps", 0), "commission_bps")
         slippage_bps = _decimal(sizing.get("slippage_bps", 0), "slippage_bps")
-        if risk_pct <= 0 or multiplier <= 0 or strategy_leverage <= 0:
+        if risk_pct <= 0 or multiplier <= 0:
             raise ValueError("Parámetros de riesgo inválidos")
 
         wallet_equity = _decimal(snapshot["wallet_balance"], "equity")
@@ -665,10 +664,7 @@ class ExecutionWorker:
         config_row = symbol_config[0] if symbol_config else {}
         account_leverage = _float(_get(config_row, "leverage"))
         if self.settings.set_leverage:
-            target = min(
-                self.settings.max_leverage,
-                int(strategy_leverage.to_integral_value(rounding=ROUND_DOWN)),
-            )
+            target = self.settings.max_leverage
             if target < 1:
                 raise ValueError("Leverage objetivo debe ser al menos 1x")
             if account_leverage is None or int(account_leverage) != target:
@@ -687,7 +683,6 @@ class ExecutionWorker:
                     "No se pudo verificar el leverage configurado en Binance"
                 )
             effective_leverage = min(
-                strategy_leverage,
                 Decimal(self.settings.max_leverage),
                 _decimal(account_leverage, "account leverage"),
             )

@@ -172,7 +172,6 @@ _CONFIG_ENV = {
     "commission_bps": ("STRATEGY_COMMISSION_BPS", env_float),
     "slippage_bps": ("STRATEGY_SLIPPAGE_BPS", env_float),
     "risk_pct": ("STRATEGY_RISK_PCT", env_float),
-    "max_leverage": ("STRATEGY_MAX_LEVERAGE", env_float),
     "stop_loss_pct": ("STRATEGY_STOP_LOSS_PCT", env_float),
     "partial_tp_enabled": ("STRATEGY_PARTIAL_TP", env_bool),
     "partial_tp_r": ("STRATEGY_PARTIAL_TP_R", env_float),

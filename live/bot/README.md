@@ -56,9 +56,9 @@ señales debe validar su vigencia e idempotencia antes de operar.
 órdenes ni de posiciones reales. Cada fila incluye `schema_version`, `signal_id`,
 `event`, `action`, `side`, `position_id`, `scheduled`, `signal_time` y el
 `payload` detallado. Los `ENTRY` incluyen en `payload.sizing` los multiplicadores
-efectivos de `strategy`, el stop y el leverage simulado. `signal_id` es un
-SHA-256 determinista v2; `position_id`
-solo correlaciona eventos del backtest y no identifica una posición de Binance.
+efectivos de `strategy` y el stop; la estrategia no calcula ni transmite leverage.
+`signal_id` es un SHA-256 determinista v2; `position_id` solo correlaciona eventos
+del backtest y no identifica una posición de Binance.
 `signal` y `side` se conservan iguales por compatibilidad; en un `EXIT`, `side`
 indica la posición que se cierra, no el lado de la orden de Binance.
 
@@ -91,10 +91,12 @@ Compose ejecuta `python -m bot.execution`, pero **no envía órdenes por defecto
 `binance-sdk-derivatives-trading-usds-futures`; el entorno predeterminado es
 testnet. Producción requiere `BOT_BINANCE_ENVIRONMENT=production`,
 `BOT_BINANCE_TRADING_ENABLED=true` y `BOT_BINANCE_ALLOW_LIVE_TRADING=true`.
-El tope de leverage predeterminado es 10x. `BOT_BINANCE_SET_LEVERAGE=true` aplica
-en Binance el menor valor entre ese tope y el de `strategy`, pero no tiene efecto
-mientras el trading siga deshabilitado. El tamaño puede ser menor que 10x por
-`risk_pct`, los multiplicadores adaptativos y el límite de exposición.
+El executor es el único componente que configura y aplica leverage en Binance:
+`BOT_BINANCE_SET_LEVERAGE=true` fija el tope definido por
+`BOT_BINANCE_MAX_LEVERAGE` (10x por defecto). Si se desactiva, usa el leverage
+actual de Binance, limitado por ese tope. Estos ajustes no tienen efecto mientras
+el trading siga deshabilitado. El tamaño también puede ser menor por `risk_pct`,
+los multiplicadores adaptativos y el límite de exposición.
 `BOT_STRATEGY_INITIAL_CAPITAL=100` es la referencia del backtest; el worker lee el
 equity/margen real de Binance para calcular la cantidad live.
 El executor fija un corte inicial por cuenta con un margen corto de recuperación

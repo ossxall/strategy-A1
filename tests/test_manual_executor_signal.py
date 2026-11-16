@@ -12,7 +12,6 @@ def test_manual_executor_entry_and_exit_are_valid_v3_signals():
         "risk_pct": 0.01,
         "risk_multiplier": 1.0,
         "stop_loss_pct": 0.01,
-        "max_leverage": 10.0,
         "commission_bps": 0.0,
         "slippage_bps": 0.0,
         "move_stop_to_breakeven": True,

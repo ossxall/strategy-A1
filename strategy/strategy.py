@@ -590,14 +590,20 @@ class Backtester:
         er_multiplier = sizing["er_multiplier"]
         unscaled_by_risk = (
             self.cash * self.cfg.risk_pct * adaptive_multiplier / risk_unit
-            if risk_unit > 0 else np.inf
+            if risk_unit > 0 else self.cash / price
         )
         by_risk = (
             unscaled_by_risk * mfi_multiplier * er_multiplier
+            if risk_unit > 0
+            else unscaled_by_risk
         )
-        by_lev = self.cash * self.cfg.max_leverage / price
-        quantity_without_entry_scaling = min(unscaled_by_risk, by_lev)
-        qty_total = min(by_risk, by_lev)
+        # La estrategia es cash-only: limita siempre el nominal a su equity.
+        # El leverage de Binance pertenece exclusivamente al executor.
+        equity_quantity_cap = sizing_equity / price
+        quantity_without_entry_scaling = min(
+            unscaled_by_risk, equity_quantity_cap
+        )
+        qty_total = min(by_risk, equity_quantity_cap)
         if not np.isfinite(qty_total) or qty_total <= 0:
             return
         fee = self._fee(price * qty_total)
@@ -710,7 +716,6 @@ class Backtester:
             "er_multiplier": float(er),
             "risk_multiplier": float(adaptive * mfi * er),
             "stop_loss_pct": float(self.cfg.stop_loss_pct),
-            "max_leverage": float(self.cfg.max_leverage),
             "commission_bps": float(self.cfg.commission_bps),
             "slippage_bps": float(self.cfg.slippage_bps),
             "sizing_equity": float(
