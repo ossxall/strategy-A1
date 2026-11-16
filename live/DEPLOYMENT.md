@@ -57,8 +57,9 @@ Antes de iniciar Compose:
 
    El asistente copia la configuración para `lovelacers.com`, genera los
    secretos y crea un usuario. La contraseña se solicita sin mostrarla; solo se
-   guarda su hash Argon2. No reemplaza configuraciones, usuarios ni secretos
-   que ya existan.
+   guarda su hash Argon2. Ejecútalo como el mismo usuario SSH que hará el
+   despliegue, sin `sudo`. No reemplaza configuraciones, usuarios ni secretos
+   existentes; además corrige `remember_me: '-1'` de configuraciones anteriores.
 
 3. Cuando el certificado y la configuración de Authelia estén
    preparados, pon el mismo `LETSENCRYPT_EMAIL` en el `.env.prod` de tu PC y

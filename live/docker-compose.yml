@@ -149,6 +149,7 @@ services:
 
   authelia:
     image: authelia/authelia:4.39.28
+    user: "${AUTHELIA_UID:-1000}:${AUTHELIA_GID:-1000}"
     restart: unless-stopped
     networks:
       - auth

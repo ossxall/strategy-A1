@@ -25,6 +25,8 @@
 Desde `live/`:
 
 ```bash
+export AUTHELIA_UID="$(id -u)"
+export AUTHELIA_GID="$(id -g)"
 APP_ENV=prod docker-compose --env-file .env.prod -f docker-compose.yml -f docker-compose.runtime.yml -p blacker-bot1 up -d --build
 APP_ENV=prod docker-compose --env-file .env.prod -f docker-compose.yml -f docker-compose.runtime.yml -p blacker-bot1 ps
 APP_ENV=prod docker-compose --env-file .env.prod -f docker-compose.yml -f docker-compose.runtime.yml -p blacker-bot1 logs --tail=200 feed bot executor monitor
