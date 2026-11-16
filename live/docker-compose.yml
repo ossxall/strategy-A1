@@ -112,6 +112,20 @@ services:
       retries: 3
       start_period: 120s
 
+  monitor:
+    <<: *common
+    command: ["python", "-m", "monitor"]
+    profiles: ["monitor"]
+    volumes:
+      - ./monitor/config.yaml:/app/legacy/bot1/monitor/config.yaml:ro
+    depends_on:
+      feed:
+        condition: service_started
+      bot:
+        condition: service_started
+      executor:
+        condition: service_started
+
   nginx:
     image: nginx:stable-alpine
     ports:

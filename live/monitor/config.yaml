@@ -1,0 +1,21 @@
+# El token se lee desde una variable de entorno y no se guarda en este archivo.
+telegram:
+  token_env: MONITOR_TELEGRAM_BOT_TOKEN
+  password_env: MONITOR_PASSWORD
+  polling_timeout_seconds: 30
+
+# Direcciones internas de Docker Compose. Para ejecutar fuera de Docker,
+# cambia "feed", "bot" y "executor" por 127.0.0.1.
+services:
+  feed:
+    url: http://127.0.0.1:8787/live/feed/health
+  bot:
+    url: http://127.0.0.1:8080/live/bot/health
+  executor:
+    url: http://127.0.0.1:8081/live/bot/execution/status
+
+http:
+  request_timeout_seconds: 3
+  max_response_bytes: 65536
+  # Telegram admite mensajes de hasta 4096 caracteres.
+  max_message_chars: 3900

@@ -1,6 +1,51 @@
-# HTTP endpoints de `/live`
+# Monitor de Telegram y endpoints HTTP de `/live`
 
-Inventario de los tres servicios HTTP definidos en `docker-compose.yml`:
+## Bot de Telegram
+
+`monitor` consulta endpoints HTTP de salud y devuelve el estado HTTP y el JSON
+recibido. La respuesta se representa sin asumir nombres ni niveles concretos en
+el JSON, por lo que tolera cambios en el esquema.
+
+1. Crea un bot con BotFather y copia su token a `MONITOR_TELEGRAM_BOT_TOKEN` en
+   `live/.env.dev` o `live/.env.prod`.
+2. Define una contraseña fuerte en `MONITOR_PASSWORD` en el mismo archivo de
+   entorno.
+3. Revisa `services` en `config.yaml`. Los valores iniciales usan los nombres
+   DNS de Docker Compose y los puertos internos de cada servicio.
+4. Para ejecutarlo directamente, instala las dependencias desde `live/`:
+
+   ```sh
+   python -m pip install -r monitor/requirements.txt
+   ```
+
+5. Arranca el perfil opcional desde `live/`:
+
+   ```sh
+   docker-compose -p blacker-bot1 --profile monitor up -d --build monitor
+   ```
+
+   Para ver los logs: `docker-compose -p blacker-bot1 logs -f monitor`.
+   También puedes ejecutarlo directamente desde `live/` con `python monitor.py`;
+   cargará `.env.dev` por defecto o `.env.prod` si `APP_ENV=prod`.
+
+Comandos:
+
+- `/auth <contraseña>` habilita la sesión del usuario hasta `/logout` o el
+  reinicio del monitor. Envíalo en un chat privado.
+- `/status feed` consulta el endpoint del feed.
+- `/status bot` consulta el endpoint del bot.
+- `/status executor` consulta el endpoint del executor.
+- `/status all` consulta todos los endpoints.
+- `/logout` cierra la sesión autenticada.
+- `/help` muestra los comandos disponibles.
+
+El bot usa long polling de Telegram, por lo que no publica un puerto entrante.
+Fuera de Docker, cambia en `config.yaml` los hosts `feed`, `bot` y `executor`
+por `127.0.0.1` y usa los puertos publicados abajo.
+
+## HTTP endpoints de `/live`
+
+Inventario de los servicios HTTP definidos en `docker-compose.yml`:
 
 | Servicio | Puerto local | Rutas `/live` | Formato |
 | --- | ---: | --- | --- |
