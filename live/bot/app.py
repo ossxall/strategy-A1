@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 import math
+import threading
 import time
 from pathlib import Path
 
-from strategy.strategy import Config, EMACrossStrategy
+from strategy.strategy import Backtester, Config, EMACrossStrategy
 
 from .config import (
     DEFAULT_BACKTEST_REPORT_DIR,
@@ -16,6 +17,7 @@ from .config import (
     DEFAULT_HTTP_PORT,
     DEFAULT_INTERVAL,
     DEFAULT_LIVE_ONLY,
+    DEFAULT_MODE,
     DEFAULT_POLL_SECONDS,
     DEFAULT_RUN_ONCE,
     DEFAULT_SIGNAL_DB,
@@ -73,7 +75,11 @@ class SignalBot:
         snapshot: SeriesSnapshot | None = None,
         health: BotHealth | None = None,
         backtest_report_dir: Path | None = None,
+        mode: str = DEFAULT_MODE,
     ):
+        normalized_mode = str(mode).strip().lower()
+        if normalized_mode not in {"live", "backtest"}:
+            raise ValueError("BOT_MODE debe ser 'live' o 'backtest'")
         self.cfg = cfg
         self.feed = feed
         self.store = store
@@ -86,8 +92,10 @@ class SignalBot:
         self.snapshot = snapshot
         self.health = health
         self.backtest_report_dir = backtest_report_dir
+        self.mode = normalized_mode
         self._last_report_signature = None
         self._live_resolved = False
+        self._backtest_complete = False
 
     def _resolve_live_since(self) -> None:
         """Fija y persiste la marca desde la que se publican eventos live-only."""
@@ -194,7 +202,8 @@ class SignalBot:
 
     def process_once(self) -> int:
         """Lee datos cerrados, calcula acciones y persiste los eventos nuevos."""
-        self._resolve_live_since()
+        if self.mode == "live":
+            self._resolve_live_since()
         raw = self.feed.load_closed()
         if self.health is not None:
             self.health.record_feed(raw)
@@ -220,6 +229,44 @@ class SignalBot:
 
         signals = self.strategy.generate_signals(bars, raw)
         adx_exit, weak_exit, rsi_div_exit = self.strategy.prepare_exits(raw, bars)
+        if self.mode == "backtest":
+            if self.backtest_report_dir is None:
+                raise ValueError(
+                    "BOT_BACKTEST_REPORT_DIR es obligatorio en modo backtest"
+                )
+            engine = Backtester(
+                bars,
+                self.cfg,
+                signals,
+                adx_exit,
+                weak_exit,
+                rsi_div_exit,
+            )
+            trades, equity = engine.run()
+            from strategy.report import generate_report
+
+            generate_report(
+                trades,
+                equity,
+                self.cfg,
+                bars,
+                f"{self.symbol} {self.interval} feed.db",
+                output_dir=self.backtest_report_dir,
+                raw=raw,
+                signals=signals,
+                adx_exit=adx_exit,
+                weak_exit=weak_exit,
+                rsi_div_exit=rsi_div_exit,
+                volume_exit=engine.volume_exit,
+            )
+            self._backtest_complete = True
+            logger.info(
+                "Backtest completo publicado: %s → %s",
+                raw.index[0],
+                raw.index[-1],
+            )
+            return 0
+
         events, trades, equity = build_events_and_result(
             bars,
             signals,
@@ -257,8 +304,29 @@ class SignalBot:
     def run(self, once: bool = False, poll_seconds: float = DEFAULT_POLL_SECONDS) -> None:
         if self.health is not None:
             self.health.mark_running()
+        heartbeat_stop = threading.Event()
+
+        def heartbeat_worker() -> None:
+            interval = max(0.2, min(30.0, poll_seconds))
+            while not heartbeat_stop.wait(interval):
+                if self.health is not None:
+                    self.health.heartbeat()
+                touch_heartbeat()
+
+        heartbeat_thread = threading.Thread(
+            target=heartbeat_worker,
+            name="bot-heartbeat",
+            daemon=True,
+        )
+        heartbeat_thread.start()
         try:
             while not STOP_EVENT.is_set():
+                if self.mode == "backtest" and self._backtest_complete:
+                    if self.health is not None:
+                        self.health.heartbeat()
+                    touch_heartbeat()
+                    STOP_EVENT.wait(poll_seconds)
+                    continue
                 started = time.monotonic()
                 if self.health is not None:
                     self.health.begin_cycle()
@@ -289,9 +357,11 @@ class SignalBot:
                         )
 
                 touch_heartbeat()
-                if once or STOP_EVENT.wait(poll_seconds):
+                if (once and self.mode == "live") or STOP_EVENT.wait(poll_seconds):
                     break
         finally:
+            heartbeat_stop.set()
+            heartbeat_thread.join(timeout=1)
             if self.health is not None:
                 self.health.mark_stopped()
 
@@ -303,6 +373,9 @@ def request_stop(signum=None, frame=None) -> None:
 
 def main() -> int:
     cfg = build_strategy_config()
+    mode = env_str("MODE", DEFAULT_MODE).strip().lower()
+    if mode not in {"live", "backtest"}:
+        raise ValueError("BOT_MODE debe ser 'live' o 'backtest'")
     symbol = env_str("SYMBOL", DEFAULT_SYMBOL).upper()
     interval = env_str("INTERVAL", DEFAULT_INTERVAL)
     feed_path = resolve_path(env_str("DB_PATH", DEFAULT_FEED_DB))
@@ -316,8 +389,16 @@ def main() -> int:
     poll_seconds = max(0.1, poll_seconds)
     run_once = env_bool("BOT_RUN_ONCE", DEFAULT_RUN_ONCE)
     live_since_value = env_str("LIVE_SINCE", "").strip()
-    live_since_ms = parse_live_since(live_since_value) if live_since_value else None
-    live_only = env_bool("LIVE_ONLY", DEFAULT_LIVE_ONLY) or live_since_ms is not None
+    live_since_ms = (
+        parse_live_since(live_since_value)
+        if mode == "live" and live_since_value
+        else None
+    )
+    live_only = (
+        env_bool("LIVE_ONLY", DEFAULT_LIVE_ONLY) or live_since_ms is not None
+        if mode == "live"
+        else False
+    )
     http_host = env_str("HTTP_HOST", DEFAULT_HTTP_HOST)
     http_port = env_int("HTTP_PORT", DEFAULT_HTTP_PORT)
     http_max_clients = env_int("HTTP_MAX_CLIENTS", 8)
@@ -328,7 +409,8 @@ def main() -> int:
         raise ValueError("BOT_HTTP_PORT debe estar entre 0 y 65535")
 
     logger.info(
-        "Bot iniciado: symbol=%s interval=%s timeframe=%s feed=%s signal=%s",
+        "Bot iniciado: mode=%s symbol=%s interval=%s timeframe=%s feed=%s signal=%s",
+        mode,
         symbol,
         interval,
         cfg.timeframe,
@@ -349,12 +431,18 @@ def main() -> int:
         min_bars=min_bars,
         live_only=live_only,
         live_since_ms=live_since_ms,
+        mode=mode,
         probe_interval_seconds=health_probe_interval,
     )
     http_server = None
     http_thread = None
     probe_thread = None
     try:
+        # Validar las bases antes de publicar health/status o procesar señales.
+        feed.connect()
+        if mode == "live":
+            store.connect()
+
         if http_port > 0:
             http_server, http_thread, probe_thread = start_health_server(
                 health,
@@ -366,9 +454,9 @@ def main() -> int:
                 probe_interval=health_probe_interval,
                 probe_timeout=health_probe_timeout,
                 backtest_dir=backtest_report_dir / "html",
+                report_dir=backtest_report_dir,
             )
 
-        store.connect()
         SignalBot(
             cfg,
             feed,
@@ -380,6 +468,7 @@ def main() -> int:
             live_since_ms=live_since_ms,
             health=health,
             backtest_report_dir=backtest_report_dir,
+            mode=mode,
         ).run(once=run_once, poll_seconds=poll_seconds)
     finally:
         health.stop()

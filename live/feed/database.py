@@ -8,6 +8,7 @@ from pathlib import Path
 from .config import (
     DB_PATH,
     INTERVAL,
+    INTERVAL_MS,
     STATUS_DB_PROBE_INTERVAL,
     STATUS_DB_TIMEOUT,
     SYMBOL,
@@ -16,9 +17,131 @@ from .config import (
 from .state import STATE, update_diagnostics
 
 try:
-    from ..db.sqlite_config import connect_sqlite
+    from ..db.sqlite_config import (
+        SQLiteSchemaError,
+        connect_sqlite,
+        sqlite_user_tables,
+        validate_index,
+        validate_index_set,
+        validate_no_views_or_triggers,
+        validate_quick_check,
+        validate_table,
+    )
 except ImportError:  # ejecución como paquete top-level desde live/
-    from db.sqlite_config import connect_sqlite
+    from db.sqlite_config import (
+        SQLiteSchemaError,
+        connect_sqlite,
+        sqlite_user_tables,
+        validate_index,
+        validate_index_set,
+        validate_no_views_or_triggers,
+        validate_quick_check,
+        validate_table,
+    )
+
+
+FEED_TABLES = {"candles", "collector_state"}
+FEED_CANDLE_COLUMNS = {
+    "symbol": "TEXT",
+    "interval": "TEXT",
+    "open_time": "INTEGER",
+    "close_time": "INTEGER",
+    "open": "REAL",
+    "high": "REAL",
+    "low": "REAL",
+    "close": "REAL",
+    "volume": "REAL",
+    "quote_volume": "REAL",
+    "trades": "INTEGER",
+    "taker_buy_base": "REAL",
+    "taker_buy_quote": "REAL",
+    "is_closed": "INTEGER",
+    "source": "TEXT",
+    "updated_at": "TEXT",
+}
+FEED_STATE_COLUMNS = {
+    "key": "TEXT",
+    "value": "TEXT",
+    "updated_at": "TEXT",
+}
+
+
+def validate_feed_schema(connection):
+    """Verifica el contrato SQL usado por el colector y por sus lectores."""
+    validate_no_views_or_triggers(connection, "feed.db")
+    tables = sqlite_user_tables(connection)
+    if tables != FEED_TABLES:
+        raise SQLiteSchemaError(
+            "feed.db contiene tablas "
+            f"{sorted(tables)!r}; se requieren exactamente {sorted(FEED_TABLES)!r}"
+        )
+
+    validate_table(
+        connection,
+        "candles",
+        FEED_CANDLE_COLUMNS,
+        primary_key=("symbol", "interval", "open_time"),
+        exact_columns=True,
+        not_null={
+            "symbol": True,
+            "interval": True,
+            "open_time": True,
+            "close_time": True,
+            "open": True,
+            "high": True,
+            "low": True,
+            "close": True,
+            "volume": True,
+            "quote_volume": True,
+            "trades": True,
+            "taker_buy_base": True,
+            "taker_buy_quote": True,
+            "is_closed": True,
+            "source": True,
+            "updated_at": True,
+        },
+        defaults={
+            "quote_volume": "0",
+            "trades": "0",
+            "taker_buy_base": "0",
+            "taker_buy_quote": "0",
+            "is_closed": "0",
+            "source": "'rest'",
+        },
+    )
+    validate_table(
+        connection,
+        "collector_state",
+        FEED_STATE_COLUMNS,
+        primary_key=("key",),
+        exact_columns=True,
+        not_null={"value": True, "updated_at": True},
+    )
+    validate_index(
+        connection,
+        "candles",
+        "idx_candles_time",
+        ("symbol", "interval", "open_time"),
+    )
+    validate_index_set(connection, "candles", {"idx_candles_time"})
+    validate_index_set(connection, "collector_state", set())
+    validate_quick_check(connection, "feed.db")
+
+
+def _validate_existing_feed_database(path: Path) -> None:
+    """Valida una base existente sin modificarla, antes de inicializar SQLite."""
+    if not path.exists() or path.stat().st_size == 0:
+        return
+    connection = connect_sqlite(path, read_only=True, query_only=True)
+    try:
+        tables = sqlite_user_tables(connection)
+        if tables:
+            validate_feed_schema(connection)
+        else:
+            validate_no_views_or_triggers(connection, "feed.db")
+            validate_quick_check(connection, "feed.db")
+    finally:
+        connection.close()
 
 
 def db_connect():
@@ -30,7 +153,10 @@ def db_connect():
 
 
 def init_db():
-    Path(DB_PATH).resolve().parent.mkdir(parents=True, exist_ok=True)
+    db_path = Path(DB_PATH)
+    db_path.resolve().parent.mkdir(parents=True, exist_ok=True)
+    # No dejar que CREATE TABLE IF NOT EXISTS oculte una base antigua/malformada.
+    _validate_existing_feed_database(db_path)
     with STATE.db_lock:
         # Candles are recoverable from REST; NORMAL avoids syncing every commit.
         conn = connect_sqlite(
@@ -40,6 +166,7 @@ def init_db():
             check_same_thread=False,
         )
         try:
+            conn.execute("BEGIN IMMEDIATE")
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS candles (
@@ -78,7 +205,11 @@ def init_db():
                 )
                 """
             )
+            validate_feed_schema(conn)
             conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
         finally:
             conn.close()
 
@@ -117,6 +248,47 @@ def get_latest_open_time():
                 (SYMBOL, INTERVAL),
             ).fetchone()
             return row[0] if row and row[0] is not None else None
+        finally:
+            conn.close()
+
+
+def get_first_missing_candle_range(start_time_ms):
+    """Devuelve el primer rango de velas ausente desde la fecha configurada."""
+    with STATE.db_lock:
+        conn = db_connect()
+        try:
+            first = conn.execute(
+                """
+                SELECT MIN(open_time)
+                FROM candles
+                WHERE symbol=? AND interval=? AND open_time >= ?
+                """,
+                (SYMBOL, INTERVAL, start_time_ms),
+            ).fetchone()[0]
+            if first is None:
+                return None
+            if first > start_time_ms:
+                return start_time_ms, first - INTERVAL_MS
+
+            gap = conn.execute(
+                """
+                SELECT open_time, next_open_time
+                FROM (
+                    SELECT
+                        open_time,
+                        LEAD(open_time) OVER (ORDER BY open_time) AS next_open_time
+                    FROM candles
+                    WHERE symbol=? AND interval=? AND open_time >= ?
+                )
+                WHERE next_open_time > open_time + ?
+                ORDER BY open_time
+                LIMIT 1
+                """,
+                (SYMBOL, INTERVAL, start_time_ms, INTERVAL_MS),
+            ).fetchone()
+            if gap is None:
+                return None
+            return gap[0] + INTERVAL_MS, gap[1] - INTERVAL_MS
         finally:
             conn.close()
 

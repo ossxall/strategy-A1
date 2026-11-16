@@ -26,8 +26,9 @@ el paquete desde el directorio live con `python -m bot`; no hay opciones CLI.
 
 La configuración operativa se toma del perfil de Compose (`live/.env.dev` por
 defecto o `live/.env.prod` con `APP_ENV=prod`) y de las variables de entorno.
-Al ejecutar directamente `python live/bot/executor.py`, el perfil también se
-carga antes de iniciar el worker. No se admiten argumentos de terminal.
+Al ejecutar directamente `python live/bot.py`, `python -m bot` o
+`python live/bot/executor.py`, el perfil también se carga antes de iniciar el
+proceso. No se admiten argumentos de terminal.
 
 ## Reinicio y recuperación
 
@@ -55,9 +56,9 @@ señales debe validar su vigencia e idempotencia antes de operar.
 órdenes ni de posiciones reales. Cada fila incluye `schema_version`, `signal_id`,
 `event`, `action`, `side`, `position_id`, `scheduled`, `signal_time` y el
 `payload` detallado. Los `ENTRY` incluyen en `payload.sizing` los multiplicadores
-efectivos de `strategy`, el stop y el leverage simulado. `signal_id` es un
-SHA-256 determinista v2; `position_id`
-solo correlaciona eventos del backtest y no identifica una posición de Binance.
+efectivos de `strategy` y el stop; la estrategia no calcula ni transmite leverage.
+`signal_id` es un SHA-256 determinista v2; `position_id` solo correlaciona eventos
+del backtest y no identifica una posición de Binance.
 `signal` y `side` se conservan iguales por compatibilidad; en un `EXIT`, `side`
 indica la posición que se cierra, no el lado de la orden de Binance.
 
@@ -90,10 +91,12 @@ Compose ejecuta `python -m bot.execution`, pero **no envía órdenes por defecto
 `binance-sdk-derivatives-trading-usds-futures`; el entorno predeterminado es
 testnet. Producción requiere `BOT_BINANCE_ENVIRONMENT=production`,
 `BOT_BINANCE_TRADING_ENABLED=true` y `BOT_BINANCE_ALLOW_LIVE_TRADING=true`.
-El tope de leverage predeterminado es 10x. `BOT_BINANCE_SET_LEVERAGE=true` aplica
-en Binance el menor valor entre ese tope y el de `strategy`, pero no tiene efecto
-mientras el trading siga deshabilitado. El tamaño puede ser menor que 10x por
-`risk_pct`, los multiplicadores adaptativos y el límite de exposición.
+El executor es el único componente que configura y aplica leverage en Binance:
+`BOT_BINANCE_SET_LEVERAGE=true` fija el tope definido por
+`BOT_BINANCE_MAX_LEVERAGE` (10x por defecto). Si se desactiva, usa el leverage
+actual de Binance, limitado por ese tope. Estos ajustes no tienen efecto mientras
+el trading siga deshabilitado. El tamaño también puede ser menor por `risk_pct`,
+los multiplicadores adaptativos y el límite de exposición.
 `BOT_STRATEGY_INITIAL_CAPITAL=100` es la referencia del backtest; el worker lee el
 equity/margen real de Binance para calcular la cantidad live.
 El executor fija un corte inicial por cuenta con un margen corto de recuperación
@@ -199,6 +202,31 @@ de `signal.db`, los umbrales y los checks calculados. También se conservan
 `GET /live/bot/backtest/` sirve el visor estático live y los archivos de datos
 bajo el directorio generado del reporte.
 
+## Modo de backtest histórico
+
+`BOT_MODE=backtest` hace una simulación completa con todas las velas cerradas que
+existan en `feed.db` para `BOT_SYMBOL` y `BOT_INTERVAL`. Aplica la configuración
+actual de `strategy.Config`, genera métricas, CSV/JSON y el dashboard resumen en
+el directorio persistente del reporte. El informe se sirve en
+`/live/bot/report/`; el visor mensual continúa en `/live/bot/backtest/`.
+
+El modo ejecuta el backtest una vez al arrancar y mantiene el proceso HTTP vivo.
+Si `feed.db` todavía no existe, está vacío o no tiene suficientes velas, espera
+y vuelve a intentarlo. No inserta ni modifica señales en `signal.db`; no es un
+modo de trading ni un reemplazo del modo `live`. `BOT_RUN_ONCE` no termina este
+modo, para que los reportes sigan disponibles por HTTP.
+
+`strategy/report.html` es la plantilla fuente y no se sobrescribe. El generador
+la copia como `report.html` (y como `index.html` por compatibilidad) junto a la
+carpeta configurada en `BOT_BACKTEST_REPORT_DIR`. Con el valor predeterminado
+`backtest_out`, la página resumen carga los datos de esa carpeta. En Compose,
+los resultados permanecen en el volumen `bot_reports`.
+
+Antes de cambiar un despliegue al modo histórico, confirma que el executor no
+tenga señales live pendientes que deban procesarse. Cambia el modo con
+`BOT_MODE=backtest` en el perfil `.env` que usa Compose; vuelve a `BOT_MODE=live`
+para reanudar la generación normal de señales.
+
 ## Estado HTTP del executor
 
 El proceso executor publica `GET /live/bot/execution/status`; el alias es
@@ -226,6 +254,16 @@ publicado en `http://127.0.0.1:8080/live/bot/health`.
 durabilidad de señales y estado de recuperación, y un `busy_timeout` de 5 s.
 El autocheckpoint se configura en 1000 páginas y el límite de tamaño de WAL de
 64 MiB es orientativo, no un tope duro.
+
+Al arrancar en modo live, el bot valida `feed.db` en solo lectura y
+valida/migra de forma transaccional `signal.db`; el executor también valida el
+esquema compartido de `signal.db` antes de consumir señales. Se comprueban
+tablas, columnas, tipos, claves, índices, `user_version` de `signal.db` e
+integridad SQLite. Solo se aceptan las migraciones históricas explícitamente
+soportadas por el almacén. Si la estructura es desconocida, está dañada o es de
+una versión futura, el proceso falla antes de publicar endpoints o procesar
+órdenes. No se borran ni reinicializan bases automáticamente: conserva una copia
+y revisa el diagnóstico de arranque.
 
 La configuración común de conexiones está en `live/db/sqlite_config.py` y se
 reaplica al abrir cada base. Borrar `signal.db` no afecta a la configuración del

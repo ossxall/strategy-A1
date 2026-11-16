@@ -21,14 +21,13 @@ if str(LIVE_DIR) not in sys.path:
 from bot.execution.binance_usdm import BinanceUsdmClient, response_data
 
 SYMBOL = "BTCUSDT"
-LEVERAGE = 10
 STOP_DISTANCE = Decimal("0.01")  # 1,0 %
 TP_STEP = Decimal("0.005")  # 0,5 %
 TP_COUNT = 7
 
 # Parámetros de operación: cambia estos valores directamente en el archivo.
 SIDE = "LONG"  # "LONG" o "SHORT"
-CAPITAL_USDT = Decimal(60)  # margen aislado objetivo; a 10x ≈ 100 USDT nominales
+CAPITAL_USDT = Decimal(60)  # nominal máximo de la posición; no se aplica leverage
 USE_LIVE = False  # False = Futures Testnet; True = producción (requiere confirmación)
 
 
@@ -180,8 +179,8 @@ def quantity_for_capital(
     min_qty: Decimal,
     min_notional: Decimal,
 ) -> Decimal:
-    """Calcula BTC para el margen objetivo, redondeando sin excederlo."""
-    target_notional = capital * LEVERAGE
+    """Calcula BTC para el nominal objetivo, redondeando sin excederlo."""
+    target_notional = capital
     quantity = (target_notional / mark_price / step).to_integral_value(
         rounding=ROUND_DOWN
     ) * step
@@ -190,10 +189,10 @@ def quantity_for_capital(
         min_required_qty = (min_required_qty / step).to_integral_value(
             rounding=ROUND_UP
         ) * step
-        min_required_capital = min_required_qty * mark_price / LEVERAGE
+        min_required_capital = min_required_qty * mark_price
         raise ValueError(
-            f"{capital} USDT de margen no alcanza los mínimos actuales de Binance. "
-            f"El mínimo estimado es {min_required_capital:.4f} USDT de margen "
+            f"{capital} USDT de nominal no alcanza los mínimos actuales de Binance. "
+            f"El nominal mínimo estimado es {min_required_capital:.4f} USDT "
             f"(cantidad {min_required_qty} BTC). No se envió la entrada."
         )
     return quantity
@@ -268,7 +267,7 @@ def check_confirm(
 ) -> None:
     print(
         f"\nEntorno: {environment.upper()} | {SYMBOL} {side} | "
-        f"margen aislado objetivo: {capital} USDT | "
+        f"nominal máximo: {capital} USDT | "
         f"nominal estimado: {notional:.2f} USDT | "
         f"cantidad: {quantity} BTC | TPs parciales: {tp_count}"
     )
@@ -336,7 +335,6 @@ def execute_trade(
     )
 
     set_isolated_margin(client)
-    client.change_leverage(SYMBOL, LEVERAGE)
     entry_reference = get_mark_price(client)
     quantity = quantity_for_capital(
         capital, entry_reference, step, min_qty, min_notional
@@ -351,7 +349,7 @@ def execute_trade(
         )
     if len(pre_entry_tps) < TP_COUNT:
         print(
-            f"Con el margen y los filtros actuales se pueden colocar "
+            f"Con el nominal y los filtros actuales se pueden colocar "
             f"{len(pre_entry_tps)} TPs parciales de {TP_COUNT}."
         )
 
@@ -386,8 +384,8 @@ def execute_trade(
 
     print(f"\nEntrada ejecutada: {executed} BTC a ~{entry_price} USDT")
     print(
-        f"Margen aislado estimado: {executed * entry_price / LEVERAGE:.4f} USDT "
-        f"(nominal: {executed * entry_price:.2f} USDT)"
+        f"Nominal ejecutado: {executed * entry_price:.2f} USDT "
+        f"(máximo solicitado: {capital:.2f} USDT)"
     )
     print(f"Stop (mark price ±{STOP_DISTANCE * 100}%): {stop_price} USDT")
 

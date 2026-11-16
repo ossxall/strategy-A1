@@ -1,3 +1,4 @@
+import os
 import sys
 import types
 from pathlib import Path
@@ -43,3 +44,26 @@ def test_direct_executor_uses_profile_selected_by_app_env(monkeypatch, tmp_path)
     load_direct_profile(tmp_path)
 
     assert calls[0] == tmp_path / ".env.prod"
+
+
+def test_direct_profile_falls_back_to_simple_env_files_without_dotenv(
+    monkeypatch, tmp_path
+):
+    monkeypatch.delenv("APP_ENV", raising=False)
+    monkeypatch.delenv("BOT_MODE", raising=False)
+    monkeypatch.setenv("BOT_PROFILE_VALUE", "shell")
+    monkeypatch.setitem(sys.modules, "dotenv", None)
+    (tmp_path / ".env.dev").write_text(
+        "BOT_MODE=backtest\nBOT_PROFILE_VALUE=profile\n",
+        encoding="utf-8",
+    )
+    (tmp_path / ".env").write_text(
+        "BOT_MODE=live\nBOT_COMMON_VALUE=common\n",
+        encoding="utf-8",
+    )
+
+    load_direct_profile(tmp_path)
+
+    assert os.environ["BOT_MODE"] == "backtest"
+    assert os.environ["BOT_PROFILE_VALUE"] == "shell"
+    assert os.environ["BOT_COMMON_VALUE"] == "common"

@@ -33,7 +33,7 @@
          font-weight:650; letter-spacing:-.025em; overflow-wrap:anywhere; }
     .subtitle { margin:.3rem 0 0; color:var(--muted); font-size:.86rem; }
     .pager {
-      display:grid; grid-template-columns:auto minmax(10rem,auto) auto; align-items:center;
+      display:grid; grid-template-columns:auto minmax(10rem,auto) auto auto; align-items:center;
       gap:.45rem; padding:.35rem; border:1px solid var(--border); border-radius:.75rem;
       background:var(--page); flex-shrink:0;
     }
@@ -67,7 +67,7 @@
     .status { padding:2rem; color:var(--muted); text-align:center; }
     @media (max-width:700px) {
       .page-header { align-items:stretch; flex-direction:column; gap:.9rem; padding:1rem; }
-      .pager { width:100%; grid-template-columns:auto minmax(0,1fr) auto; }
+      .pager { width:100%; grid-template-columns:auto minmax(0,1fr) auto auto; }
       .page-label { min-width:0; }
       .chart-shell { padding:8px; }
       .chart-panels { gap:8px; }
@@ -90,6 +90,7 @@
       <button class="pager-button" id="previous" type="button" disabled>← Anterior</button>
       <span class="page-label" id="page-label" aria-live="polite"></span>
       <button class="pager-button" id="next" type="button" disabled>Siguiente →</button>
+      <button class="pager-button" id="last" type="button" disabled>Última »</button>
     </nav>
   </header>
   <main>
@@ -106,6 +107,7 @@
     const label = document.getElementById("page-label");
     const previous = document.getElementById("previous");
     const next = document.getElementById("next");
+    const last = document.getElementById("last");
     const status = document.getElementById("status");
     const config = {responsive:true, displaylogo:false, scrollZoom:true,
                     displayModeBar:"hover",
@@ -226,6 +228,7 @@
         label.textContent = "No hay meses para mostrar";
         previous.disabled = true;
         next.disabled = true;
+        last.disabled = true;
         return;
       }
       current = index;
@@ -233,6 +236,7 @@
       const entry = manifest.pages[current];
       previous.disabled = true;
       next.disabled = true;
+      last.disabled = true;
       status.textContent = "Cargando gráficos…";
       try {
         const pageUrl = new URL(entry.file, manifestUrl);
@@ -262,11 +266,13 @@
         status.textContent = "";
         previous.disabled = current === 0;
         next.disabled = current === manifest.pages.length - 1;
+        last.disabled = current === manifest.pages.length - 1;
       } catch (error) {
         console.error("No se pudieron cargar los datos del backtest:", error);
         status.textContent = "No se pudieron cargar los datos de este mes.";
         previous.disabled = current === 0;
         next.disabled = current === manifest.pages.length - 1;
+        last.disabled = current === manifest.pages.length - 1;
       }
     }
 
@@ -293,6 +299,7 @@
         }
         previous.addEventListener("click", () => showPage(current - 1));
         next.addEventListener("click", () => showPage(current + 1));
+        last.addEventListener("click", () => showPage(manifest.pages.length - 1));
         window.addEventListener("resize", () => {
           activePlots.forEach(plot => Plotly.Plots.resize(plot));
         });

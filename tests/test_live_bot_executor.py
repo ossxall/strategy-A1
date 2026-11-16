@@ -68,7 +68,6 @@ def _entry_event():
                     "risk_pct": 0.01,
                     "risk_multiplier": 1.0,
                     "stop_loss_pct": 0.01,
-                    "max_leverage": 1.0,
                     "commission_bps": 0.0,
                     "slippage_bps": 0.0,
                 },
@@ -451,12 +450,14 @@ def test_test_mode_never_connects_to_production_for_order_execution(tmp_path):
         )
 
 
-def test_default_strategy_and_worker_leverage_cap_is_ten(monkeypatch):
+def test_strategy_has_no_leverage_setting_and_executor_owns_binance_leverage(
+    monkeypatch,
+):
     monkeypatch.setenv("BOT_BINANCE_MAX_LEVERAGE", "10")
     monkeypatch.setenv("BOT_BINANCE_SET_LEVERAGE", "true")
     monkeypatch.setenv("BOT_EXECUTOR_TEST_MODE", "false")
     settings = ExecutorSettings.from_env()
-    assert Config().max_leverage == 10.0
+    assert not hasattr(Config(), "max_leverage")
     assert settings.max_leverage == 10
     assert settings.set_leverage is True
 
@@ -604,7 +605,7 @@ def test_mainnet_environment_alias_uses_production_endpoint(monkeypatch):
     assert settings.account_id == "binance-production"
 
 
-def test_entry_size_uses_strategy_risk_and_exchange_leverage_caps(tmp_path):
+def test_entry_size_uses_strategy_risk_and_execution_leverage_caps(tmp_path):
     class FakeGateway:
         def symbol_configuration(self, symbol):
             assert symbol == "BTCUSDT"
@@ -631,8 +632,8 @@ def test_entry_size_uses_strategy_risk_and_exchange_leverage_caps(tmp_path):
             {"wallet_balance": 100.0, "available_balance": 100.0},
             mark_price=100.0,
         )
-        # 1% risk / 1% stop = 1 BTC-contract unit, but the 95% exposure
-        # reserve caps notional to 95 USD at 1x.
+        # 1% risk / 1% stop = 1 BTC-contract unit, but execution's 95%
+        # exposure reserve caps notional to 95 USD at Binance's 1x leverage.
         assert quantity == Decimal("0.95")
     finally:
         store.close()

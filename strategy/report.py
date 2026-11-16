@@ -157,6 +157,7 @@ def write_outputs(out_dir: str | Path, trades: pd.DataFrame, equity: pd.DataFram
     metrics_path.write_text(json.dumps(current, indent=2, allow_nan=False), encoding="utf-8")
     (out / "config.json").write_text(json.dumps(report["config"], indent=2, allow_nan=False), encoding="utf-8")
     _write_static_report_html(out.parent / "index.html")
+    _write_static_report_html(out.parent / "report.html")
     print(f"[OUT] Archivos guardados en {out.resolve()}", flush=True)
 
 

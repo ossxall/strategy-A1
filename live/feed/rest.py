@@ -25,7 +25,13 @@ from .config import (
     logger,
     utc_iso,
 )
-from .database import db_connect, get_latest_open_time, save_candle, set_state
+from .database import (
+    db_connect,
+    get_first_missing_candle_range,
+    get_latest_open_time,
+    save_candle,
+    set_state,
+)
 from .state import STATE, update_diagnostics
 
 
@@ -166,13 +172,30 @@ def initial_backfill_worker():
         latest = get_latest_open_time()
         if latest is None:
             start_ms = START_TIME_MS
+            end_ms = int(time.time() * 1000)
             logger.info("Base de datos vacía; backfill desde %s UTC", START_DATE)
         else:
-            start_ms = max(START_TIME_MS, latest - 10 * INTERVAL_MS)
-            logger.info(
-                "Backfill desde la última vela guardada (con solapamiento de 10 velas)."
-            )
-        end_ms = int(time.time() * 1000)
+            missing_range = get_first_missing_candle_range(START_TIME_MS)
+            if missing_range is not None:
+                start_ms, end_ms = missing_range
+                logger.info(
+                    "Hueco histórico; backfill desde %s UTC hasta %s UTC",
+                    datetime.fromtimestamp(
+                        start_ms / 1000,
+                        timezone.utc,
+                    ).isoformat(),
+                    datetime.fromtimestamp(
+                        end_ms / 1000,
+                        timezone.utc,
+                    ).isoformat(),
+                )
+            else:
+                start_ms = max(START_TIME_MS, latest - 10 * INTERVAL_MS)
+                end_ms = int(time.time() * 1000)
+                logger.info(
+                    "Backfill desde la última vela guardada "
+                    "(con solapamiento de 10 velas)."
+                )
 
         expected_candles = max(1, (end_ms - start_ms) // INTERVAL_MS + 1)
         expected_pages = (expected_candles + REST_PAGE_LIMIT - 1) // REST_PAGE_LIMIT

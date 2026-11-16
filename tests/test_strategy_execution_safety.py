@@ -138,7 +138,7 @@ def test_partial_closes_reconcile_cash_and_allocate_entry_fee_once():
             }
         ]
     )
-    config = quiet_config(commission_bps=10.0, max_leverage=1.0)
+    config = quiet_config(commission_bps=10.0)
     engine = Backtester(
         bars,
         config,
@@ -159,6 +159,34 @@ def test_partial_closes_reconcile_cash_and_allocate_entry_fee_once():
     assert engine.position is None
 
 
+def test_strategy_never_opens_notional_above_its_equity():
+    bars = make_bars(
+        [
+            {
+                "open": 100.0,
+                "high": 100.0,
+                "low": 100.0,
+                "close": 100.0,
+                "volume": 1.0,
+            }
+        ]
+    )
+    config = quiet_config(
+        initial_capital=1_000.0,
+        risk_pct=0.01,
+        stop_loss_pct=0.001,
+    )
+    engine = Backtester(bars, config, signals=manual_signals(bars, [0]))
+    engine._bar_index = 0
+    equity = engine.cash
+
+    engine.open_position(1, 100.0, bars.index[0])
+
+    assert engine.position is not None
+    assert engine.position.quantity == pytest.approx(equity / 100.0)
+    assert engine.position.quantity * engine.position.entry_price <= equity
+
+
 def test_monthly_loss_limit_closes_position_and_blocks_reentry_until_month_end():
     bars = make_bars(
         [
@@ -169,7 +197,7 @@ def test_monthly_loss_limit_closes_position_and_blocks_reentry_until_month_end()
     )
     engine = Backtester(
         bars,
-        quiet_config(monthly_loss_limit_pct=5.0, max_leverage=1.0),
+        quiet_config(monthly_loss_limit_pct=5.0),
         signals=manual_signals(bars, [1, 0, 1]),
     )
 
@@ -202,7 +230,7 @@ def test_monthly_loss_limit_rearms_at_the_start_of_the_next_calendar_month():
     )
     engine = Backtester(
         bars,
-        quiet_config(monthly_loss_limit_pct=5.0, max_leverage=1.0),
+        quiet_config(monthly_loss_limit_pct=5.0),
         signals=manual_signals(bars, [1, 0, 1, 0]),
     )
 

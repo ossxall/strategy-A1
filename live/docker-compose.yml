@@ -11,14 +11,13 @@
 #   el feed tarda o queda unhealthy.
 #
 # Uso (desde ./live):
-#   docker-compose -p blacker-bot1 up -d --build
-#   docker-compose -p blacker-bot1 ps
-#   docker-compose -p blacker-bot1 logs -f bot
-#   docker-compose -p blacker-bot1 down  # conserva live/data
+#   APP_ENV=dev docker-compose --env-file .env.dev -p blacker-bot1 up -d --build
+#   APP_ENV=dev docker-compose --env-file .env.dev -p blacker-bot1 ps
+#   APP_ENV=dev docker-compose --env-file .env.dev -p blacker-bot1 logs -f bot
+#   APP_ENV=dev docker-compose --env-file .env.dev -p blacker-bot1 down  # conserva live/data
 #
-# Compose 1.29 no admite env_file opcional: usa el perfil indicado por APP_ENV
-# (`live/.env.prod` o, por defecto, `live/.env.dev`). Pon ahí las variables que
-# deban llegar a los contenedores.
+# `feed`, `bot` y `executor` usan el perfil indicado por APP_ENV (.env.prod o,
+# por defecto, .env.dev). `monitor` recibe únicamente las variables MONITOR_*.
 # Los datos persistentes se guardan en live/data y no se incluyen en la imagen.
 
 version: "2.4"
@@ -29,8 +28,6 @@ x-common: &common
     dockerfile: live/Dockerfile
   image: blacker-bot1:latest
   working_dir: /app/legacy/bot1
-  env_file:
-    - .env.${APP_ENV:-dev}
   volumes:
     - ./data:/data
   init: true
@@ -47,6 +44,8 @@ x-common: &common
 services:
   feed:
     <<: *common
+    env_file:
+      - .env.${APP_ENV:-dev}
     command: ["python", "-m", "feed"]
     ports:
       - "127.0.0.1:8787:8787"
@@ -65,6 +64,8 @@ services:
 
   bot:
     <<: *common
+    env_file:
+      - .env.${APP_ENV:-dev}
     command: ["python", "-m", "bot"]
     volumes:
       - ./data:/data
@@ -92,6 +93,8 @@ services:
 
   executor:
     <<: *common
+    env_file:
+      - .env.${APP_ENV:-dev}
     command: ["python", "-m", "bot.execution"]
     volumes:
       - ./data:/data
@@ -111,6 +114,31 @@ services:
       timeout: 10s
       retries: 3
       start_period: 120s
+
+  monitor:
+    <<: *common
+    command: ["python", "-m", "monitor"]
+    volumes:
+      - ./monitor/config.yaml:/app/legacy/bot1/monitor/config.yaml:ro
+    environment:
+      MONITOR_TELEGRAM_BOT_TOKEN: ${MONITOR_TELEGRAM_BOT_TOKEN:?Define MONITOR_TELEGRAM_BOT_TOKEN en el perfil de entorno}
+      MONITOR_PASSWORD: ${MONITOR_PASSWORD:?Define MONITOR_PASSWORD en el perfil de entorno}
+      MONITOR_FEED_URL: ${MONITOR_FEED_URL:-http://feed:8787/live/feed/health}
+      MONITOR_BOT_URL: ${MONITOR_BOT_URL:-http://bot:8080/live/bot/health}
+      MONITOR_EXECUTOR_URL: ${MONITOR_EXECUTOR_URL:-http://executor:8081/live/bot/execution/status}
+    depends_on:
+      feed:
+        condition: service_started
+      bot:
+        condition: service_started
+      executor:
+        condition: service_started
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
 
   nginx:
     image: nginx:stable-alpine

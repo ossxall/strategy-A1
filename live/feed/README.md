@@ -24,6 +24,11 @@ al iniciar que SQLite haya devuelto `wal`. Las conexiones del colector usan
 páginas y un objetivo de truncado del WAL de 64 MiB. El límite del WAL no es
 duro y depende de que el checkpoint pueda completarse.
 
+Antes de iniciar el colector, se valida en solo lectura la integridad SQLite y
+el esquema de `candles`, `collector_state`, sus columnas, tipos, claves e índices.
+Una base incompatible detiene el arranque con un error; el colector no crea
+tablas encima de una base parcial ni borra datos automáticamente.
+
 Al borrar y recrear `feed.db`, el colector vuelve a aplicar esta política al
 iniciar. El archivo eliminado también contenía las velas persistidas.
 
@@ -35,9 +40,11 @@ Desde el directorio `live/`:
 python -m feed
 ```
 
-`live/feed.py` se conserva como launcher compatible. La configuración se carga
-desde `live/.env`, independientemente del directorio desde el que se inicie;
-las variables ya exportadas en el proceso tienen prioridad.
+`live/feed.py` se conserva como launcher compatible. Al ejecutar directamente,
+se carga `live/.env.dev` por defecto o `live/.env.prod` con `APP_ENV=prod`; luego
+se carga `live/.env` como complemento. Las variables ya exportadas en el proceso
+tienen prioridad. Docker Compose inyecta al contenedor el perfil seleccionado por
+`APP_ENV`.
 
 Los endpoints locales son `http://127.0.0.1:8787/live/feed/health` y
 `http://127.0.0.1:8787/live/feed/status`. El gráfico interactivo se sirve en
