@@ -45,3 +45,11 @@ APP_ENV=prod docker-compose \
   -f docker-compose.runtime.yml \
   -p blacker-bot1 \
   up -d --remove-orphans
+
+# Nginx config is bind-mounted; recreate it so updated host files are loaded.
+APP_ENV=prod docker-compose \
+  --env-file .env.prod \
+  -f docker-compose.yml \
+  -f docker-compose.runtime.yml \
+  -p blacker-bot1 \
+  up -d --no-deps --force-recreate nginx
