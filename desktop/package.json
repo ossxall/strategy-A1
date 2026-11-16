@@ -1,0 +1,17 @@
+{
+  "name": "desktop",
+  "version": "1.0.0",
+  "description": "La ventana usa `WebContentsView` de Electron para mostrar cada sistema; no usa `iframe`. Las pestañas se definen en `config.json` y no se pueden cerrar desde la interfaz.",
+  "main": "main.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "electron ."
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "electron": "^45.3.3"
+  }
+}
