@@ -59,9 +59,9 @@ Los fallos al enlazar los endpoints del bot o executor ahora abortan el proceso
 para que el problema no quede oculto.
 
 Los puertos de feed, bot y executor siguen ligados a `127.0.0.1`. Nginx publica
-80 (redirección a HTTPS) y 443, enruta `/live/feed/`, `/live/bot/` y
-`/live/bot/execution/` al servicio correspondiente y protege las tres rutas con
-Authelia. La cookie de sesión SSO es común a los endpoints y dura 24 horas.
+80 (redirección a HTTPS) y 443, enruta los endpoints `/live/...` y Dozzle en
+`/logs/`; todas las rutas privadas están protegidas con Authelia. La cookie de
+sesión SSO es común a las rutas y dura 24 horas.
 Redis conserva las sesiones al reiniciar Authelia y solo es accesible desde la
 red Docker separada de autenticación (sin puertos publicados). Antes de habilitar
 el acceso externo, configura un certificado válido para `lovelacers.com` siguiendo
