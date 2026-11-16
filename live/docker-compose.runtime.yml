@@ -1,0 +1,16 @@
+version: "2.4"
+
+# Añadir este override solo para build/up/diagnóstico. No usarlo para `down`:
+# los archivos de entorno de ejecución pueden no existir en el host.
+services:
+  feed:
+    env_file:
+      - .env.${APP_ENV:-dev}
+
+  bot:
+    env_file:
+      - .env.${APP_ENV:-dev}
+
+  executor:
+    env_file:
+      - .env.${APP_ENV:-dev}

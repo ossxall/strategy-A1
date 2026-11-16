@@ -1,7 +1,8 @@
 #!/bin/sh
 set -eu
 
-cd "$(dirname "$0")/.."
+REPO_ROOT=$(git rev-parse --show-toplevel)
+cd "$REPO_ROOT/live"
 
-APP_ENV=prod docker-compose --env-file .env.prod -p blacker-bot1 \
+docker-compose -f docker-compose.yml -p blacker-bot1 \
   down --volumes --rmi all --remove-orphans
