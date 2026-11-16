@@ -3,11 +3,6 @@ set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-if [[ "${EUID}" -eq 0 ]]; then
-  echo "Ejecuta este asistente como el usuario SSH que hará el despliegue, sin sudo." >&2
-  exit 1
-fi
-
 for command in docker openssl script tee; do
   if ! command -v "$command" >/dev/null 2>&1; then
     echo "Falta el comando requerido: $command" >&2
