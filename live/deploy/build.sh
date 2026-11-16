@@ -1,3 +1,5 @@
+set -euo pipefail
+
 cd strategy-A1/live
 
 if [ ! -f .env.prod ]; then
@@ -5,6 +7,16 @@ if [ ! -f .env.prod ]; then
   exit 1
 fi
 
-docker-compose build --no-cache --pull --force-rm
+APP_ENV=prod docker-compose \
+  --env-file .env.prod \
+  -f docker-compose.yml \
+  -f docker-compose.runtime.yml \
+  -p blacker-bot1 \
+  build --no-cache --pull --force-rm
 
-docker-compose up -d --build
+APP_ENV=prod docker-compose \
+  --env-file .env.prod \
+  -f docker-compose.yml \
+  -f docker-compose.runtime.yml \
+  -p blacker-bot1 \
+  up -d --remove-orphans
