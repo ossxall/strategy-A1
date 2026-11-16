@@ -1,5 +1,8 @@
 set -euo pipefail
 
+export APP_ENV=prod
+echo $APP_ENV
+
 cd strategy-A1/live
 
 git pull origin main
