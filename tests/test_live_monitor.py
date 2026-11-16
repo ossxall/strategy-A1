@@ -1,5 +1,4 @@
 import io
-import json
 from pathlib import Path
 
 from live.monitor import bot, config
@@ -7,7 +6,7 @@ from live.monitor import bot, config
 MONITOR_CONFIG = Path(__file__).resolve().parents[1] / "live/monitor/config.yaml"
 
 
-def test_monitor_config_loads_docker_health_endpoints(monkeypatch):
+def test_monitor_config_loads_health_endpoints(monkeypatch):
     monkeypatch.setenv("MONITOR_TELEGRAM_BOT_TOKEN", "test-token")
     monkeypatch.setenv("MONITOR_PASSWORD", "test-password")
 
@@ -15,11 +14,10 @@ def test_monitor_config_loads_docker_health_endpoints(monkeypatch):
 
     assert loaded.token == "test-token"
     assert loaded.password == "test-password"
-    assert loaded.services["feed"].url == "http://feed:8787/live/feed/health"
-    assert loaded.services["bot"].url == "http://bot:8080/live/bot/health"
-    assert (
-        loaded.services["executor"].url
-        == "http://executor:8081/live/bot/execution/status"
+    assert set(loaded.services) == {"feed", "bot", "executor"}
+    assert all(
+        service.url.startswith(("http://", "https://"))
+        for service in loaded.services.values()
     )
 
 
@@ -30,9 +28,7 @@ def test_monitor_config_requires_token_and_password_but_not_user_allowlist(
     monkeypatch.delenv("MONITOR_PASSWORD", raising=False)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        "services:\n"
-        "  feed:\n"
-        "    url: http://localhost:8787/health\n",
+        "services:\n  feed:\n    url: http://localhost:8787/health\n",
         encoding="utf-8",
     )
 
@@ -56,6 +52,16 @@ def test_monitor_config_requires_token_and_password_but_not_user_allowlist(
     assert loaded.password == "test-password"
 
 
+def test_monitor_url_environment_variable_overrides_yaml(monkeypatch):
+    monkeypatch.setenv("MONITOR_TELEGRAM_BOT_TOKEN", "test-token")
+    monkeypatch.setenv("MONITOR_PASSWORD", "test-password")
+    monkeypatch.setenv("MONITOR_FEED_URL", "http://feed:8787/custom/health")
+
+    loaded = config.load_config(MONITOR_CONFIG)
+
+    assert loaded.services["feed"].url == "http://feed:8787/custom/health"
+
+
 def test_auth_password_comparison_supports_unicode_and_rejects_mismatch():
     assert bot.verify_password("clave-segura-ñ", "clave-segura-ñ")
     assert not bot.verify_password("clave-incorrecta", "clave-segura-ñ")
@@ -65,27 +71,49 @@ def test_status_template_adapts_to_arbitrary_nested_json():
     payload = {
         "status": "healthy",
         "new_field": {"changed_shape": [1, "two", None]},
+        "empty_object": {},
+        "empty_array": [],
     }
     result = bot.CheckResult(status_code=200, payload=payload)
 
     message = bot.format_result("feed", "http://feed:8787/health", result)
 
-    assert "✅ Estado de feed" in message
+    assert "✅ Monitor · feed" in message
     assert "HTTP: 200 OK" in message
-    assert json.dumps(payload, ensure_ascii=False, indent=2) in message
+    assert "📦 Respuesta JSON · objeto (4 campos)" in message
+    assert '"status": "healthy"' in message
+    assert '"new_field" · objeto (1 campo)' in message
+    assert '"changed_shape" · lista (3 elementos)' in message
+    assert "[0]: 1" in message
+    assert '[1]: "two"' in message
+    assert "[2]: null" in message
+    assert '"empty_object" · objeto vacío {}' in message
+    assert '"empty_array" · lista vacía []' in message
 
 
-def test_status_template_marks_http_errors_and_clips_long_messages():
+def test_status_template_paginates_long_messages_without_dropping_content():
     result = bot.CheckResult(status_code=503, payload={"detail": "x" * 1000})
 
-    message = bot.format_result(
-        "feed", "http://feed:8787/health", result, max_chars=256
-    )
+    message = bot.format_result("feed", "http://feed:8787/health", result)
+    pages = bot.paginate_message(message, max_chars=256)
 
-    assert "❌ Estado de feed" in message
+    assert len(pages) > 1
+    assert all(bot._utf16_length(page) <= 256 for page in pages)
+    rebuilt = "".join(page.split("\n", maxsplit=1)[1] for page in pages)
+    assert rebuilt == message
+    assert "❌ Monitor · feed" in rebuilt
     assert "HTTP: 503 Service Unavailable" in message
-    assert "mensaje recortado" in message
-    assert len(message) <= 256
+    assert "x" * 1000 in rebuilt
+
+
+def test_pagination_preserves_unicode_values_across_message_boundaries():
+    message = bot.render_json_tree({"emoji": "🙂" * 400})
+
+    pages = bot.paginate_message(message, max_chars=256)
+    rebuilt = "".join(page.split("\n", maxsplit=1)[1] for page in pages)
+
+    assert rebuilt == message
+    assert all(bot._utf16_length(page) <= 256 for page in pages)
 
 
 def test_fetch_endpoint_decodes_json_and_limits_body(monkeypatch):

@@ -39,6 +39,92 @@ def verify_password(provided: str, expected: str) -> bool:
     )
 
 
+def _count_label(count: int, singular: str, plural: str) -> str:
+    return f"{count} {singular if count == 1 else plural}"
+
+
+def _json_entry_lines(label: str, value: Any, prefix: str, is_last: bool) -> list[str]:
+    connector = "└─ " if is_last else "├─ "
+    branch = prefix + connector
+
+    if isinstance(value, dict):
+        if not value:
+            return [f"{branch}{label} · objeto vacío {{}}"]
+        count = _count_label(len(value), "campo", "campos")
+        lines = [f"{branch}{label} · objeto ({count})"]
+        child_prefix = prefix + ("   " if is_last else "│  ")
+        items = list(value.items())
+        for index, (key, child) in enumerate(items):
+            lines.extend(
+                _json_entry_lines(
+                    json.dumps(str(key), ensure_ascii=False),
+                    child,
+                    child_prefix,
+                    index == len(items) - 1,
+                )
+            )
+        return lines
+
+    if isinstance(value, list):
+        if not value:
+            return [f"{branch}{label} · lista vacía []"]
+        count = _count_label(len(value), "elemento", "elementos")
+        lines = [f"{branch}{label} · lista ({count})"]
+        child_prefix = prefix + ("   " if is_last else "│  ")
+        for index, child in enumerate(value):
+            lines.extend(
+                _json_entry_lines(
+                    f"[{index}]",
+                    child,
+                    child_prefix,
+                    index == len(value) - 1,
+                )
+            )
+        return lines
+
+    scalar = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    return [f"{branch}{label}: {scalar}"]
+
+
+def render_json_tree(payload: Any) -> str:
+    """Representa recursivamente todos los campos de un valor JSON."""
+    if isinstance(payload, dict):
+        count = _count_label(len(payload), "campo", "campos")
+        lines = [f"📦 Respuesta JSON · objeto ({count})"]
+        items = list(payload.items())
+        for index, (key, value) in enumerate(items):
+            lines.extend(
+                _json_entry_lines(
+                    json.dumps(str(key), ensure_ascii=False),
+                    value,
+                    "",
+                    index == len(items) - 1,
+                )
+            )
+        return "\n".join(lines)
+
+    if isinstance(payload, list):
+        count = _count_label(len(payload), "elemento", "elementos")
+        lines = [f"📦 Respuesta JSON · lista ({count})"]
+        for index, value in enumerate(payload):
+            lines.extend(
+                _json_entry_lines(
+                    f"[{index}]",
+                    value,
+                    "",
+                    index == len(payload) - 1,
+                )
+            )
+        return "\n".join(lines)
+
+    return "\n".join(
+        [
+            "📦 Respuesta JSON · valor",
+            *_json_entry_lines("valor", payload, "", True),
+        ]
+    )
+
+
 @dataclass(frozen=True)
 class CheckResult:
     status_code: int | None
@@ -97,13 +183,11 @@ def fetch_endpoint(
     )
 
 
-def format_result(
-    service: str, url: str, result: CheckResult, max_chars: int = 3900
-) -> str:
-    """Crea una plantilla estable y representa el JSON recibido tal cual."""
+def format_result(service: str, url: str, result: CheckResult) -> str:
+    """Crea una cabecera estable y un árbol con todos los datos de respuesta."""
     if result.status_code is None:
         lines = [
-            f"❌ Estado de {service}: sin respuesta HTTP",
+            f"❌ Monitor · {service} · sin respuesta HTTP",
             f"Endpoint: {url}",
             f"Error: {result.error or 'error de conexión'}",
         ]
@@ -114,29 +198,57 @@ def format_result(
             reason = "HTTP"
         icon = "✅" if 200 <= result.status_code < 300 else "❌"
         lines = [
-            f"{icon} Estado de {service}",
+            f"{icon} Monitor · {service}",
             f"HTTP: {result.status_code} {reason}",
             f"Endpoint: {url}",
         ]
         if result.raw_body is not None:
             lines.extend(["Respuesta:", result.raw_body or "(cuerpo vacío)"])
         else:
-            lines.extend(
-                [
-                    "Respuesta JSON:",
-                    json.dumps(result.payload, ensure_ascii=False, indent=2),
-                ]
-            )
+            lines.append(render_json_tree(result.payload))
 
     if result.response_truncated:
         lines.append("… respuesta recortada por superar el límite configurado")
 
-    message = "\n".join(lines)
-    if _utf16_length(message) > max_chars:
-        suffix = "\n… (mensaje recortado)"
-        available = max_chars - _utf16_length(suffix)
-        message = _truncate_utf16(message, available).rstrip() + suffix
-    return message
+    return "\n".join(lines)
+
+
+def _split_text(text: str, max_units: int) -> list[str]:
+    """Divide texto sin perder caracteres y respetando el límite UTF-16."""
+    if not text:
+        return [""]
+
+    chunks: list[str] = []
+    current = ""
+    for line in text.splitlines(keepends=True):
+        remainder = line
+        while remainder:
+            available = max_units - _utf16_length(current)
+            if _utf16_length(remainder) <= available:
+                current += remainder
+                remainder = ""
+            elif current:
+                chunks.append(current)
+                current = ""
+            else:
+                part = _truncate_utf16(remainder, max_units)
+                chunks.append(part)
+                remainder = remainder[len(part) :]
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def paginate_message(text: str, max_chars: int = 3900) -> list[str]:
+    """Parte una respuesta larga en mensajes Telegram sin descartar contenido."""
+    if max_chars < 64:
+        raise ValueError("max_chars debe ser al menos 64")
+    body_chunks = _split_text(text, max_chars - 32)
+    total = len(body_chunks)
+    return [
+        f"📄 {index}/{total}\n{chunk}"
+        for index, chunk in enumerate(body_chunks, start=1)
+    ]
 
 
 def create_dispatcher(config: MonitorConfig):
@@ -167,7 +279,9 @@ def create_dispatcher(config: MonitorConfig):
     @router.message(Command("auth"))
     async def authenticate(message: Message, command: CommandObject) -> None:
         if message.chat.type != "private":
-            await message.answer("Por seguridad, autentícate en un chat privado con el bot.")
+            await message.answer(
+                "Por seguridad, autentícate en un chat privado con el bot."
+            )
             return
         user = message.from_user
         if user is None:
@@ -247,14 +361,9 @@ def create_dispatcher(config: MonitorConfig):
                     status_code=None,
                     error="error inesperado al consultar el endpoint",
                 )
-            await message.answer(
-                format_result(
-                    service.name,
-                    service.url,
-                    result,
-                    config.max_message_chars,
-                )
-            )
+            formatted = format_result(service.name, service.url, result)
+            for page in paginate_message(formatted, config.max_message_chars):
+                await message.answer(page)
 
     dispatcher = Dispatcher()
     dispatcher.include_router(router)

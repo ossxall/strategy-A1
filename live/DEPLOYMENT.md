@@ -4,7 +4,8 @@ El workflow `.github/workflows/deploy-lightnode.yml` despliega `main` cuando se
 fusiona un pull request **desde `dev` hacia `main`** en este repositorio.
 Accede al VPS por SSH, clona el repositorio público la primera vez y, en
 despliegues posteriores, actualiza el checkout solo mediante avance rápido.
-Después ejecuta `docker-compose -p blacker-bot1 up -d --build --remove-orphans`
+Después ejecuta
+`APP_ENV=prod docker-compose --env-file .env.prod -p blacker-bot1 up -d --build --remove-orphans`
 desde `live/`. Este Compose es compatible con Docker Compose 1.29.2.
 
 ## Secretos de GitHub
@@ -34,8 +35,11 @@ sobrescribir esos cambios.
 ## Preparación del VPS
 
 Instala Docker Engine y Docker Compose 1.29.2; crea en
-`LIGHTNODE_DEPLOY_PATH/live/` el archivo `.env` (se puede partir de
-`.env.example`). El workflow no copia ni crea secretos de aplicación en el VPS.
+`LIGHTNODE_DEPLOY_PATH/live/` el archivo `.env.prod` (a partir de
+`.env.example`) con la configuración y secretos de producción, incluidas las
+variables `MONITOR_*`. Compose solo inyecta esas variables al contenedor
+`monitor`; no le pasa las credenciales de Binance. El workflow no copia ni crea
+secretos de aplicación en el VPS.
 Mantén `live/data/` en el host: contiene las bases SQLite persistentes y no debe
 eliminarse al actualizar el código.
 

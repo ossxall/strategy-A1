@@ -47,7 +47,9 @@ def load_config(path: str | Path = DEFAULT_CONFIG_PATH) -> MonitorConfig:
         with config_path.open("r", encoding="utf-8") as stream:
             raw = yaml.safe_load(stream)
     except OSError as exc:
-        raise ValueError(f"No se pudo leer la configuración {config_path}: {exc}") from exc
+        raise ValueError(
+            f"No se pudo leer la configuración {config_path}: {exc}"
+        ) from exc
 
     if not isinstance(raw, dict):
         raise TypeError("La raíz de config.yaml debe ser un objeto YAML")
@@ -81,7 +83,8 @@ def load_config(path: str | Path = DEFAULT_CONFIG_PATH) -> MonitorConfig:
             raise ValueError(f"Nombre de servicio no válido: {name!r}")
         if not isinstance(endpoint, dict) or not isinstance(endpoint.get("url"), str):
             raise TypeError(f"'services.{name}.url' es obligatorio")
-        url = endpoint["url"].strip()
+        url_override = os.getenv(f"MONITOR_{service_name.upper()}_URL", "").strip()
+        url = url_override or endpoint["url"].strip()
         parsed_url = urlparse(url)
         if (
             parsed_url.scheme not in {"http", "https"}

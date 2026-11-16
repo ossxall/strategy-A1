@@ -9,22 +9,24 @@ el JSON, por lo que tolera cambios en el esquema.
 1. Crea un bot con BotFather y copia su token a `MONITOR_TELEGRAM_BOT_TOKEN` en
    `live/.env.dev` o `live/.env.prod`.
 2. Define una contraseña fuerte en `MONITOR_PASSWORD` en el mismo archivo de
-   entorno.
-3. Revisa `services` en `config.yaml`. Los valores iniciales usan los nombres
-   DNS de Docker Compose y los puertos internos de cada servicio.
+   entorno. No se necesita ningún archivo `.env.monitor*`.
+3. Revisa `services` en `config.yaml`. En Docker Compose, el contenedor recibe
+   automáticamente los endpoints internos (`feed`, `bot` y `executor`); al
+   ejecutar directamente se usan las URLs del YAML.
 4. Para ejecutarlo directamente, instala las dependencias desde `live/`:
 
    ```sh
    python -m pip install -r monitor/requirements.txt
    ```
 
-5. Arranca el perfil opcional desde `live/`:
+5. Arranca todos los servicios desde `live/`:
 
    ```sh
-   docker-compose -p blacker-bot1 --profile monitor up -d --build monitor
+   APP_ENV=prod docker-compose --env-file .env.prod -p blacker-bot1 up -d --build
    ```
 
-   Para ver los logs: `docker-compose -p blacker-bot1 logs -f monitor`.
+   `monitor` inicia automáticamente con el stack. Para ver los logs:
+   `APP_ENV=prod docker-compose --env-file .env.prod -p blacker-bot1 logs -f monitor`.
    También puedes ejecutarlo directamente desde `live/` con `python monitor.py`;
    cargará `.env.dev` por defecto o `.env.prod` si `APP_ENV=prod`.
 

@@ -24,11 +24,17 @@
 Desde `live/`:
 
 ```bash
-docker-compose -p blacker-bot1 config
-docker-compose -p blacker-bot1 up -d --build
-docker-compose -p blacker-bot1 ps
-docker-compose -p blacker-bot1 logs --tail=200 feed bot executor
+APP_ENV=prod docker-compose --env-file .env.prod -p blacker-bot1 up -d --build
+APP_ENV=prod docker-compose --env-file .env.prod -p blacker-bot1 ps
+APP_ENV=prod docker-compose --env-file .env.prod -p blacker-bot1 logs --tail=200 feed bot executor monitor
 ```
+
+El contenedor `monitor` se inicia con el stack, sin publicar puertos entrantes.
+Antes del despliegue, define `MONITOR_TELEGRAM_BOT_TOKEN` y una contraseña
+fuerte en `MONITOR_PASSWORD` dentro de `.env.prod`. Compose solo pasa variables
+`MONITOR_*` al monitor y no le entrega las credenciales de Binance. Las URLs de
+salud usan por defecto los nombres DNS internos de Compose; se pueden cambiar
+con `MONITOR_FEED_URL`, `MONITOR_BOT_URL` y `MONITOR_EXECUTOR_URL`.
 
 Los healthchecks consultan ahora las rutas `/live/feed/health`,
 `/live/bot/health` y `/live/bot/execution/status`, además de validar frescura de
@@ -39,7 +45,8 @@ snapshots de SQLite cuando aplica.
 
 **Docker Compose no reinicia automáticamente un contenedor solo por estar
 `unhealthy`.** `restart: unless-stopped` cubre salidas del proceso, no fallos de
-readiness. Supervisa `docker-compose -p blacker-bot1 ps` y configura alertas/acción operativa
+readiness. Supervisa `APP_ENV=prod docker-compose --env-file .env.prod -p blacker-bot1 ps`
+y configura alertas/acción operativa
 para `unhealthy`; no reinicies automáticamente el executor ante una discrepancia
 de cuenta o `RECONCILIATION_REQUIRED`, porque podría repetir una acción insegura.
 Los fallos al enlazar los endpoints del bot o executor ahora abortan el proceso
