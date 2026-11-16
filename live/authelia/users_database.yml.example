@@ -1,0 +1,11 @@
+# Generate a password hash with:
+# docker run --rm -it authelia/authelia:4.39.28 authelia crypto hash generate argon2
+#
+# Add one or more users below, replacing the password value with the generated
+# Argon2 digest. Never put a plaintext password in this file.
+users:
+  operator:
+    disabled: false
+    displayname: 'Operator'
+    password: '$argon2id$REPLACE_WITH_GENERATED_HASH'
+    groups: []

@@ -1,0 +1,14 @@
+{
+  "systems": [
+    {
+      "id": "terminal",
+      "name": "Terminal",
+      "url": "http://127.0.0.1:8888"
+    },
+    {
+      "id": "binance",
+      "name": "binance",
+      "url": "https://www.binance.com/en/futures/BTCUSDT"
+    }
+  ]
+}

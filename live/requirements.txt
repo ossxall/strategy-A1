@@ -1,4 +1,4 @@
-# Dependencias del colector (feed.py) y del bot (bot.py + strategy.py).
+# Dependencias comunes de los servicios live: colector, bot, monitor y estrategia.
 # Mínimos compatibles; los tests se hicieron con pandas 3.0.3 / numpy 2.5.1.
 pandas>=2.2
 numpy>=1.26

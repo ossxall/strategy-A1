@@ -6,7 +6,16 @@ data/
 !/data/.gitkeep
 live/bot/data
 live/data
-/nginx/.htpasswd
 /nginx/tls/*
 !/nginx/tls/.gitkeep
+/authelia/configuration.yml
+/authelia/users_database.yml
+/authelia/data/*
+!/authelia/data/.gitkeep
+/authelia/secrets/*
+!/authelia/secrets/.gitkeep
+/certbot/conf/*
+!/certbot/conf/.gitkeep
+/certbot/www/*
+!/certbot/www/.gitkeep
 /data
