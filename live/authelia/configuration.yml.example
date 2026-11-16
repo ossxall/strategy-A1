@@ -34,7 +34,7 @@ session:
       same_site: 'lax'
       expiration: '24h'
       inactivity: '24h'
-      remember_me: '-1'
+      remember_me: -1
 
 storage:
   local:

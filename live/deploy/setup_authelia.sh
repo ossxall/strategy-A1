@@ -3,6 +3,11 @@ set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
+if [[ "${EUID}" -eq 0 ]]; then
+  echo "Ejecuta este asistente como el usuario SSH que hará el despliegue, sin sudo." >&2
+  exit 1
+fi
+
 for command in docker openssl script tee; do
   if ! command -v "$command" >/dev/null 2>&1; then
     echo "Falta el comando requerido: $command" >&2
@@ -24,6 +29,12 @@ if [[ ! -e authelia/configuration.yml ]]; then
 else
   echo "Se conserva authelia/configuration.yml existente."
 fi
+
+# Older template copies quoted -1 as a string, which Authelia cannot parse as
+# a duration. YAML integer -1 is interpreted as seconds and disables remember-me.
+sed -i -E \
+  "s/^([[:space:]]*remember_me:[[:space:]]*)['\"]-1['\"]([[:space:]]*(#.*)?)$/\\1-1\\2/" \
+  authelia/configuration.yml
 
 create_secret() {
   local path="$1"
