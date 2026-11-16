@@ -27,14 +27,15 @@ from ..config import (
     resolve_path,
     utc_iso,
 )
+from ..env import validate_prod_environment
 from ..storage import SignalStore
 from .binance_usdm import BinanceOrderNotFound, BinanceUsdmClient
+from .status import ExecutionHealth, start_execution_status_server
 from .test_mode_policy import (
     TEST_MODE_MAX_LEVERAGE,
     calculate_test_entry_quantity,
     validate_test_order_notional,
 )
-from .status import ExecutionHealth, start_execution_status_server
 
 LOG = logging.getLogger("bot1.executor")
 
@@ -1705,6 +1706,7 @@ class ExecutionWorker:
 
 
 def main() -> int:
+    validate_prod_environment("executor")
     settings = ExecutorSettings.from_env()
     store = SignalStore(settings.signal_db)
     store.connect()
