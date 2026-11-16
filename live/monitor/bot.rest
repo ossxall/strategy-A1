@@ -1,0 +1,41 @@
+@baseUrl = http://127.0.0.1:8080
+@backtestFile = data/manifest.json
+@reportFile = backtest_out/data/manifest.json
+
+### Bot health (JSON)
+GET {{baseUrl}}/live/bot/health
+Accept: application/json
+
+### Bot status (JSON)
+GET {{baseUrl}}/live/bot/status
+Accept: application/json
+
+### Backtest viewer (redirects to trailing slash)
+GET {{baseUrl}}/live/bot/backtest
+
+### Backtest viewer (HTML)
+GET {{baseUrl}}/live/bot/backtest/
+Accept: text/html
+
+### Backtest generated file (example: manifest)
+GET {{baseUrl}}/live/bot/backtest/{{backtestFile}}
+Accept: application/json
+
+### Report viewer (redirects to configured report directory)
+GET {{baseUrl}}/live/bot/report
+
+### Report viewer (HTML)
+GET {{baseUrl}}/live/bot/report/?data=backtest_out/
+Accept: text/html
+
+### Report generated file (example: manifest)
+GET {{baseUrl}}/live/bot/report/{{reportFile}}
+Accept: application/json
+
+### Legacy health alias (direct service only; not under /live)
+GET {{baseUrl}}/health
+Accept: application/json
+
+### Legacy status alias (direct service only; not under /live)
+GET {{baseUrl}}/status
+Accept: application/json

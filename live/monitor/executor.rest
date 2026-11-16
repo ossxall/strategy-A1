@@ -1,0 +1,9 @@
+@baseUrl = http://127.0.0.1:8081
+
+### Executor status (JSON)
+GET {{baseUrl}}/live/bot/execution/status
+Accept: application/json
+
+### Executor health alias (JSON)
+GET {{baseUrl}}/live/bot/execution/health
+Accept: application/json

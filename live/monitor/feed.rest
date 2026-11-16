@@ -1,0 +1,21 @@
+@baseUrl = http://127.0.0.1:8787
+
+### Feed health (JSON)
+GET {{baseUrl}}/live/feed/health
+Accept: application/json
+
+### Feed status (JSON)
+GET {{baseUrl}}/live/feed/status
+Accept: application/json
+
+### OHLCV chart (HTML)
+GET {{baseUrl}}/live/feed/chart
+Accept: text/html
+
+### Legacy health alias (direct service only; not under /live)
+GET {{baseUrl}}/health
+Accept: application/json
+
+### Legacy status alias (direct service only; not under /live)
+GET {{baseUrl}}/status
+Accept: application/json
