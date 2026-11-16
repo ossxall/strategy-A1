@@ -149,3 +149,52 @@ def test_fetch_endpoint_decodes_json_and_limits_body(monkeypatch):
     result = bot.fetch_endpoint("http://localhost/health", 1, 5)
     assert result.response_truncated
     assert result.raw_body is not None
+
+
+def test_fetch_public_ip_returns_validated_ip(monkeypatch):
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return None
+
+        def getcode(self):
+            return 200
+
+        def read(self, amount):
+            assert amount == 129
+            return b"203.0.113.10\n"
+
+    def fake_urlopen(request, timeout):
+        assert request.full_url == bot.PUBLIC_IP_URL
+        assert timeout == 2
+        return FakeResponse()
+
+    monkeypatch.setattr(bot, "urlopen", fake_urlopen)
+
+    assert bot.fetch_public_ip(2) == "203.0.113.10"
+
+
+def test_fetch_public_ip_rejects_invalid_response(monkeypatch):
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return None
+
+        def getcode(self):
+            return 200
+
+        def read(self, _amount):
+            return b"not-an-ip"
+
+    monkeypatch.setattr(bot, "urlopen", lambda *_args, **_kwargs: FakeResponse())
+
+    try:
+        bot.fetch_public_ip(1)
+    except RuntimeError as exc:
+        assert "no devolvió una dirección IP válida" in str(exc)
+    else:
+        raise AssertionError("se esperaba rechazar una respuesta sin IP válida")

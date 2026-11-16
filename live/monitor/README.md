@@ -38,10 +38,12 @@ Comandos:
 - `/status bot` consulta el endpoint del bot.
 - `/status executor` consulta el endpoint del executor.
 - `/status all` consulta todos los endpoints.
+- `/status ip` consulta por HTTPS la IP pública de salida del VPS.
 - `/logout` cierra la sesión autenticada.
 - `/help` muestra los comandos disponibles.
 
-El bot usa long polling de Telegram, por lo que no publica un puerto entrante.
+El comando de IP necesita conectividad HTTPS saliente hacia `api.ipify.org`. El
+bot usa long polling de Telegram, por lo que no publica un puerto entrante.
 Fuera de Docker, cambia en `config.yaml` los hosts `feed`, `bot` y `executor`
 por `127.0.0.1` y usa los puertos publicados abajo.
 

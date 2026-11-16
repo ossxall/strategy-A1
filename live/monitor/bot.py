@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import ipaddress
 import json
 import logging
 from dataclasses import dataclass
@@ -15,6 +16,7 @@ from urllib.request import Request, urlopen
 from .config import MonitorConfig, load_config
 
 logger = logging.getLogger(__name__)
+PUBLIC_IP_URL = "https://api.ipify.org"
 
 
 def _utf16_length(text: str) -> int:
@@ -183,6 +185,38 @@ def fetch_endpoint(
     )
 
 
+def fetch_public_ip(timeout_seconds: float) -> str:
+    """Consulta y valida la IP pública de salida del servidor."""
+    request = Request(
+        PUBLIC_IP_URL,
+        headers={
+            "Accept": "text/plain",
+            "User-Agent": "live-monitor/1.0",
+        },
+    )
+    try:
+        with urlopen(request, timeout=timeout_seconds) as response:
+            status_code = response.getcode()
+            body = response.read(129)
+    except (HTTPError, OSError, URLError, TimeoutError, ValueError) as exc:
+        status_code = getattr(exc, "code", None)
+        if status_code is not None:
+            detail = f"HTTP {status_code}"
+        else:
+            reason = getattr(exc, "reason", None)
+            detail = str(reason or exc)[:200]
+        raise RuntimeError(f"No se pudo consultar api.ipify.org: {detail}") from None
+
+    if status_code != 200:
+        raise RuntimeError(f"api.ipify.org respondió HTTP {status_code}")
+    if len(body) > 128:
+        raise RuntimeError("api.ipify.org devolvió una respuesta no válida")
+    try:
+        return str(ipaddress.ip_address(body.decode("ascii").strip()))
+    except ValueError:
+        raise RuntimeError("api.ipify.org no devolvió una dirección IP válida") from None
+
+
 def format_result(service: str, url: str, result: CheckResult) -> str:
     """Crea una cabecera estable y un árbol con todos los datos de respuesta."""
     if result.status_code is None:
@@ -273,7 +307,7 @@ def create_dispatcher(config: MonitorConfig):
             "Primero autentícate con /auth <contraseña>.\n"
             f"Comando: /status <servicio>\n"
             f"Servicios: {services}\n"
-            "También puedes usar /status all y /logout."
+            "También puedes usar /status all, /status ip y /logout."
         )
 
     @router.message(Command("auth"))
@@ -322,8 +356,21 @@ def create_dispatcher(config: MonitorConfig):
         if not service_name:
             await message.answer(
                 "Indica un servicio. Uso: /status <servicio>\n"
-                f"Servicios: {', '.join(sorted(config.services))}"
+                f"Servicios: {', '.join(sorted(config.services))}\n"
+                "También puedes usar /status ip."
             )
+            return
+
+        if service_name == "ip":
+            try:
+                public_ip = await asyncio.to_thread(
+                    fetch_public_ip, config.request_timeout_seconds
+                )
+            except RuntimeError as exc:
+                logger.warning("No se pudo consultar la IP pública: %s", exc)
+                await message.answer(f"❌ {exc}")
+                return
+            await message.answer(f"🌐 IP pública de salida del VPS: {public_ip}")
             return
 
         if service_name == "all":
