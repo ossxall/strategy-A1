@@ -8,3 +8,6 @@ git checkout main
 
 sudo apt install docker-compose -y
 docker-compose --version
+
+export APP_ENV=prod
+echo $APP_ENV
