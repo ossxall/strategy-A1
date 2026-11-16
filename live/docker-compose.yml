@@ -30,6 +30,8 @@ x-common: &common
   working_dir: /app/legacy/bot1
   volumes:
     - ./data:/data
+  environment:
+    APP_ENV: ${APP_ENV:-dev}
   init: true
   restart: unless-stopped
   stop_grace_period: 30s

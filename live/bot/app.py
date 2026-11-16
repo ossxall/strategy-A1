@@ -36,6 +36,7 @@ from .config import (
     ts_ms,
     utc_now,
 )
+from .env import validate_prod_environment
 from .events import build_events_and_result, events_to_trades
 from .health import BotHealth, start_health_server
 from .series import build_series_frames, resample
@@ -372,6 +373,7 @@ def request_stop(signum=None, frame=None) -> None:
 
 
 def main() -> int:
+    validate_prod_environment("bot")
     cfg = build_strategy_config()
     mode = env_str("MODE", DEFAULT_MODE).strip().lower()
     if mode not in {"live", "backtest"}:
