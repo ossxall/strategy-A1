@@ -152,7 +152,7 @@ services:
     user: "${AUTHELIA_UID:-1000}:${AUTHELIA_GID:-1000}"
     restart: unless-stopped
     networks:
-      - auth
+      - auth_egress
     volumes:
       - ./authelia/configuration.yml:/config/configuration.yml:ro
       - ./authelia/users_database.yml:/config/users_database.yml:ro
@@ -199,7 +199,7 @@ services:
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes", "--save", "60", "1"]
     networks:
-      - auth
+      - auth_egress
     volumes:
       - authelia_sessions:/data
     healthcheck:
@@ -220,7 +220,7 @@ services:
     image: nginx:stable-alpine
     networks:
       - default
-      - auth
+      - auth_egress
     ports:
       - "80:80"
       - "443:443"
@@ -255,5 +255,7 @@ volumes:
     name: blacker-bot1-authelia-sessions
 
 networks:
-  auth:
-    internal: true
+  auth_egress:
+    # Dedicated to nginx, Authelia, and Redis. It is not attached to the
+    # application containers and permits Authelia's outbound DNS/NTP checks.
+    driver: bridge

@@ -63,8 +63,8 @@ Los puertos de feed, bot y executor siguen ligados a `127.0.0.1`. Nginx publica
 `/live/bot/execution/` al servicio correspondiente y protege las tres rutas con
 Authelia. La cookie de sesión SSO es común a los endpoints y dura 24 horas.
 Redis conserva las sesiones al reiniciar Authelia y solo es accesible desde la
-red interna de autenticación. Antes de habilitar el acceso externo, configura un
-certificado válido para `lovelacers.com` siguiendo
+red Docker separada de autenticación (sin puertos publicados). Antes de habilitar
+el acceso externo, configura un certificado válido para `lovelacers.com` siguiendo
 [DEPLOYMENT.md](DEPLOYMENT.md), y configura el hostname de Authelia y sus
 secretos en el VPS; los puertos internos 8787, 8080 y 8081 no deben exponerse.
 
