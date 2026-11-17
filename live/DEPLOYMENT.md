@@ -25,14 +25,23 @@ eliminarse al actualizar el código.
 
 Nginx publica los puertos 80 y 443. El puerto 80 solo redirige a HTTPS; Nginx
 valida mediante Authelia cada petición a `/live/feed/`, `/live/bot/` y
-`/live/bot/execution/`, además del visor Dozzle en `/logs/` y Glances en
-`/glances/`. El portal de acceso está en `/auth/`. Las rutas protegidas comparten
+`/live/bot/execution/`, además del visor Dozzle en `/logs/`, Glances en
+`/glances/` y WebSSH en `/webssh/`. El puerto interno de WebSSH no se publica
+directamente. El portal de acceso está en `/auth/`. Las rutas protegidas comparten
 la misma cookie de sesión, así que el usuario inicia sesión una vez y no vuelve
 a introducir la contraseña hasta que caduque. Authelia requiere
 usuario y contraseña (sin segundo factor). La cookie dura 24 horas, también
 caduca tras 24 horas de inactividad, y no tiene una extensión «recordarme».
 Redis conserva la sesión entre reinicios de Authelia; Redis no publica ningún
 puerto al host.
+
+WebSSH está disponible en `https://lovelacers.com/webssh/`. En Compose usa la
+política `warning` para permitir conexiones a hosts nuevos; Authelia protege el
+acceso web, pero esa política no verifica la clave SSH del servidor de destino.
+Para exigir verificación de claves, configura `WEBSSH_POLICY=reject` y añade
+claves de destino verificadas por un canal de confianza a
+`live/ssh/known_hosts` antes de iniciar el servicio; Compose lo monta como
+`/root/.ssh/known_hosts` dentro del contenedor.
 
 Antes de iniciar Compose:
 

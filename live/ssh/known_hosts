@@ -1,0 +1,2 @@
+# Añade aquí claves SSH de destino verificadas por un canal de confianza.
+# Después puedes configurar WEBSSH_POLICY=reject para rechazar claves desconocidas.
