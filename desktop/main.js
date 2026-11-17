@@ -67,6 +67,7 @@ function loadConfiguration () {
           .map((system) => ({
             id: system.id.trim(),
             name: system.name.trim(),
+            icon: typeof system.icon === 'string' ? system.icon.trim() : 'circle-help',
             url: system.url.trim()
           }))
       : []

@@ -25,8 +25,8 @@ instalación anterior no tiene `authUrl`, se añade desde la configuración incl
 También se migra la URL antigua local de Terminal a `/webssh/`, conservando el
 resto de la configuración.
 
-Cada entrada necesita un `id` único, un nombre visible y una URL `http` o
-`https`:
+Cada entrada necesita un `id` único, un nombre visible, un icono de
+[Lucide](https://lucide.dev/icons/) y una URL `http` o `https`:
 
 ```json
 {
@@ -35,6 +35,7 @@ Cada entrada necesita un `id` único, un nombre visible y una URL `http` o
     {
       "id": "grafico",
       "name": "Gráfico en vivo",
+      "icon": "chart-candlestick",
       "url": "http://127.0.0.1:8787/live/feed/chart"
     }
   ]

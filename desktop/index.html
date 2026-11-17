@@ -226,7 +226,11 @@
 
       .system-tab {
         position: relative;
+        display: inline-flex;
         min-width: 96px;
+        align-items: center;
+        justify-content: center;
+        gap: 7px;
         padding: 0 10px;
         border: 0;
         border-radius: 0;
@@ -261,15 +265,11 @@
         content: "";
       }
 
-      .tab-indicator {
-        display: inline-block;
-        width: 6px;
-        height: 6px;
-        margin-right: 8px;
-        border-radius: 50%;
-        background: currentColor;
-        opacity: 0.62;
-        vertical-align: 1px;
+      .tab-icon {
+        width: 15px;
+        height: 15px;
+        flex: 0 0 auto;
+        stroke-width: 1.8;
       }
 
       .reload-button {
@@ -442,6 +442,7 @@
       </div>
     </section>
 
+    <script src="./node_modules/lucide/dist/umd/lucide.min.js"></script>
     <script src="./renderer.js"></script>
   </body>
 </html>

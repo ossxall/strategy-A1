@@ -104,10 +104,10 @@ async function initialize () {
     button.setAttribute('aria-selected', String(system.id === configuration.selectedId))
     button.tabIndex = system.id === configuration.selectedId ? 0 : -1
 
-    const indicator = document.createElement('span')
-    indicator.className = 'tab-indicator'
-    indicator.setAttribute('aria-hidden', 'true')
-    button.append(indicator, document.createTextNode(system.name))
+    const icon = document.createElement('i')
+    icon.setAttribute('data-lucide', system.icon || 'circle-help')
+    icon.setAttribute('aria-hidden', 'true')
+    button.append(icon, document.createTextNode(system.name))
     button.addEventListener('click', () => selectSystem(system.id, buttons))
     button.addEventListener('keydown', (event) => {
       if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
@@ -121,6 +121,11 @@ async function initialize () {
     })
     tabsContainer.append(button)
     return button
+  })
+
+  window.lucide.createIcons({
+    icons: window.lucide.icons,
+    attrs: { class: 'tab-icon' }
   })
 
   if (configuration.selectedId) {
