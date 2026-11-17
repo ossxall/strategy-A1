@@ -81,7 +81,7 @@
       .app-header {
         position: relative;
         z-index: 2;
-        height: 124px;
+        height: 100px;
         background: var(--surface);
         box-shadow: 0 1px 0 var(--border);
       }
@@ -90,7 +90,7 @@
         display: flex;
         align-items: center;
         justify-content: space-between;
-        height: 70px;
+        height: 60px;
         padding: 0 32px;
       }
 
@@ -208,7 +208,7 @@
       .tab-row {
         display: flex;
         align-items: stretch;
-        height: 54px;
+        height: 40px;
         gap: 4px;
         padding: 0 24px;
         border-top: 1px solid var(--divider);
@@ -226,15 +226,15 @@
 
       .system-tab {
         position: relative;
-        min-width: 112px;
-        padding: 0 15px;
+        min-width: 96px;
+        padding: 0 10px;
         border: 0;
         border-radius: 0;
         background: transparent;
         color: var(--muted);
         cursor: pointer;
         font: inherit;
-        font-size: 13px;
+        font-size: 12px;
         font-weight: 500;
         line-height: 20px;
         letter-spacing: -0.003em;
@@ -252,9 +252,9 @@
 
       .system-tab[aria-selected="true"]::after {
         position: absolute;
-        right: 14px;
+        right: 10px;
         bottom: 0;
-        left: 14px;
+        left: 10px;
         height: 2px;
         border-radius: 2px 2px 0 0;
         background: var(--accent);
@@ -274,8 +274,8 @@
 
       .reload-button {
         display: inline-grid;
-        width: 36px;
-        height: 36px;
+        width: 32px;
+        height: 32px;
         flex: 0 0 auto;
         align-self: center;
         place-items: center;
@@ -305,8 +305,8 @@
       }
 
       .reload-button svg {
-        width: 16px;
-        height: 16px;
+        width: 14px;
+        height: 14px;
         fill: none;
         stroke: currentColor;
         stroke-linecap: round;
@@ -315,7 +315,7 @@
       }
 
       .app-content {
-        height: calc(100vh - 124px);
+        height: calc(100vh - 100px);
         background: var(--page-bg);
       }
 
@@ -323,7 +323,7 @@
         display: none;
         position: absolute;
         z-index: 1;
-        inset: 124px 0 0;
+        inset: 100px 0 0;
         align-items: center;
         justify-content: center;
         padding: 40px;

@@ -2,7 +2,7 @@ const { app, BrowserWindow, WebContentsView, ipcMain } = require('electron/main'
 const fs = require('node:fs')
 const path = require('node:path')
 
-const HEADER_HEIGHT = 124
+const HEADER_HEIGHT = 100
 const PERSISTENT_PARTITION = 'persist:strategy-a1'
 const DEV_TOOLS_ENABLED = !app.isPackaged
 
