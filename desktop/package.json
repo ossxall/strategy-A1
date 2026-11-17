@@ -27,6 +27,8 @@
       "preload.js",
       "renderer.js",
       "index.html",
+      "fonts/InterVariable.woff2",
+      "fonts/LICENSE.txt",
       "config.json",
       "package.json"
     ],
@@ -36,5 +38,8 @@
       ],
       "category": "Utility"
     }
+  },
+  "dependencies": {
+    "lucide": "^1.73.0"
   }
 }

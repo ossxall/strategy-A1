@@ -2,8 +2,10 @@ const { app, BrowserWindow, WebContentsView, ipcMain } = require('electron/main'
 const fs = require('node:fs')
 const path = require('node:path')
 
-const HEADER_HEIGHT = 124
+const HEADER_HEIGHT = 100
+const CONTENT_VIEW_INSET = 17
 const PERSISTENT_PARTITION = 'persist:strategy-a1'
+const DEV_TOOLS_ENABLED = !app.isPackaged
 
 app.setName('Strategy A1')
 
@@ -23,10 +25,34 @@ function loadConfiguration () {
     }
 
     const parsed = JSON.parse(fs.readFileSync(configPath, 'utf8'))
-    if (app.isPackaged && !Object.hasOwn(parsed, 'authUrl')) {
+    if (app.isPackaged) {
       const template = JSON.parse(fs.readFileSync(templatePath, 'utf8'))
-      if (isValidWebUrl(template.authUrl)) {
-        parsed.authUrl = template.authUrl.trim()
+      let migrated = false
+
+      if (!Object.hasOwn(parsed, 'authUrl')) {
+        if (isValidWebUrl(template.authUrl)) {
+          parsed.authUrl = template.authUrl.trim()
+          migrated = true
+        }
+      }
+
+      const previousTerminalUrl = 'http://127.0.0.1:8888'
+      const terminal = Array.isArray(parsed.systems)
+        ? parsed.systems.find((system) => system?.id === 'terminal')
+        : null
+      const configuredTerminal = Array.isArray(template.systems)
+        ? template.systems.find((system) => system?.id === 'terminal')
+        : null
+
+      if (
+        terminal?.url === previousTerminalUrl &&
+        isValidWebUrl(configuredTerminal?.url)
+      ) {
+        terminal.url = configuredTerminal.url.trim()
+        migrated = true
+      }
+
+      if (migrated) {
         fs.writeFileSync(configPath, `${JSON.stringify(parsed, null, 2)}\n`)
       }
     }
@@ -42,6 +68,7 @@ function loadConfiguration () {
           .map((system) => ({
             id: system.id.trim(),
             name: system.name.trim(),
+            icon: typeof system.icon === 'string' ? system.icon.trim() : 'circle-help',
             url: system.url.trim()
           }))
       : []
@@ -109,10 +136,10 @@ function setViewBounds (state) {
 
   for (const { view } of state.systems.values()) {
     view.setBounds({
-      x: 0,
-      y: HEADER_HEIGHT,
-      width,
-      height: Math.max(0, height - HEADER_HEIGHT)
+      x: CONTENT_VIEW_INSET,
+      y: HEADER_HEIGHT + CONTENT_VIEW_INSET,
+      width: Math.max(0, width - CONTENT_VIEW_INSET * 2),
+      height: Math.max(0, height - HEADER_HEIGHT - CONTENT_VIEW_INSET * 2)
     })
   }
 }
@@ -150,7 +177,8 @@ function showApplication (state) {
         partition: PERSISTENT_PARTITION,
         contextIsolation: true,
         nodeIntegration: false,
-        sandbox: true
+        sandbox: true,
+        devTools: DEV_TOOLS_ENABLED
       }
     })
 
@@ -181,7 +209,8 @@ function createWindow () {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true
+      sandbox: true,
+      devTools: DEV_TOOLS_ENABLED
     }
   })
 
@@ -200,7 +229,8 @@ function createWindow () {
       partition: PERSISTENT_PARTITION,
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true
+      sandbox: true,
+      devTools: DEV_TOOLS_ENABLED
     }
   })
   state.authView = authView

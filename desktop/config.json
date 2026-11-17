@@ -1,20 +1,40 @@
 {
   "authUrl": "https://lovelacers.com/auth",
   "systems": [
-    { 
+    {
       "id": "vps",
-      "name" :"VPS",
+      "name": "VPS",
+      "icon": "server",
       "url": "https://lovelacers.com/glances"
-
+    },
+    {
+      "id": "logs",
+      "name": "Logs",
+      "icon": "scroll-text",
+      "url": "https://lovelacers.com/logs"
     },
     {
       "id": "terminal",
       "name": "Terminal",
-      "url": "http://127.0.0.1:8888"
+      "icon": "terminal",
+      "url": "https://lovelacers.com/webssh"
+    },
+    {
+      "id": "backtest",
+      "name": "Backtest",
+      "icon": "candlestick-chart",
+      "url": "https://lovelacers.com/live/bot/backtest"
+    },
+    {
+      "id": "feed",
+      "name": "Feed",
+      "icon": "activity",
+      "url": "https://lovelacers.com/live/feed/chart"
     },
     {
       "id": "binance",
       "name": "binance",
+      "icon": "bitcoin",
       "url": "https://www.binance.com/en/futures/BTCUSDT"
     }
   ]
