@@ -111,6 +111,18 @@ services:
       retries: 3
       start_period: 120s
 
+  webssh:
+    <<: *common
+    command: ["python", "ssh/start_webssh.py"]
+    volumes:
+      - ./ssh/known_hosts:/root/.ssh/known_hosts:ro
+    environment:
+      WEBSSH_HOST: 0.0.0.0
+      WEBSSH_PORT: "8888"
+      # WebSSH sólo se publica detrás de Nginx + Authelia.
+      WEBSSH_POLICY: ${WEBSSH_POLICY:-warning}
+      WEBSSH_PUBLIC_URL: https://lovelacers.com/webssh/
+
   monitor:
     <<: *common
     command: ["python", "-m", "monitor"]
@@ -252,6 +264,8 @@ services:
       bot:
         condition: service_started
       executor:
+        condition: service_started
+      webssh:
         condition: service_started
       glances:
         condition: service_started
