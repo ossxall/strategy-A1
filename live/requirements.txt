@@ -12,3 +12,4 @@ aiogram>=3.13,<4
 PyYAML>=6.0
 glances[web]==4.5.9
 webssh==1.6.3
+sqlite-web>=0.8.2
