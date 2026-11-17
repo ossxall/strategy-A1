@@ -25,6 +25,8 @@
         background: var(--page-bg);
         font-synthesis: none;
         text-rendering: optimizeLegibility;
+        font-optical-sizing: auto;
+        font-feature-settings: "cv11", "ss03";
 
         --page-bg: #f3f6fa;
         --surface: #fff;
@@ -69,6 +71,11 @@
         min-height: 100vh;
         margin: 0;
         overflow: hidden;
+        font-size: 13px;
+        font-weight: 400;
+        line-height: 20px;
+        letter-spacing: -0.003em;
+        -webkit-font-smoothing: antialiased;
       }
 
       .app-header {
@@ -101,22 +108,27 @@
         border-radius: 12px;
         background: var(--brand-bg);
         color: var(--brand-text);
-        font-size: 17px;
-        font-weight: 800;
-        letter-spacing: -1px;
+        font-size: 18px;
+        font-weight: 700;
+        line-height: 24px;
+        letter-spacing: -0.014em;
       }
 
       .brand-name {
         margin: 0;
         font-size: 15px;
-        font-weight: 750;
-        letter-spacing: -0.2px;
+        font-weight: 600;
+        line-height: 22px;
+        letter-spacing: -0.009em;
       }
 
       .brand-caption {
         margin: 3px 0 0;
         color: var(--muted);
         font-size: 11px;
+        font-weight: 400;
+        line-height: 16px;
+        letter-spacing: 0.005em;
       }
 
       .header-actions {
@@ -133,8 +145,10 @@
         border: 1px solid var(--border);
         border-radius: 999px;
         color: var(--subtle);
-        font-size: 11px;
-        font-weight: 600;
+        font-size: 12px;
+        font-weight: 500;
+        line-height: 16px;
+        letter-spacing: 0;
       }
 
       .local-dot {
@@ -158,8 +172,10 @@
         color: var(--text);
         cursor: pointer;
         font: inherit;
-        font-size: 11px;
-        font-weight: 650;
+        font-size: 13px;
+        font-weight: 500;
+        line-height: 20px;
+        letter-spacing: -0.003em;
         transition: background 120ms ease, border-color 120ms ease;
       }
 
@@ -218,8 +234,10 @@
         color: var(--muted);
         cursor: pointer;
         font: inherit;
-        font-size: 12px;
-        font-weight: 650;
+        font-size: 13px;
+        font-weight: 500;
+        line-height: 20px;
+        letter-spacing: -0.003em;
         transition: color 120ms ease, background 120ms ease;
       }
 
@@ -329,13 +347,18 @@
       .message-card h2 {
         margin: 0 0 10px;
         font-size: 18px;
+        font-weight: 600;
+        line-height: 24px;
+        letter-spacing: -0.014em;
       }
 
       .message-card p {
         margin: 0;
         color: var(--subtle);
-        font-size: 13px;
-        line-height: 1.6;
+        font-size: 14px;
+        font-weight: 400;
+        line-height: 22px;
+        letter-spacing: -0.006em;
       }
 
       .config-path {
@@ -344,7 +367,15 @@
         color: var(--subtle);
         font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
         font-size: 11px;
+        font-weight: 400;
+        line-height: 16px;
+        letter-spacing: 0.005em;
+        font-feature-settings: "zero", "ss02";
         overflow-wrap: anywhere;
+      }
+
+      .numeric {
+        font-variant-numeric: tabular-nums;
       }
     </style>
   </head>
