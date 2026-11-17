@@ -13,6 +13,9 @@ navegador (como `localStorage` e IndexedDB) se conservan entre ejecuciones.
 La pestaña **Terminal** usa `https://lovelacers.com/webssh/`; su tráfico pasa
 por Nginx y Authelia, no por un puerto local del equipo.
 
+Las DevTools de Electron están habilitadas solo al ejecutar desde el código
+fuente (modo desarrollo) y deshabilitadas en la aplicación empaquetada.
+
 En desarrollo, la aplicación lee directamente `desktop/config.json`. En Linux
 empaquetado, primero busca `config.json` junto al AppImage/ejecutable; si no está,
 usa `app.getPath('userData')/config.json` y copia ahí la configuración incluida

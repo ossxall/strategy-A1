@@ -4,6 +4,7 @@ const path = require('node:path')
 
 const HEADER_HEIGHT = 124
 const PERSISTENT_PARTITION = 'persist:strategy-a1'
+const DEV_TOOLS_ENABLED = !app.isPackaged
 
 app.setName('Strategy A1')
 
@@ -174,7 +175,8 @@ function showApplication (state) {
         partition: PERSISTENT_PARTITION,
         contextIsolation: true,
         nodeIntegration: false,
-        sandbox: true
+        sandbox: true,
+        devTools: DEV_TOOLS_ENABLED
       }
     })
 
@@ -205,7 +207,8 @@ function createWindow () {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true
+      sandbox: true,
+      devTools: DEV_TOOLS_ENABLED
     }
   })
 
@@ -224,7 +227,8 @@ function createWindow () {
       partition: PERSISTENT_PARTITION,
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true
+      sandbox: true,
+      devTools: DEV_TOOLS_ENABLED
     }
   })
   state.authView = authView
