@@ -137,6 +137,18 @@ services:
     cap_drop:
       - ALL
 
+  glances:
+    <<: *common
+    command:
+      - python
+      - glances/start_web.py
+      - --bind
+      - 0.0.0.0
+      - --port
+      - "61208"
+    # No necesita acceder a los datos de trading montados por los servicios comunes.
+    volumes: []
+
   dozzle:
     image: amir20/dozzle:latest
     restart: unless-stopped
@@ -235,6 +247,8 @@ services:
       bot:
         condition: service_started
       executor:
+        condition: service_started
+      glances:
         condition: service_started
       authelia:
         condition: service_started
