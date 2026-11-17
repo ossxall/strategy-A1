@@ -1,4 +1,5 @@
 {
+  "authUrl": "https://lovelacers.com/auth",
   "systems": [
     {
       "id": "terminal",

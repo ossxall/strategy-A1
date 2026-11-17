@@ -3,6 +3,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 
 const HEADER_HEIGHT = 124
+const PERSISTENT_PARTITION = 'persist:strategy-a1'
 
 app.setName('Strategy A1')
 
@@ -13,9 +14,7 @@ let configurationError = ''
 
 function loadConfiguration () {
   const templatePath = path.join(__dirname, 'config.json')
-  configPath = app.isPackaged
-    ? path.join(app.getPath('userData'), 'config.json')
-    : templatePath
+  configPath = getConfigurationPath(templatePath)
 
   try {
     if (app.isPackaged) {
@@ -24,6 +23,19 @@ function loadConfiguration () {
     }
 
     const parsed = JSON.parse(fs.readFileSync(configPath, 'utf8'))
+    if (app.isPackaged && !Object.hasOwn(parsed, 'authUrl')) {
+      const template = JSON.parse(fs.readFileSync(templatePath, 'utf8'))
+      if (isValidWebUrl(template.authUrl)) {
+        parsed.authUrl = template.authUrl.trim()
+        fs.writeFileSync(configPath, `${JSON.stringify(parsed, null, 2)}\n`)
+      }
+    }
+
+    const authUrl = typeof parsed.authUrl === 'string' ? parsed.authUrl.trim() : ''
+    if (!isValidWebUrl(authUrl)) {
+      throw new Error('La configuración debe incluir una authUrl HTTP o HTTPS válida.')
+    }
+
     const configuredSystems = Array.isArray(parsed.systems)
       ? parsed.systems
           .filter(isValidSystem)
@@ -44,10 +56,31 @@ function loadConfiguration () {
       throw new Error('La configuración debe incluir al menos un sistema con id, name y URL HTTP o HTTPS.')
     }
 
-    configuration = { systems }
+    configuration = { authUrl, systems }
   } catch (error) {
-    configuration = { systems: [] }
+    configuration = { authUrl: '', systems: [] }
     configurationError = error.message
+  }
+}
+
+function getConfigurationPath (templatePath) {
+  if (!app.isPackaged) return templatePath
+
+  const binaryPath = process.env.APPIMAGE || app.getPath('exe')
+  const adjacentConfigPath = path.join(path.dirname(binaryPath), 'config.json')
+
+  if (fs.existsSync(adjacentConfigPath)) return adjacentConfigPath
+  return path.join(app.getPath('userData'), 'config.json')
+}
+
+function isValidWebUrl (value) {
+  if (typeof value !== 'string' || !value.trim()) return false
+
+  try {
+    const url = new URL(value)
+    return (url.protocol === 'http:' || url.protocol === 'https:') && Boolean(url.hostname)
+  } catch {
+    return false
   }
 }
 
@@ -63,26 +96,76 @@ function isValidSystem (system) {
     return false
   }
 
-  try {
-    const url = new URL(system.url)
-    return (url.protocol === 'http:' || url.protocol === 'https:') && Boolean(url.hostname)
-  } catch {
-    return false
-  }
+  return isValidWebUrl(system.url)
 }
 
 function setViewBounds (state) {
   const { width, height } = state.window.getContentBounds()
-  const viewHeight = Math.max(0, height - HEADER_HEIGHT)
+
+  if (!state.authenticated) {
+    state.authView?.setBounds({ x: 0, y: 0, width, height })
+    return
+  }
 
   for (const { view } of state.systems.values()) {
     view.setBounds({
       x: 0,
       y: HEADER_HEIGHT,
       width,
-      height: viewHeight
+      height: Math.max(0, height - HEADER_HEIGHT)
     })
   }
+}
+
+function isSuccessfulAuthRedirect (url, authUrl) {
+  try {
+    const redirectedUrl = new URL(url)
+    const authPageUrl = new URL(authUrl)
+    const authHost = authPageUrl.hostname.toLowerCase().replace(/^www\./, '')
+    const redirectedHost = redirectedUrl.hostname.toLowerCase().replace(/^www\./, '')
+    const isSameSite = redirectedHost === authHost ||
+      redirectedHost.endsWith(`.${authHost}`)
+    const pathname = redirectedUrl.pathname.toLowerCase().replace(/\/+$/, '') || '/'
+    const authPathname = authPageUrl.pathname.toLowerCase().replace(/\/+$/, '') || '/'
+
+    return redirectedUrl.protocol === authPageUrl.protocol &&
+      isSameSite &&
+      pathname !== authPathname
+  } catch {
+    return false
+  }
+}
+
+function showApplication (state) {
+  if (state.authenticated || state.window.isDestroyed()) return
+
+  state.authenticated = true
+  state.window.contentView.removeChildView(state.authView)
+  state.authView.webContents.close()
+  state.authView = null
+
+  for (const system of configuration.systems) {
+    const view = new WebContentsView({
+      webPreferences: {
+        partition: PERSISTENT_PARTITION,
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true
+      }
+    })
+
+    view.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+    state.window.contentView.addChildView(view)
+    view.setVisible(false)
+    view.webContents.loadURL(system.url).catch(() => {})
+    state.systems.set(system.id, { definition: system, view })
+  }
+
+  state.selectedId = configuration.systems[0]?.id ?? null
+  if (state.selectedId) state.systems.get(state.selectedId).view.setVisible(true)
+
+  setViewBounds(state)
+  state.window.loadFile(path.join(__dirname, 'index.html'))
 }
 
 function createWindow () {
@@ -93,6 +176,7 @@ function createWindow () {
     minHeight: 560,
     autoHideMenuBar: true,
     backgroundColor: '#f3f6fa',
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -102,37 +186,50 @@ function createWindow () {
   })
 
   const systems = new Map()
-  const state = { window: win, systems, selectedId: null }
+  const state = {
+    window: win,
+    systems,
+    selectedId: null,
+    authenticated: false,
+    authView: null
+  }
   windowStates.set(win, state)
 
-  for (const system of configuration.systems) {
-    const view = new WebContentsView({
-      webPreferences: {
-        contextIsolation: true,
-        nodeIntegration: false,
-        sandbox: true
-      }
-    })
+  const authView = new WebContentsView({
+    webPreferences: {
+      partition: PERSISTENT_PARTITION,
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true
+    }
+  })
+  state.authView = authView
 
-    view.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
-    win.contentView.addChildView(view)
-    view.setVisible(false)
-    view.webContents.loadURL(system.url).catch(() => {})
-    systems.set(system.id, { definition: system, view })
+  authView.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  const onAuthNavigation = (_event, url) => {
+    if (isSuccessfulAuthRedirect(url, configuration.authUrl)) showApplication(state)
   }
+  authView.webContents.on('did-navigate', onAuthNavigation)
+  authView.webContents.on('did-navigate-in-page', onAuthNavigation)
 
-  state.selectedId = configuration.systems[0]?.id ?? null
-  if (state.selectedId) systems.get(state.selectedId).view.setVisible(true)
+  win.contentView.addChildView(authView)
 
   setViewBounds(state)
   win.on('resize', () => setViewBounds(state))
   win.on('closed', () => {
     windowStates.delete(win)
+    if (state.authView && !state.authView.webContents.isDestroyed()) {
+      state.authView.webContents.close()
+    }
     for (const { view } of systems.values()) {
       if (!view.webContents.isDestroyed()) view.webContents.close()
     }
   })
-  win.loadFile(path.join(__dirname, 'index.html'))
+
+  win.show()
+  if (configuration.authUrl) {
+    authView.webContents.loadURL(configuration.authUrl).catch(() => {})
+  }
 }
 
 ipcMain.handle('systems:get-configuration', (event) => {
