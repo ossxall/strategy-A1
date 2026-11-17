@@ -123,6 +123,28 @@ services:
       WEBSSH_POLICY: ${WEBSSH_POLICY:-warning}
       WEBSSH_PUBLIC_URL: https://lovelacers.com/webssh/
 
+  sqlweb:
+    <<: *common
+    command:
+      - python
+      - sqlweb/start.py
+      - --writable
+      - --behind-auth-proxy
+    volumes:
+      - ./data:/data
+    environment:
+      SQLWEB_DATABASE_DIR: /data
+      SQLWEB_HOST: 0.0.0.0
+      SQLWEB_PORT: "8082"
+      SQLWEB_URL_PREFIX: /sqlweb
+      # Sin password local por ahora: el acceso público queda detrás de Authelia.
+      SQLITE_WEB_PASSWORD: ""
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+
   monitor:
     <<: *common
     command: ["python", "-m", "monitor"]
@@ -266,6 +288,8 @@ services:
       executor:
         condition: service_started
       webssh:
+        condition: service_started
+      sqlweb:
         condition: service_started
       glances:
         condition: service_started

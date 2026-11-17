@@ -26,14 +26,20 @@ eliminarse al actualizar el código.
 Nginx publica los puertos 80 y 443. El puerto 80 solo redirige a HTTPS; Nginx
 valida mediante Authelia cada petición a `/live/feed/`, `/live/bot/` y
 `/live/bot/execution/`, además del visor Dozzle en `/logs/`, Glances en
-`/glances/` y WebSSH en `/webssh/`. El puerto interno de WebSSH no se publica
-directamente. El portal de acceso está en `/auth/`. Las rutas protegidas comparten
+`/glances/`, WebSSH en `/webssh/` y SQLite Web en `/sqlweb/`. Los puertos
+internos de estos servicios no se publican directamente. El portal de acceso
+está en `/auth/`. Las rutas protegidas comparten
 la misma cookie de sesión, así que el usuario inicia sesión una vez y no vuelve
 a introducir la contraseña hasta que caduque. Authelia requiere
 usuario y contraseña (sin segundo factor). La cookie dura 24 horas, también
 caduca tras 24 horas de inactividad, y no tiene una extensión «recordarme».
 Redis conserva la sesión entre reinicios de Authelia; Redis no publica ningún
 puerto al host.
+
+SQLite Web tiene acceso de lectura/escritura a las bases de `live/data/`.
+`SQLITE_WEB_PASSWORD` queda vacía por ahora; Nginx protege
+`https://lovelacers.com/sqlweb/` con Authelia. El servicio no publica un puerto
+directamente en el host, así que mantenlo detrás de ese proxy autenticado.
 
 WebSSH está disponible en `https://lovelacers.com/webssh/`. En Compose usa la
 política `warning` para permitir conexiones a hosts nuevos; Authelia protege el
