@@ -23,10 +23,34 @@ function loadConfiguration () {
     }
 
     const parsed = JSON.parse(fs.readFileSync(configPath, 'utf8'))
-    if (app.isPackaged && !Object.hasOwn(parsed, 'authUrl')) {
+    if (app.isPackaged) {
       const template = JSON.parse(fs.readFileSync(templatePath, 'utf8'))
-      if (isValidWebUrl(template.authUrl)) {
-        parsed.authUrl = template.authUrl.trim()
+      let migrated = false
+
+      if (!Object.hasOwn(parsed, 'authUrl')) {
+        if (isValidWebUrl(template.authUrl)) {
+          parsed.authUrl = template.authUrl.trim()
+          migrated = true
+        }
+      }
+
+      const previousTerminalUrl = 'http://127.0.0.1:8888'
+      const terminal = Array.isArray(parsed.systems)
+        ? parsed.systems.find((system) => system?.id === 'terminal')
+        : null
+      const configuredTerminal = Array.isArray(template.systems)
+        ? template.systems.find((system) => system?.id === 'terminal')
+        : null
+
+      if (
+        terminal?.url === previousTerminalUrl &&
+        isValidWebUrl(configuredTerminal?.url)
+      ) {
+        terminal.url = configuredTerminal.url.trim()
+        migrated = true
+      }
+
+      if (migrated) {
         fs.writeFileSync(configPath, `${JSON.stringify(parsed, null, 2)}\n`)
       }
     }

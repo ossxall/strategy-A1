@@ -10,12 +10,17 @@ a otra ruta de su dominio. La autenticación y los sistemas usan la partición
 persistente `strategy-a1`, por lo que las cookies y los datos persistentes del
 navegador (como `localStorage` e IndexedDB) se conservan entre ejecuciones.
 
+La pestaña **Terminal** usa `https://lovelacers.com/webssh/`; su tráfico pasa
+por Nginx y Authelia, no por un puerto local del equipo.
+
 En desarrollo, la aplicación lee directamente `desktop/config.json`. En Linux
 empaquetado, primero busca `config.json` junto al AppImage/ejecutable; si no está,
 usa `app.getPath('userData')/config.json` y copia ahí la configuración incluida
 solo la primera vez. La ruta activa aparece en el tooltip de «Aplicación de
 escritorio» del header. Después de editarla, reinicia la aplicación. Si una
 instalación anterior no tiene `authUrl`, se añade desde la configuración incluida.
+También se migra la URL antigua local de Terminal a `/webssh/`, conservando el
+resto de la configuración.
 
 Cada entrada necesita un `id` único, un nombre visible y una URL `http` o
 `https`:
