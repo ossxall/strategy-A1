@@ -15,7 +15,7 @@ except ImportError:
     pass
 
 REST_BASE_URL = "https://fapi.binance.com"
-WS_BASE_URL = "wss://fstream.binance.com/ws"
+WS_BASE_URL = "wss://fstream.binance.com/market/ws"
 
 SYMBOL = os.getenv("FEED_SYMBOL", "BTCUSDT").upper()
 INTERVAL = os.getenv("FEED_INTERVAL", "1m")
