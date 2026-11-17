@@ -3,6 +3,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 
 const HEADER_HEIGHT = 100
+const CONTENT_VIEW_INSET = 17
 const PERSISTENT_PARTITION = 'persist:strategy-a1'
 const DEV_TOOLS_ENABLED = !app.isPackaged
 
@@ -135,10 +136,10 @@ function setViewBounds (state) {
 
   for (const { view } of state.systems.values()) {
     view.setBounds({
-      x: 0,
-      y: HEADER_HEIGHT,
-      width,
-      height: Math.max(0, height - HEADER_HEIGHT)
+      x: CONTENT_VIEW_INSET,
+      y: HEADER_HEIGHT + CONTENT_VIEW_INSET,
+      width: Math.max(0, width - CONTENT_VIEW_INSET * 2),
+      height: Math.max(0, height - HEADER_HEIGHT - CONTENT_VIEW_INSET * 2)
     })
   }
 }
