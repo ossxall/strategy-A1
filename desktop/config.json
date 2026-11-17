@@ -20,6 +20,12 @@
       "url": "https://lovelacers.com/webssh"
     },
     {
+      "id": "sql",
+      "name": "SQL",
+      "icon": "database",
+      "url": "https://lovelacers.com/sqlweb"
+    },
+    {
       "id": "backtest",
       "name": "Backtest",
       "icon": "candlestick-chart",
