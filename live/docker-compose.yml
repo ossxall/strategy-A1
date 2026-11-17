@@ -146,8 +146,13 @@ services:
       - 0.0.0.0
       - --port
       - "61208"
-    # No necesita acceder a los datos de trading montados por los servicios comunes.
-    volumes: []
+    # Acceso de solo lectura a recursos del host; no monta los datos de trading.
+    volumes:
+      - /:/rootfs:ro,rslave
+      - /sys:/sys:ro
+      - /etc/os-release:/etc/os-release:ro
+    # Permite enumerar procesos del host, no solo los del contenedor.
+    pid: host
 
   dozzle:
     image: amir20/dozzle:latest

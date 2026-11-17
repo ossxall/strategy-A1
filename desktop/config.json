@@ -1,6 +1,12 @@
 {
   "authUrl": "https://lovelacers.com/auth",
   "systems": [
+    { 
+      "id": "vps",
+      "name" :"VPS",
+      "url": "https://lovelacers.com/glances"
+
+    },
     {
       "id": "terminal",
       "name": "Terminal",
