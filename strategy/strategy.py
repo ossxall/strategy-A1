@@ -1224,7 +1224,7 @@ class Backtester:
 # ---------------------------------------------------------------------------
 
 #: Dataset OHLCV en Parquet; las rutas relativas cuelgan de la raíz del proyecto.
-DATASET = "dataset/binance/spot/BTCUSDT/merged/BTCUSDT-1m.parquet"
+DATASET = "dataset/binance/futures/um/BTCUSDT/merged/BTCUSDT-1m.parquet"
 #: Directorio donde se escriben los informes del backtest.
 OUTPUT_DIR = DEFAULT_OUTPUT_DIR
 #: Escribir los archivos del informe.
