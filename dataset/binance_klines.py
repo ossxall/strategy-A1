@@ -59,6 +59,8 @@ COLUMNS = [
 FLOAT_COLS = {"open", "high", "low", "close", "volume", "quote_volume",
               "taker_buy_volume", "taker_buy_quote_volume"}
 INT_COLS = {"open_time", "close_time", "count", "ignore"}
+TIMESTAMP_COLS = ("open_time", "close_time")
+MICROSECOND_TIMESTAMP_THRESHOLD = 100_000_000_000_000
 
 MARKETS = {"um": "data/futures/um", "cm": "data/futures/cm", "spot": "data/spot"}
 MARKET_OUTPUT_PARTS = {
@@ -302,6 +304,7 @@ def merge_parquet(csvs: Sequence[Path], out: Path) -> int:
     try:
         import pyarrow as pa
         import pyarrow.csv as pacsv
+        import pyarrow.compute as pc
         import pyarrow.parquet as pq
     except ImportError:
         raise SystemExit("Parquet requiere 'pyarrow'. Instálalo con: pip install pyarrow")
@@ -328,7 +331,21 @@ def merge_parquet(csvs: Sequence[Path], out: Path) -> int:
                                      column_names=COLUMNS,
                                      skip_rows=1 if header else 0)
             table = pacsv.read_csv(path, read_options=read, convert_options=conv)
-            table = table.rename_columns(COLUMNS).cast(schema)
+            table = table.rename_columns(COLUMNS)
+            for col in TIMESTAMP_COLS:
+                values = table[col]
+                is_microseconds = pc.greater_equal(
+                    pc.abs(values), MICROSECOND_TIMESTAMP_THRESHOLD
+                )
+                normalized = pc.if_else(
+                    is_microseconds,
+                    pc.divide_checked(values, 1000),
+                    values,
+                )
+                table = table.set_column(
+                    table.schema.get_field_index(col), col, normalized
+                )
+            table = table.cast(schema)
             writer.write_table(table, row_group_size=250_000)
             rows += table.num_rows
     finally:
@@ -339,6 +356,8 @@ def merge_parquet(csvs: Sequence[Path], out: Path) -> int:
 
 def ts_to_iso(ms: int) -> str:
     import datetime as dt
+    if abs(ms) >= MICROSECOND_TIMESTAMP_THRESHOLD:
+        ms //= 1000
     return dt.datetime.fromtimestamp(ms / 1000, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
