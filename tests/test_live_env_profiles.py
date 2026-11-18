@@ -1,4 +1,7 @@
+from pathlib import Path
+
 import pytest
+import yaml
 
 from live.env_profiles import validate_prod_environment
 
@@ -6,6 +9,16 @@ from live.env_profiles import validate_prod_environment
 def test_prod_validation_is_skipped_outside_prod(monkeypatch):
     monkeypatch.setenv("APP_ENV", "dev")
     validate_prod_environment("feed")
+
+
+def test_compose_passes_app_env_to_each_profiled_service():
+    compose_path = Path(__file__).resolve().parents[1] / "live/docker-compose.yml"
+    compose = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
+
+    for service in ("feed", "bot", "executor", "webssh", "sqlweb", "monitor"):
+        assert compose["services"][service]["environment"]["APP_ENV"] == (
+            "${APP_ENV:-dev}"
+        )
 
 
 def test_prod_bot_does_not_require_strategy_environment_variables(monkeypatch):

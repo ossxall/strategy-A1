@@ -51,6 +51,7 @@ services:
     ports:
       - "127.0.0.1:8787:8787"
     environment:
+      APP_ENV: ${APP_ENV:-dev}
       # Absoluto para que el colector y el paquete bot compartan la base de datos.
       DB_PATH: /data/feed.db
       FEED_DB_PATH: /data/feed.db
@@ -76,6 +77,7 @@ services:
         # Solo orden de arranque, no salud: el bot arranca igual y espera datos.
         condition: service_started
     environment:
+      APP_ENV: ${APP_ENV:-dev}
       BOT_DB_PATH: /data/feed.db
       BOT_SIGNAL_DB: /data/signal.db
       BOT_BACKTEST_REPORT_DIR: /app/legacy/bot1/bot/data/backtest_out
@@ -101,6 +103,7 @@ services:
       bot:
         condition: service_started
     environment:
+      APP_ENV: ${APP_ENV:-dev}
       BOT_SIGNAL_DB: /data/signal.db
       BOT_EXECUTOR_HEARTBEAT: /data/executor.heartbeat
       BOT_EXECUTOR_HTTP_HOST: 0.0.0.0
@@ -123,6 +126,7 @@ services:
     volumes:
       - ./ssh/known_hosts:/root/.ssh/known_hosts:ro
     environment:
+      APP_ENV: ${APP_ENV:-dev}
       WEBSSH_HOST: 0.0.0.0
       WEBSSH_PORT: "8888"
       # WebSSH sólo se publica detrás de Nginx + Authelia.
@@ -138,6 +142,7 @@ services:
     volumes:
       - ./data:/data
     environment:
+      APP_ENV: ${APP_ENV:-dev}
       SQLWEB_DATABASE_DIR: /data
       SQLWEB_HOST: 0.0.0.0
       SQLWEB_PORT: "8082"
@@ -156,6 +161,7 @@ services:
     volumes:
       - ./monitor/config.yaml:/app/legacy/bot1/monitor/config.yaml:ro
     environment:
+      APP_ENV: ${APP_ENV:-dev}
       # El teardown no debe exigir secretos; monitor/config.py los valida al arrancar.
       MONITOR_TELEGRAM_BOT_TOKEN: ${MONITOR_TELEGRAM_BOT_TOKEN:-}
       MONITOR_PASSWORD: ${MONITOR_PASSWORD:-}
