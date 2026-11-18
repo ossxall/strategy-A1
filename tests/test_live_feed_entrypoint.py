@@ -10,8 +10,8 @@ def test_legacy_feed_launcher_loads_profile_before_running_feed(monkeypatch):
 
     profiles = types.ModuleType("env_profiles")
 
-    def fake_load_direct_profile(directory):
-        calls.append(("profile", Path(directory)))
+    def fake_load_direct_profile(directory, *, service):
+        calls.append(("profile", Path(directory), service))
 
     profiles.load_direct_profile = fake_load_direct_profile
     monkeypatch.setitem(sys.modules, "env_profiles", profiles)
@@ -26,4 +26,4 @@ def test_legacy_feed_launcher_loads_profile_before_running_feed(monkeypatch):
 
     runpy.run_path(str(live_dir / "feed.py"), run_name="__main__")
 
-    assert calls == [("profile", live_dir), ("run", None)]
+    assert calls == [("profile", live_dir, "feed"), ("run", None)]

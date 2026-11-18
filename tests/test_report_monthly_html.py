@@ -63,6 +63,12 @@ def test_monthly_backtest_html_renders_isolated_panels_per_page(tmp_path, monkey
     assert "domain:[0, 1]" in document
     assert 'id="previous"' in document
     assert 'id="next"' in document
+    assert "function requestedPage(pageCount)" in document
+    assert 'url.searchParams.set("page", String(pageNumber))' in document
+    assert 'await showPage(requestedPage(manifest.pages.length) - 1, "replace")' in document
+    assert 'id="page-select" aria-label="Seleccionar página" disabled' in document
+    assert 'pageSelect.addEventListener("change"' in document
+    assert 'showPage(Number(pageSelect.value) - 1)' in document
     assert 'id="monthly-data"' not in document
     assert "2024-01" not in document
     manifest = json.loads(
@@ -118,7 +124,6 @@ def test_backtest_figure_visualizes_atr_filter_and_hides_it_when_disabled():
             adx_exit=exit_flags,
             weak_exit=exit_flags,
             rsi_div_exit=np.zeros(len(index), dtype=int),
-            volume_exit=exit_flags,
         )
 
     figure = build(Config(entry_atr_enabled=True, entry_adx_enabled=False))
@@ -216,7 +221,6 @@ def test_backtest_figure_shows_rejections_position_risk_and_drawdown():
         Config(
             entry_atr_enabled=False,
             entry_adx_enabled=False,
-            volume_exit_enabled=False,
             adx_exit_enabled=False,
             ema_weakening_exit_enabled=False,
             streak_trend_only=True,
@@ -227,7 +231,6 @@ def test_backtest_figure_shows_rejections_position_risk_and_drawdown():
         adx_exit=no_flags,
         weak_exit=no_flags,
         rsi_div_exit=np.zeros(len(index), dtype=int),
-        volume_exit=no_flags,
     )
 
     trace_names = {trace.name for trace in figure.data}

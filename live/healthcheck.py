@@ -34,8 +34,16 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
 
+LIVE_DIR = Path(__file__).resolve().parent
+try:
+    from .env_profiles import load_direct_profile
+except ImportError:  # ejecución directa como ``python healthcheck.py``
+    from env_profiles import load_direct_profile
+
+load_direct_profile(LIVE_DIR, service="healthcheck")
+
 _UNIT_SECONDS = {"s": 1, "m": 60, "h": 3600, "d": 86_400, "w": 604_800}
-LIVE_DATA_DIR = Path(__file__).resolve().parent / "data"
+LIVE_DATA_DIR = LIVE_DIR / "data"
 HTTP_HEALTH_TIMEOUT_SECONDS = 2.0
 HTTP_HEALTH_MAX_BYTES = 65_536
 

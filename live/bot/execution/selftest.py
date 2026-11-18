@@ -415,7 +415,7 @@ def _self_test_lifecycles(root: Path, now_ms: int) -> int:
                     action="PARTIAL_CLOSE",
                     side=side,
                     position_id=position_id,
-                    reason="VOLUME_DECLINE_20B_20%",
+                    reason="PARTIAL_EXIT_TEST",
                     close_pct=50.0,
                     move_stop_to_breakeven=move_stop_to_breakeven,
                 ),

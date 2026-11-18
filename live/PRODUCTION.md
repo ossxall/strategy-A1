@@ -5,13 +5,14 @@
 - Ejecuta primero el flujo completo en testnet: entrada, stop protector, salida
   parcial/total, reinicio durante una orden y reconciliación. Las pruebas offline
   no sustituyen las pruebas de red ni los fills reales.
-- Trading sigue apagado por defecto. Mainnet exige
-  `BOT_BINANCE_ENVIRONMENT=production`,
+- Mainnet exige `BOT_BINANCE_ENVIRONMENT=production`,
   `BOT_BINANCE_TRADING_ENABLED=true` y
-  `BOT_BINANCE_ALLOW_LIVE_TRADING=true`; no actives esos tres valores como parte
-  de un despliegue rutinario. Usa claves sin permisos de retiro, restringidas por
-  IP, y guarda `.env` fuera del control de versiones con permisos de solo lectura
-  para el usuario del servicio.
+  `BOT_BINANCE_ALLOW_LIVE_TRADING=true` en `config.prod.yaml`. **La configuración
+  actual tiene los tres valores activos**, así que el despliegue puede enviar
+  órdenes reales si `.env.prod` contiene credenciales válidas. Desactívalos en
+  `config.prod.yaml` si no quieres operar. Usa claves sin permisos de retiro,
+  restringidas por IP, y guarda `.env.prod` fuera del control de versiones con
+  permisos de solo lectura para el usuario del servicio.
 - Revisa símbolo, timeframe y riesgo de la estrategia; configura el leverage
   exclusivamente en el executor. Verifica saldo, modo One-way, stops y límites
   del exchange con el operador responsable antes de habilitar órdenes.
@@ -37,10 +38,10 @@ Para detener el stack sin `.env.prod` ni secretos:
 
 El contenedor `monitor` se inicia con el stack, sin publicar puertos entrantes.
 Antes del despliegue, define `MONITOR_TELEGRAM_BOT_TOKEN` y una contraseña
-fuerte en `MONITOR_PASSWORD` dentro de `.env.prod`. Compose solo pasa variables
-`MONITOR_*` al monitor y no le entrega las credenciales de Binance. Las URLs de
-salud usan por defecto los nombres DNS internos de Compose; se pueden cambiar
-con `MONITOR_FEED_URL`, `MONITOR_BOT_URL` y `MONITOR_EXECUTOR_URL`.
+fuerte en `MONITOR_PASSWORD` dentro de `.env.prod`. Compose pasa los secretos
+explícitamente a sus servicios destinatarios; las claves Binance solo llegan al
+executor. Las URLs privadas de salud se configuran con `MONITOR_FEED_URL`,
+`MONITOR_BOT_URL` y `MONITOR_EXECUTOR_URL`.
 
 Los healthchecks consultan ahora las rutas `/live/feed/health`,
 `/live/bot/health` y `/live/bot/execution/status`, además de validar frescura de

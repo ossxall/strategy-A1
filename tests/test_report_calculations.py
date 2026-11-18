@@ -5,7 +5,6 @@ from strategy.config import Config
 from strategy.report import (
     _closed_x_ms,
     _configured_tp_levels,
-    _executed_volume_exit_flags,
     _position_spans,
     _r_target_price,
     calculate_metrics,
@@ -55,33 +54,6 @@ def test_drawdown_uses_initial_capital_as_starting_peak():
     assert metrics["max_dd_trough_equity"] == 80.0
     assert metrics["min_equity"] == 80.0
     assert np.isclose(metrics["min_equity_vs_capital_pct"], -20.0)
-
-
-def test_volume_markers_require_an_executed_volume_exit():
-    bars = pd.DataFrame(
-        {"close": [1.0, 1.0, 1.0]},
-        index=pd.date_range("2024-01-01", periods=3, freq="30min", tz="UTC")
-    )
-    candidates = pd.DataFrame(
-        {
-            "reason": ["STOP_LOSS_1%"],
-            "exit_time": [bars.index[2]],
-        }
-    )
-    volume_exit = pd.DataFrame(
-        {
-            "reason": ["VOLUME_DECLINE_20B"],
-            "exit_time": [bars.index[2]],
-        }
-    )
-
-    assert not _executed_volume_exit_flags(bars, candidates, "30min").any()
-    assert not _executed_volume_exit_flags(bars, pd.DataFrame(), "30min").any()
-    assert _executed_volume_exit_flags(bars, volume_exit, "30min").tolist() == [
-        False,
-        True,
-        False,
-    ]
 
 
 def test_tp_chart_levels_match_position_risk_and_execution_enablement():

@@ -37,7 +37,6 @@ def setup_entry():
         partial_tp_enabled=False,
         partial_tp2_r=0.0,
         partial_tp2_pct=0.0,
-        ema55_touch_exit_enabled=False,
         ema_weakening_exit_enabled=False,
         adx_exit_enabled=False,
         rsi_divergence_exit_enabled=False,

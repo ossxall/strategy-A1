@@ -6,7 +6,7 @@ from pathlib import Path
 from env_profiles import load_direct_profile
 
 LIVE_DIR = Path(__file__).resolve().parent
-load_direct_profile(LIVE_DIR)
+load_direct_profile(LIVE_DIR, service="monitor")
 
 try:
     importlib.import_module("yaml")

@@ -258,7 +258,6 @@ class SignalBot:
                 adx_exit=adx_exit,
                 weak_exit=weak_exit,
                 rsi_div_exit=rsi_div_exit,
-                volume_exit=engine.volume_exit,
             )
             self._backtest_complete = True
             logger.info(

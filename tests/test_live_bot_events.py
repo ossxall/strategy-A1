@@ -62,8 +62,6 @@ def make_config(**overrides):
         "adx_exit_enabled": False,
         "ema_weakening_exit_enabled": False,
         "rsi_divergence_exit_enabled": False,
-        "ema55_touch_exit_enabled": False,
-        "volume_exit_enabled": False,
         "partial_tp_enabled": False,
         "stop_loss_pct": 0.1,
         "monthly_loss_limit_pct": 0,
@@ -87,16 +85,22 @@ def test_bot_rejects_terminal_arguments_instead_of_parsing_cli():
     assert "no acepta argumentos" in result.stderr
 
 
-def test_strategy_parameters_continue_to_load_from_environment(monkeypatch):
+def test_strategy_parameters_ignore_environment_overrides(monkeypatch):
+    defaults = Config()
     monkeypatch.setenv("BOT_STRATEGY_TIMEFRAME", "15min")
     monkeypatch.setenv("BOT_STRATEGY_EMA_FAST", "8")
     monkeypatch.setenv("BOT_STRATEGY_EMA_SLOW", "21")
+    monkeypatch.setenv("BOT_STRATEGY_INITIAL_CAPITAL", "12345")
+    monkeypatch.setenv("BOT_STRATEGY_PARTIAL_TP3_PCT", "10")
 
     config = build_strategy_config()
 
-    assert config.timeframe == "15min"
-    assert config.ema_fast == 8
-    assert config.ema_slow == 21
+    assert config == defaults
+    assert config.timeframe == "30min"
+    assert config.ema_fast == 55
+    assert config.ema_slow == 200
+    assert config.initial_capital == defaults.initial_capital
+    assert config.partial_tp3_pct == 5.0
 
 
 def test_backtest_mode_generates_report_without_publishing_signals(
@@ -114,7 +118,7 @@ def test_backtest_mode_generates_report_without_publishing_signals(
 
     class Engine:
         def __init__(self, *args):
-            self.volume_exit = np.array([False, False, False])
+            pass
 
         def run(self):
             return pd.DataFrame(), pd.DataFrame(
@@ -153,7 +157,6 @@ def test_backtest_mode_generates_report_without_publishing_signals(
     assert bot._backtest_complete is True
     assert len(calls) == 1
     assert calls[0][1]["output_dir"] == tmp_path / "backtest_out"
-    assert calls[0][1]["volume_exit"].tolist() == [False, False, False]
     assert calls[0][0][2] is bot.cfg
     assert calls[0][0][4] == "BTCUSDT 1m feed.db"
 

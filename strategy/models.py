@@ -16,15 +16,11 @@ class Position:
     breakeven: bool = False
     partial_done: bool = False
     partial2_done: bool = False
-    # Índice de barra de entrada, usado por salidas que evalúan velas desde la apertura.
-    entry_bar_index: int = -1
     partial3_done: bool = False
     partial4_done: bool = False
     partial5_done: bool = False
     partial6_done: bool = False
     partial7_done: bool = False
-    # Salida parcial por volumen decreciente (una vez por posición).
-    volume_exit_done: bool = False
     entry_mfi_multiplier: float = 1.0
     entry_er_multiplier: float = 1.0
     entry_adaptive_multiplier: float = 1.0
@@ -67,8 +63,6 @@ RSI_DIVERGENCE_BEAR_REASON = "RSI_DIVERGENCE_BEAR"
 #: Salida parcial al girar el Gaussian Filter Trend contra una posición.
 GAUSSIAN_TREND_BULL_REASON = "GAUSSIAN_TREND_BULL"
 GAUSSIAN_TREND_BEAR_REASON = "GAUSSIAN_TREND_BEAR"
-#: Salida parcial cuando el volumen cae en las últimas `volume_exit_bars` velas.
-VOLUME_DECLINE_REASON = "VOLUME_DECLINE"
 DEFAULT_OUTPUT_DIR = "strategy/report/backtest_out"
 
 

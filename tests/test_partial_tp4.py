@@ -34,7 +34,6 @@ def make_engine(side, *, reach_tp5=False, reach_tp6=False, reach_tp7=False):
         adx_exit_enabled=False,
         ema_weakening_exit_enabled=False,
         rsi_divergence_exit_enabled=False,
-        ema55_touch_exit_enabled=False,
         streak_trend_only=False,
     )
     engine = Backtester(bars, config, signals=signals)
@@ -61,7 +60,7 @@ def test_tp4_closes_configured_percent_before_nearer_targets(side):
     trade = engine.trades[0]
     assert trade.reason == "PARTIAL_TP4_2.5R"
     assert trade.exit_price == (125.0 if side == 1 else 75.0)
-    assert trade.quantity == pytest.approx(0.1)
+    assert trade.quantity == pytest.approx(0.05)
     assert engine.position is not None
     assert engine.position.partial4_done
     assert not engine.position.partial3_done
@@ -70,11 +69,11 @@ def test_tp4_closes_configured_percent_before_nearer_targets(side):
 def test_tp4_defaults_and_ordering_validation():
     config = Config()
     assert config.partial_tp4_r == 2.5
-    assert config.partial_tp4_pct == 10.0
+    assert config.partial_tp4_pct == 5.0
     assert Config(partial_tp4_r=0, partial_tp4_pct=0).partial_tp4_r == 0
 
     with pytest.raises(ValueError, match="partial take-profit 4"):
-        Config(partial_tp4_r=0, partial_tp4_pct=10)
+        Config(partial_tp4_r=0, partial_tp4_pct=5.0)
     with pytest.raises(ValueError, match="greater than TP3"):
         Config(partial_tp4_r=2.0)
 
@@ -88,7 +87,7 @@ def test_tp5_closes_configured_percent_before_nearer_targets(side):
     trade = engine.trades[0]
     assert trade.reason == "PARTIAL_TP5_3R"
     assert trade.exit_price == (130.0 if side == 1 else 70.0)
-    assert trade.quantity == pytest.approx(0.1)
+    assert trade.quantity == pytest.approx(0.05)
     assert engine.position is not None
     assert engine.position.partial5_done
     assert not engine.position.partial4_done
@@ -97,11 +96,11 @@ def test_tp5_closes_configured_percent_before_nearer_targets(side):
 def test_tp5_defaults_and_ordering_validation():
     config = Config()
     assert config.partial_tp5_r == 3.0
-    assert config.partial_tp5_pct == 10.0
+    assert config.partial_tp5_pct == 5.0
     assert Config(partial_tp5_r=0, partial_tp5_pct=0).partial_tp5_r == 0
 
     with pytest.raises(ValueError, match="partial take-profit 5"):
-        Config(partial_tp5_r=0, partial_tp5_pct=10)
+        Config(partial_tp5_r=0, partial_tp5_pct=5.0)
     with pytest.raises(ValueError, match="greater than TP4"):
         Config(partial_tp5_r=2.5)
 
@@ -115,7 +114,7 @@ def test_tp6_closes_configured_percent_before_nearer_targets(side):
     trade = engine.trades[0]
     assert trade.reason == "PARTIAL_TP6_3.5R"
     assert trade.exit_price == (135.0 if side == 1 else 65.0)
-    assert trade.quantity == pytest.approx(0.1)
+    assert trade.quantity == pytest.approx(0.05)
     assert engine.position is not None
     assert engine.position.partial6_done
     assert not engine.position.partial5_done
@@ -124,11 +123,11 @@ def test_tp6_closes_configured_percent_before_nearer_targets(side):
 def test_tp6_defaults_and_ordering_validation():
     config = Config()
     assert config.partial_tp6_r == 3.5
-    assert config.partial_tp6_pct == 10.0
+    assert config.partial_tp6_pct == 5.0
     assert Config(partial_tp6_r=0, partial_tp6_pct=0).partial_tp6_r == 0
 
     with pytest.raises(ValueError, match="partial take-profit 6"):
-        Config(partial_tp6_r=0, partial_tp6_pct=10)
+        Config(partial_tp6_r=0, partial_tp6_pct=5.0)
     with pytest.raises(ValueError, match="greater than TP5"):
         Config(partial_tp6_r=3.0)
 
@@ -142,7 +141,7 @@ def test_tp7_closes_configured_percent_before_nearer_targets(side):
     trade = engine.trades[0]
     assert trade.reason == "PARTIAL_TP7_4R"
     assert trade.exit_price == (140.0 if side == 1 else 60.0)
-    assert trade.quantity == pytest.approx(0.1)
+    assert trade.quantity == pytest.approx(0.05)
     assert engine.position is not None
     assert engine.position.partial7_done
     assert not engine.position.partial6_done
@@ -151,10 +150,10 @@ def test_tp7_closes_configured_percent_before_nearer_targets(side):
 def test_tp7_defaults_and_ordering_validation():
     config = Config()
     assert config.partial_tp7_r == 4.0
-    assert config.partial_tp7_pct == 10.0
+    assert config.partial_tp7_pct == 5.0
     assert Config(partial_tp7_r=0, partial_tp7_pct=0).partial_tp7_r == 0
 
     with pytest.raises(ValueError, match="partial take-profit 7"):
-        Config(partial_tp7_r=0, partial_tp7_pct=10)
+        Config(partial_tp7_r=0, partial_tp7_pct=5.0)
     with pytest.raises(ValueError, match="greater than TP6"):
         Config(partial_tp7_r=3.5)

@@ -51,11 +51,9 @@ def make_config(**overrides):
         "partial_tp6_pct": 0,
         "partial_tp7_r": 0,
         "partial_tp7_pct": 0,
-        "volume_exit_enabled": False,
         "adx_exit_enabled": False,
         "ema_weakening_exit_enabled": False,
         "rsi_divergence_exit_enabled": False,
-        "ema55_touch_exit_enabled": False,
         "force_close_at_end": False,
     }
     values.update(overrides)
@@ -272,7 +270,7 @@ def test_gaussian_filter_config_defaults_and_validation():
     assert config.entry_gaussian_atr_length == 14
     assert config.entry_gaussian_adaptive_width
     assert config.gaussian_trend_reversal_exit_enabled
-    assert config.gaussian_trend_reversal_exit_pct == 50.0
+    assert config.gaussian_trend_reversal_exit_pct == 25.0
 
     with pytest.raises(ValueError, match="Gaussian"):
         Config(entry_gaussian_source="volume")
@@ -282,7 +280,7 @@ def test_gaussian_filter_config_defaults_and_validation():
         Config(gaussian_trend_reversal_exit_pct=0)
 
 
-def test_live_config_reads_gaussian_filter_settings_from_environment(monkeypatch):
+def test_live_config_ignores_gaussian_environment_overrides(monkeypatch):
     monkeypatch.setenv("BOT_STRATEGY_ENTRY_GAUSSIAN_TREND", "false")
     monkeypatch.setenv("BOT_STRATEGY_ENTRY_GAUSSIAN_SOURCE", "hl2")
     monkeypatch.setenv("BOT_STRATEGY_ENTRY_GAUSSIAN_LENGTH", "8")
@@ -291,8 +289,8 @@ def test_live_config_reads_gaussian_filter_settings_from_environment(monkeypatch
 
     config = build_strategy_config()
 
-    assert not config.entry_gaussian_trend_enabled
-    assert config.entry_gaussian_source == "hl2"
-    assert config.entry_gaussian_length == 8
-    assert not config.gaussian_trend_reversal_exit_enabled
-    assert config.gaussian_trend_reversal_exit_pct == 35.0
+    assert config.entry_gaussian_trend_enabled
+    assert config.entry_gaussian_source == "close"
+    assert config.entry_gaussian_length == 14
+    assert config.gaussian_trend_reversal_exit_enabled
+    assert config.gaussian_trend_reversal_exit_pct == 25.0

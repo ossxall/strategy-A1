@@ -6,10 +6,13 @@
 recibido. La respuesta se representa sin asumir nombres ni niveles concretos en
 el JSON, por lo que tolera cambios en el esquema.
 
-1. Crea un bot con BotFather y copia su token a `MONITOR_TELEGRAM_BOT_TOKEN` en
-   `live/.env.dev` o `live/.env.prod`.
-2. Define una contraseña fuerte en `MONITOR_PASSWORD` en el mismo archivo de
-   entorno. No se necesita ningún archivo `.env.monitor*`.
+1. Crea un bot con BotFather y guarda su token como `MONITOR_TELEGRAM_BOT_TOKEN`
+   en `live/.env.dev` o `live/.env.prod`, según el perfil. Define allí también
+   una contraseña fuerte en `MONITOR_PASSWORD`. `.env.example` solo enumera las
+   claves: cópialo al archivo del perfil y no pongas valores reales en el ejemplo.
+2. `config.dev.yaml` es la base común; `APP_ENV=prod` aplica encima los cambios
+   de `config.prod.yaml`. El token y la contraseña se cargan aparte desde el
+   `.env` correspondiente.
 3. Revisa `services` en `config.yaml`. En Docker Compose, el contenedor recibe
    automáticamente los endpoints internos (`feed`, `bot` y `executor`); al
    ejecutar directamente se usan las URLs del YAML.
@@ -28,7 +31,7 @@ el JSON, por lo que tolera cambios en el esquema.
    `monitor` inicia automáticamente con el stack. Para ver los logs:
    `APP_ENV=prod docker-compose --env-file .env.prod -f docker-compose.yml -f docker-compose.runtime.yml -p blacker-bot1 logs -f monitor`.
    También puedes ejecutarlo directamente desde `live/` con `python monitor.py`;
-   cargará `.env.dev` por defecto o `.env.prod` si `APP_ENV=prod`.
+   cargará el YAML y los secretos correspondientes a `APP_ENV`.
 
 Comandos:
 

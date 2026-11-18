@@ -1,16 +1,7 @@
 version: "2.4"
 
-# Añadir este override solo para build/up/diagnóstico. No usarlo para `down`:
-# los archivos de entorno de ejecución pueden no existir en el host.
-services:
-  feed:
-    env_file:
-      - .env.${APP_ENV:-dev}
-
-  bot:
-    env_file:
-      - .env.${APP_ENV:-dev}
-
-  executor:
-    env_file:
-      - .env.${APP_ENV:-dev}
+# Compatibilidad con comandos y scripts de despliegue existentes.
+# La configuración no secreta usa config.dev.yaml como base y aplica
+# config.prod.yaml si APP_ENV=prod; los secretos se interpolan explícitamente en
+# docker-compose.yml desde el --env-file seleccionado.
+services: {}

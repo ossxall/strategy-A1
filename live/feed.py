@@ -11,7 +11,7 @@ if str(LIVE_DIR) in sys.path:
 sys.path.insert(0, str(LIVE_DIR))
 
 load_direct_profile = importlib.import_module("env_profiles").load_direct_profile
-load_direct_profile(LIVE_DIR)
+load_direct_profile(LIVE_DIR, service="feed")
 
 run = importlib.import_module("feed.cli").run
 

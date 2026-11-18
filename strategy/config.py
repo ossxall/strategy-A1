@@ -56,7 +56,7 @@ class Config:
     #
     # Initial account equity.
     #
-    initial_capital: float = 10_000.0
+    initial_capital: float = 60.0
     #
     # Commission cost in basis points per trade.
     #
@@ -204,31 +204,6 @@ class Config:
     rsi_divergence_pivot: int = 5      # Bars on each side to confirm a pivot
     rsi_divergence_lookback: int = 60  # Lookback window for the previous pivot
     #
-    # --- EMA55 touch weakness exit (30m only) ------------------------------
-    # A touch is a candle range intersecting EMA55 ± tolerance. Exit triggers
-    # after 2 consecutive touches or 3 within 5 bars, without a breakout and
-    # with an open loss.
-    #
-    ema55_touch_exit_enabled: bool = True
-    ema55_touch_tolerance_pct: float = 0.1
-    ema55_touch_lookback_bars: int = 5
-    ema55_touch_min_touches: int = 3
-    ema55_touch_consecutive: int = 2
-    ema55_touch_breakout_buffer_pct: float = 0.1
-    ema55_touch_exit_loss_pct: float = 0.7        # LONG
-    ema55_touch_short_exit_loss_pct: float = 0.9  # SHORT, stricter threshold
-    #
-    # --- Partial exit on decreasing volume ---------------------------------
-    # Closes `volume_exit_pct` % of the position (once per position) when the
-    # average volume of the recent half of the last `volume_exit_bars` candles
-    # drops by at least `volume_exit_min_drop_pct` % versus the earlier half.
-    # E.g. with 10 bars and 20%, the mean of the last 5 must be <= 80% of the
-    # mean of the previous 5.
-    #
-    volume_exit_enabled: bool = False
-    volume_exit_bars: int = 20
-    volume_exit_pct: float = 20.0
-    volume_exit_min_drop_pct: float = 20.0
     #
     # Exit management aimed at reducing whipsaw loss streaks: when price reaches
     # `partial_tp_r` times the initial risk, profit is locked by closing
@@ -275,6 +250,7 @@ class Config:
     # After TP3, the remaining SHORT exits if price exceeds the slow EMA by
     # this %. 0 = touching it is enough.
     #
+    tp3_ema_slow_exit_enabled: bool = True
     tp3_ema_slow_penetration_pct: float = 1.75
     #
     # Whether to move the stop to breakeven after a partial take-profit.
@@ -462,22 +438,8 @@ class Config:
             0 < self.gaussian_trend_reversal_exit_pct <= 100
         ):
             raise ValueError("gaussian_trend_reversal_exit_pct must be in (0, 100].")
-        if (self.ema55_touch_tolerance_pct < 0 or self.ema55_touch_breakout_buffer_pct < 0
-                or self.ema55_touch_exit_loss_pct < 0
-                or self.ema55_touch_short_exit_loss_pct < 0):
-            raise ValueError("EMA55 tolerances and minimum loss cannot be negative.")
         if self.tp3_ema_slow_penetration_pct < 0:
             raise ValueError("tp3_ema_slow_penetration_pct cannot be negative.")
-        if min(self.ema55_touch_lookback_bars, self.ema55_touch_min_touches,
-               self.ema55_touch_consecutive) < 1:
-            raise ValueError("EMA55 touch window and counts must be >= 1.")
-        if self.volume_exit_enabled:
-            if self.volume_exit_bars < 2:
-                raise ValueError("volume_exit_bars must be >= 2.")
-            if not 0 < self.volume_exit_pct <= 100:
-                raise ValueError("volume_exit_pct must be in (0, 100].")
-            if not 0 <= self.volume_exit_min_drop_pct < 100:
-                raise ValueError("volume_exit_min_drop_pct must be in [0, 100).")
         if self.partial_tp_enabled:
             if self.partial_tp_r <= 0 or not 0 < self.partial_tp_pct <= 100:
                 raise ValueError("Invalid partial take-profit configuration.")

@@ -33,7 +33,6 @@ def _quiet_config(**overrides):
         "adx_exit_enabled": False,
         "ema_weakening_exit_enabled": False,
         "rsi_divergence_exit_enabled": False,
-        "ema55_touch_exit_enabled": False,
         "partial_tp_enabled": False,
         "partial_tp2_r": 0,
         "partial_tp2_pct": 0,
@@ -74,7 +73,6 @@ def test_losing_reversal_obeys_streak_trend_filter():
         entry_fee=0.0,
         stop_pct=0.0,
         risk_amount=0.0,
-        entry_bar_index=0,
     )
 
     trades, equity = engine.run()

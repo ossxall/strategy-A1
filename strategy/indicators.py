@@ -13,28 +13,6 @@ def ema(values: pd.Series, period: int) -> pd.Series:
     return values.ewm(alpha=2 / (period + 1), adjust=False).mean()
 
 
-def ema_band_touch_flags(
-    bars: pd.DataFrame, period: int = 55, tolerance_pct: float = 0.1
-) -> tuple[np.ndarray, np.ndarray]:
-    """Devuelve (EMA, toques) cuando el rango OHLC se acerca/cruza la banda EMA.
-
-    Una vela toca la EMA si su rango ``[low, high]`` intersecta la banda
-    ``EMA ± tolerance_pct``. Incluye tanto cruces como roces cercanos.
-    """
-    if period <= 0 or tolerance_pct < 0:
-        raise ValueError("Periodo EMA positivo y tolerancia no negativa requeridos.")
-    line = ema(bars["close"], period).to_numpy(float)
-    high = bars["high"].to_numpy(float)
-    low = bars["low"].to_numpy(float)
-    band = np.abs(line) * tolerance_pct / 100.0
-    touched = (
-        np.isfinite(line)
-        & (low <= line + band)
-        & (high >= line - band)
-    )
-    return line, touched
-
-
 def efficiency_ratio(values: pd.Series, period: int = 20) -> pd.Series:
     """Kaufman Efficiency Ratio: avance neto / recorrido total en ``period`` velas.
 
@@ -104,7 +82,7 @@ def gaussian_filter_trend(
     efficiency_smooth: int = 5,
     source: str = "close",
 ) -> pd.DataFrame:
-    """Gaussian Filter Trend line and direction, matching the Pine indicator.
+    """Gaussian Filter Trend line and direction, matching the  indicator.
 
     ``trend_dir`` is +1 when the stepped main line is bullish/rising, -1 when
     bearish/falling, and 0 before its first directional step. The efficiency
@@ -149,7 +127,7 @@ def gaussian_filter_trend(
             previous = stages[stage, i]
         filtered[i] = stages[poles - 1, i]
 
-    # Pine's ta.atr is an RMA seeded by the first full SMA window.
+    # ta.atr is an RMA seeded by the first full SMA window.
     high, low = bars["high"].to_numpy(float), bars["low"].to_numpy(float)
     tr = (
         true_range(high, low, bars["close"].to_numpy(dtype=float))
@@ -413,41 +391,6 @@ def spread_flags(flags: np.ndarray, window: int) -> np.ndarray:
     idx = np.arange(len(flags))
     start = np.maximum(idx - window + 1, 0)
     return (cumulative[idx + 1] - cumulative[start]) > 0
-
-
-def volume_decline_flags(
-    volume: np.ndarray | pd.Series, bars: int = 10, min_drop_pct: float = 20.0
-) -> np.ndarray:
-    """Detecta volumen decreciente en la ventana de las últimas ``bars`` velas.
-
-    Divide la ventana en dos mitades (una antigua y otra reciente) y compara sus
-    medias: hay señal cuando la media reciente cae al menos ``min_drop_pct`` %
-    respecto de la antigua. Con ``bars`` impar, la mitad antigua recibe la vela
-    extra. Cada posición se evalúa usando sólo velas hasta esa barra, por lo que
-    no hay lookahead. Devuelve un array booleano alineado con ``volume``.
-    """
-    values = np.asarray(volume, dtype=float)
-    flags = np.zeros(len(values), dtype=bool)
-    if bars < 2 or min_drop_pct < 0 or len(values) < bars:
-        return flags
-    recent_len = bars // 2
-    older_len = bars - recent_len
-    series = pd.Series(values)
-    recent = series.rolling(recent_len, min_periods=recent_len).mean().to_numpy(float)
-    older = (
-        series.shift(recent_len)
-        .rolling(older_len, min_periods=older_len)
-        .mean()
-        .to_numpy(float)
-    )
-    with np.errstate(divide="ignore", invalid="ignore"):
-        decline = 1.0 - recent / older
-    return (
-        np.isfinite(decline)
-        & (older > 0)
-        & (decline > 0)
-        & (decline * 100.0 + 1e-9 >= min_drop_pct)
-    )
 
 
 def _adx_exit_flags(

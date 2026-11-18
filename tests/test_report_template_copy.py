@@ -16,7 +16,6 @@ def test_write_outputs_copies_report_template_inside_strategy_without_moving_it(
     write_outputs(
         DEFAULT_OUTPUT_DIR,
         trades=pd.DataFrame(),
-        equity=pd.DataFrame(),
         curve=pd.DataFrame(),
         report={"metrics": {}, "config": {}},
     )

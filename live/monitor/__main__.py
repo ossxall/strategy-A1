@@ -9,7 +9,7 @@ try:
 except ImportError:
     from env_profiles import load_direct_profile, validate_prod_environment
 
-load_direct_profile(Path(__file__).resolve().parents[1])
+load_direct_profile(Path(__file__).resolve().parents[1], service="monitor")
 
 from .bot import run
 

@@ -8,6 +8,21 @@ def test_prod_validation_is_skipped_outside_prod(monkeypatch):
     validate_prod_environment("feed")
 
 
+def test_prod_bot_does_not_require_strategy_environment_variables(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "prod")
+    monkeypatch.setenv("BOT_SYMBOL", "BTCUSDT")
+    monkeypatch.setenv("BOT_INTERVAL", "1m")
+    monkeypatch.setenv("BOT_LIVE_ONLY", "true")
+    for name in (
+        "BOT_STRATEGY_TIMEFRAME",
+        "BOT_STRATEGY_RISK_PCT",
+        "BOT_STRATEGY_STOP_LOSS_PCT",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    validate_prod_environment("bot")
+
+
 def test_feed_reports_missing_prod_variables_with_red_x(monkeypatch, capsys):
     monkeypatch.setenv("APP_ENV", "prod")
     for name in ("FEED_SYMBOL", "FEED_INTERVAL", "FEED_START_DATE", "FEED_DB_PATH"):

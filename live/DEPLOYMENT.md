@@ -12,12 +12,14 @@ el build. `--remote-dir` es el directorio padre del checkout
 
 ## Preparación del VPS
 
-Instala Docker Engine y Docker Compose 1.29.2 en el VPS. En tu PC, crea
-`live/.env.prod` a partir de `.env.example` y completa la configuración y los
-secretos de producción, incluidos `LETSENCRYPT_EMAIL` y `MONITOR_*`.
-`build_remote.py` copia ese archivo al VPS con permisos privados. Compose pasa
-las variables `MONITOR_*` al servicio `monitor`, pero no sus credenciales de
-Binance.
+Instala Docker Engine y Docker Compose 1.29.2 en el VPS. `live/config.dev.yaml`
+contiene la configuración no secreta común; `live/config.prod.yaml` solo define
+los overrides de producción, que se aplican con `APP_ENV=prod`. En tu PC, crea
+`live/.env.prod` a partir de `.env.example` y completa solo secretos y
+datos privados, incluidos `LETSENCRYPT_EMAIL` y `MONITOR_*`. Para desarrollo,
+usa una copia independiente llamada `live/.env.dev`. Ambos archivos se ignoran
+en Git. `build_remote.py` copia solo `.env.prod` al VPS con permisos privados.
+Compose pasa cada secreto solo al servicio que lo necesita.
 Mantén `live/data/` en el host: contiene las bases SQLite persistentes y no debe
 eliminarse al actualizar el código.
 

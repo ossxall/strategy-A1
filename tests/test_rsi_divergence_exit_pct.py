@@ -48,7 +48,6 @@ def test_rsi_divergence_exit_closes_configured_percent():
         entry_fee=0.0,
         stop_pct=0.0,
         risk_amount=0.0,
-        entry_bar_index=0,
     )
 
     trades, _ = engine.run()

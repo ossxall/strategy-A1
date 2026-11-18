@@ -3,7 +3,7 @@
 # - Los servicios comparten ./data (live/data en el host), montado como /data.
 # - `feed` escribe feed.db (WAL); `bot` solo lee feed.db y escribe signal.db.
 # - `executor` consume signal.db y registra su estado por cuenta; trading está
-#   desactivado por defecto en `live/.env.dev`.
+#   desactivado por defecto en `live/config.dev.yaml`.
 # - Resiliencia: `restart: unless-stopped`, `init: true`, healthchecks reales
 #   y límites de log. El bot solo espera a que el contenedor del feed ARRANQUE
 #   (`service_started`), no a que esté sano: el paquete bot tolera que feed.db falte o
@@ -11,13 +11,14 @@
 #   el feed tarda o queda unhealthy.
 #
 # Uso (desde ./live):
+#   cp .env.example .env.dev  # rellena secretos de desarrollo solo en la copia
 #   APP_ENV=dev docker-compose --env-file .env.dev -f docker-compose.yml -f docker-compose.runtime.yml -p blacker-bot1 up -d --build
 #   APP_ENV=dev docker-compose --env-file .env.dev -f docker-compose.yml -f docker-compose.runtime.yml -p blacker-bot1 ps
 #   APP_ENV=dev docker-compose --env-file .env.dev -f docker-compose.yml -f docker-compose.runtime.yml -p blacker-bot1 logs -f bot
 #   docker-compose -f docker-compose.yml -p blacker-bot1 down  # sin perfiles ni secretos
 #
-# El override runtime añade los perfiles a `feed`, `bot` y `executor`.
-# `monitor` recibe únicamente las variables MONITOR_*.
+# config.dev.yaml es la base; APP_ENV=prod aplica config.prod.yaml encima.
+# Compose solo pasa los secretos privados requeridos por cada servicio.
 # Los datos persistentes se guardan en live/data y no se incluyen en la imagen.
 
 version: "2.4"
@@ -104,6 +105,11 @@ services:
       BOT_EXECUTOR_HEARTBEAT: /data/executor.heartbeat
       BOT_EXECUTOR_HTTP_HOST: 0.0.0.0
       BOT_EXECUTOR_HTTP_PORT: "8081"
+      BOT_BINANCE_ACCOUNT_ID: ${BOT_BINANCE_ACCOUNT_ID:-}
+      BOT_BINANCE_API_KEY: ${BOT_BINANCE_API_KEY:-}
+      BOT_BINANCE_API_SECRET: ${BOT_BINANCE_API_SECRET:-}
+      BOT_BINANCE_PRODUCTION_AUDIT_API_KEY: ${BOT_BINANCE_PRODUCTION_AUDIT_API_KEY:-}
+      BOT_BINANCE_PRODUCTION_AUDIT_API_SECRET: ${BOT_BINANCE_PRODUCTION_AUDIT_API_SECRET:-}
     healthcheck:
       test: ["CMD", "python", "healthcheck.py", "executor"]
       interval: 30s
@@ -120,7 +126,6 @@ services:
       WEBSSH_HOST: 0.0.0.0
       WEBSSH_PORT: "8888"
       # WebSSH sólo se publica detrás de Nginx + Authelia.
-      WEBSSH_POLICY: ${WEBSSH_POLICY:-warning}
       WEBSSH_PUBLIC_URL: https://lovelacers.com/webssh/
 
   sqlweb:
@@ -138,7 +143,7 @@ services:
       SQLWEB_PORT: "8082"
       SQLWEB_URL_PREFIX: /sqlweb
       # Sin password local por ahora: el acceso público queda detrás de Authelia.
-      SQLITE_WEB_PASSWORD: ""
+      SQLITE_WEB_PASSWORD: ${SQLITE_WEB_PASSWORD:-}
     read_only: true
     tmpfs:
       - /tmp

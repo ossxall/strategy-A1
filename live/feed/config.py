@@ -3,16 +3,6 @@
 import logging
 import os
 from datetime import datetime, timezone
-from pathlib import Path
-
-ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
-
-try:
-    from dotenv import load_dotenv
-
-    load_dotenv(ENV_FILE, override=False)
-except ImportError:
-    pass
 
 REST_BASE_URL = "https://fapi.binance.com"
 WS_BASE_URL = "wss://fstream.binance.com/market/ws"
