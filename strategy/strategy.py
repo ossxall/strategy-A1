@@ -37,7 +37,9 @@ Protecciones de riesgo (ver `Config`):
 * `streak_trend_only` (default True): tras una posición cerrada en pérdida,
   la siguiente entrada sólo se abre si la señal coincide con el sesgo de
   tendencia de `trend_timeframe` (vela superior ya cerrada, sin lookahead).
-  Corta las rachas de -1R del whipsaw sin recortar los cruces en tendencia.
+  Sus periodos se configuran con `trend_ema_fast` / `trend_ema_slow` (0 = usar
+  `ema_fast` / `ema_slow`). Corta las rachas de -1R del whipsaw sin recortar
+  los cruces en tendencia.
 * `monthly_loss_limit_pct` (default 5.0): si la equity cae más de X% por
   debajo de la equity al inicio del mes calendario se cierra la posición (opcional)
   y no se abren nuevas hasta el siguiente mes (o `monthly_loss_limit_days` días).
@@ -240,8 +242,9 @@ class EMACrossStrategy:
         if upper is None:
             return np.zeros(len(bars), int)
         bars_upper, upper_tf = upper
-        fast = ema(bars_upper.close, cfg.ema_fast).to_numpy(float)
-        slow = ema(bars_upper.close, cfg.ema_slow).to_numpy(float)
+        trend_fast, trend_slow = cfg.trend_ema_lengths
+        fast = ema(bars_upper.close, trend_fast).to_numpy(float)
+        slow = ema(bars_upper.close, trend_slow).to_numpy(float)
         direction = np.sign(fast - slow)
         aligned = align_closed_values(bars_upper.index, direction, bars.index, upper_tf, cfg.timeframe)
         return np.where(np.isfinite(aligned), np.sign(aligned), 0.0).astype(int)

@@ -56,7 +56,7 @@ class Config:
     #
     # Initial account equity.
     #
-    initial_capital: float = 60.0
+    initial_capital: float = 10_000.0
     #
     # Commission cost in basis points per trade.
     #
@@ -261,6 +261,12 @@ class Config:
     #
     trend_timeframe: str = "1D"
     #
+    # EMA lengths used to calculate the higher-timeframe trend bias. A value of
+    # 0 reuses the corresponding entry EMA length (`ema_fast` / `ema_slow`).
+    #
+    trend_ema_fast: int = 100
+    trend_ema_slow: int = 200
+    #
     # --- Monthly protection -----------------------------------------------
     # If equity falls more than `monthly_loss_limit_pct` % below the equity at
     # the start of the calendar month, new positions stop being opened (and, with
@@ -327,6 +333,17 @@ class Config:
         """
         fast = self.ema_weakening_fast if self.ema_weakening_fast > 0 else self.ema_fast
         slow = self.ema_weakening_slow if self.ema_weakening_slow > 0 else self.ema_slow
+        return fast, slow
+
+    @property
+    def trend_ema_lengths(self) -> tuple[int, int]:
+        """Lengths (fast, slow) used for the trend-timeframe bias.
+
+        Uses `trend_ema_fast`/`trend_ema_slow` when defined (> 0);
+        otherwise falls back to the entry crossover EMAs.
+        """
+        fast = self.trend_ema_fast if self.trend_ema_fast > 0 else self.ema_fast
+        slow = self.trend_ema_slow if self.trend_ema_slow > 0 else self.ema_slow
         return fast, slow
 
     @property
@@ -477,6 +494,15 @@ class Config:
             raise ValueError("LONG, SHORT or both must be enabled.")
         if self.streak_trend_only and pd.Timedelta(self.trend_timeframe) <= pd.Timedelta(0):
             raise ValueError("trend_timeframe must be positive.")
+        if self.streak_trend_only:
+            if min(self.trend_ema_fast, self.trend_ema_slow) < 0:
+                raise ValueError("trend_ema_fast/trend_ema_slow cannot be negative.")
+            trend_fast, trend_slow = self.trend_ema_lengths
+            if trend_fast >= trend_slow:
+                raise ValueError(
+                    "Requires trend_ema_fast < trend_ema_slow "
+                    "(or 0 to use the corresponding entry EMA)."
+                )
         if self.monthly_loss_limit_pct < 0:
             raise ValueError("monthly_loss_limit_pct cannot be negative.")
         if self.monthly_loss_limit_days < 0:
