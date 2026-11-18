@@ -245,22 +245,22 @@ class Config:
     # position. Partial 2 is intended to be at a larger distance than TP1.
     #
     partial_tp2_r: float = 1.5
-    partial_tp2_pct: float = 10.0
+    partial_tp2_pct: float = 5.0
     #
     # Third partial take-profit, at a larger distance than TP2.
     #
     partial_tp3_r: float = 2.0
-    partial_tp3_pct: float = 10.0
+    partial_tp3_pct: float = 5.0
     #
     # Fourth partial take-profit, at a larger distance than TP3.
     #
     partial_tp4_r: float = 2.5
-    partial_tp4_pct: float = 10.0
+    partial_tp4_pct: float = 5.0
     #
     # Fifth partial take-profit, at a larger distance than TP4.
     #
     partial_tp5_r: float = 3.0
-    partial_tp5_pct: float = 10.0
+    partial_tp5_pct: float = 5.0
     #
     # Sixth partial take-profit, at a larger distance than TP5.
     #
