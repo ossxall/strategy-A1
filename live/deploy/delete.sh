@@ -9,3 +9,4 @@ docker rm -f $(docker ps -aq) 2>/dev/null; docker system prune -a --volumes -f; 
 cd ../..
 
 rm -rf strategy-A1
+rm -rf nginx

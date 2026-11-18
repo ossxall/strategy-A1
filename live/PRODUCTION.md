@@ -5,12 +5,12 @@
 - Ejecuta primero el flujo completo en testnet: entrada, stop protector, salida
   parcial/total, reinicio durante una orden y reconciliación. Las pruebas offline
   no sustituyen las pruebas de red ni los fills reales.
-- Mainnet exige `BOT_BINANCE_ENVIRONMENT=production`,
-  `BOT_BINANCE_TRADING_ENABLED=true` y
-  `BOT_BINANCE_ALLOW_LIVE_TRADING=true` en `config.prod.yaml`. **La configuración
-  actual tiene los tres valores activos**, así que el despliegue puede enviar
-  órdenes reales si `.env.prod` contiene credenciales válidas. Desactívalos en
-  `config.prod.yaml` si no quieres operar. Usa claves sin permisos de retiro,
+- `config.prod.yaml` deja `BOT_MODE=live`,
+  `BOT_BINANCE_ENVIRONMENT=production`, `BOT_BINANCE_TRADING_ENABLED=true` y
+  `BOT_BINANCE_ALLOW_LIVE_TRADING=true`. **Con credenciales mainnet válidas en
+  `.env.prod`, el executor puede enviar órdenes reales.** Antes del despliegue,
+  completa las pruebas en testnet y verifica símbolo, riesgo, saldo, modo
+  One-way, stops y límites del exchange. Usa claves sin permisos de retiro,
   restringidas por IP, y guarda `.env.prod` fuera del control de versiones con
   permisos de solo lectura para el usuario del servicio.
 - Revisa símbolo, timeframe y riesgo de la estrategia; configura el leverage
