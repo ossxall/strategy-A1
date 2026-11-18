@@ -38,7 +38,7 @@ Protecciones de riesgo (ver `Config`):
   Gaussian Filter Trend esté alcista para LONG y bajista para SHORT.
 * `gaussian_trend_reversal_exit_enabled` (default True): cierra parcialmente
   cuando la línea Gaussian gira contra la posición (`gaussian_trend_reversal_exit_pct`,
-  50 % por defecto).
+  25 % por defecto).
 * `streak_trend_only` (default True): tras una posición cerrada en pérdida,
   la siguiente entrada sólo se abre si la señal coincide con el sesgo de
   tendencia de `trend_timeframe` (vela superior ya cerrada, sin lookahead).
