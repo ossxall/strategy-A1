@@ -1,0 +1,51 @@
+{
+  "seed": 42,
+  "split": {
+    "train": 0.6,
+    "validation": 0.2,
+    "test": 0.2
+  },
+  "embargo_bars": "auto",
+  "walk_forward": {
+    "enabled": true,
+    "folds": 5
+  },
+  "initial_capital": 10000,
+  "checkpoint_every": 500,
+  "hard_filters": {
+    "min_trades_train": 100,
+    "min_trades_per_fold": 20,
+    "max_drawdown_pct": 25,
+    "min_profit_factor": 1.2,
+    "min_expectancy_net": 0,
+    "max_top5_trades_share": 0.35,
+    "min_profitable_subperiods": 0.6
+  },
+  "robustness": {
+    "neighbor_perturbation_pct": [10, 20],
+    "min_neighbor_median_ratio": 0.7,
+    "cost_stress_multiplier": 2.0,
+    "monte_carlo_runs": 5000
+  },
+  "overfitting_tests": {
+    "min_dsr": 0.95,
+    "max_pbo": 0.35,
+    "permutation_test_alpha": 0.05
+  },
+  "oos_acceptance": {
+    "min_trades": 30,
+    "min_profit_factor": 1.1,
+    "min_sharpe_vs_validation": 0.5,
+    "min_sharpe_absolute": 0.3,
+    "max_drawdown_multiple": 1.25
+  },
+  "finalists_frozen": 3,
+  "stop": {
+    "max_cycles": 12,
+    "no_improvement_cycles": 5,
+    "min_improvement_pct": 2,
+    "max_runtime_hours": 6,
+    "max_backtests": 200000,
+    "max_ram_gb": 8
+  }
+}
