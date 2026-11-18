@@ -93,6 +93,28 @@ def test_grid_cannot_permute_capital_costs_or_timeframe(tmp_path: Path):
         agent.load_grid(grid)
 
 
+def test_default_grid_contains_exactly_the_ten_valid_trend_ema_pairs():
+    grid = agent.load_grid(agent.DEFAULT_GRID)
+    candidates = agent.candidate_grid(grid)
+
+    assert candidates == [
+        {"trend_ema_fast": fast, "trend_ema_slow": slow}
+        for fast, slow in (
+            (9, 20),
+            (9, 50),
+            (9, 100),
+            (9, 200),
+            (20, 50),
+            (20, 100),
+            (20, 200),
+            (50, 100),
+            (50, 200),
+            (100, 200),
+        )
+    ]
+    assert len(candidates) == 10
+
+
 def test_results_sandbox_rejects_runs_symlink_to_external_directory(tmp_path, monkeypatch):
     outside = tmp_path / "external"
     outside.mkdir()

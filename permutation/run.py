@@ -316,11 +316,22 @@ def segment_data(
 
 
 def candidate_grid(grid: dict[str, list[Any]]) -> list[dict[str, Any]]:
+    """Expand the Cartesian grid and discard combinations rejected by Config."""
     names = list(grid)
-    return [
-        dict(zip(names, combination))
-        for combination in itertools.product(*(grid[name] for name in names))
-    ] if names else [{}]
+    combinations = (
+        (dict(zip(names, combination))
+         for combination in itertools.product(*(grid[name] for name in names)))
+        if names
+        else iter(({},))
+    )
+    valid = []
+    for params in combinations:
+        try:
+            Config(**params)
+        except (TypeError, ValueError):
+            continue
+        valid.append(params)
+    return valid
 
 
 def parameter_inventory(grid: dict[str, list[Any]], base: Config) -> list[dict[str, Any]]:

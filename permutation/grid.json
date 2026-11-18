@@ -1,7 +1,4 @@
 {
-  "ema_fast": [34, 55, 89],
-  "ema_slow": [144, 200, 233],
-  "confirm_bars": [0, 2],
-  "risk_pct": [0.005, 0.01],
-  "stop_loss_pct": [0.005, 0.01]
+  "trend_ema_fast": [9, 20, 50, 100],
+  "trend_ema_slow": [20, 50, 100, 200]
 }

@@ -21,10 +21,10 @@ def _bars(periods=4 * 48, freq="30min"):
     )
 
 
-def test_trend_ema_lengths_default_to_entry_ema_periods():
+def test_trend_ema_lengths_use_configured_defaults():
     config = Config()
 
-    assert config.trend_ema_lengths == (config.ema_fast, config.ema_slow)
+    assert config.trend_ema_lengths == (100, 200)
 
 
 def test_trend_bias_uses_configured_ema_periods(monkeypatch):

@@ -91,8 +91,10 @@ resultados calculados se guardan en el run.
 ## Alcance del barrido
 
 `grid.json` define las listas finitas de candidatos que se combinan mediante
-producto cartesiano. Los parámetros omitidos conservan el valor de `Config()`.
-El ejemplo actual tiene 72 combinaciones.
+producto cartesiano. Las combinaciones que `Config` rechaza se descartan antes
+de ejecutar el barrido. Los parámetros omitidos conservan el valor de `Config()`.
+El grid actual prueba los 10 pares válidos de EMA de tendencia entre 9, 20, 50,
+100 y 200; no cambia los valores por defecto de `Config`.
 
 No existe un conjunto computable de «todos los valores posibles» de la
 configuración: varios campos son floats o timeframes y su dominio es infinito
@@ -104,9 +106,10 @@ combinaciones incompatibles (por ejemplo, `ema_fast >= ema_slow`).
 
 `grid.json` define las listas finitas de candidatos del producto cartesiano; los
 parámetros omitidos conservan los valores actuales de `Config()`. El grid por
-defecto tiene 72 configuraciones. No se pueden permutar capital, costes ni
-temporalidad: quedan fijados en el plan aprobado. `Config.__post_init__` valida
-restricciones como `ema_fast < ema_slow`.
+defecto genera 16 combinaciones posibles y conserva 10 tras descartar las que
+violan `trend_ema_fast < trend_ema_slow`. No se pueden permutar capital, costes
+ni temporalidad: quedan fijados en el plan aprobado. `Config.__post_init__`
+valida las restricciones.
 
 Cada ejecución escribe en `permutation/runs/<run-id>/`: `experiments.db`,
 `checkpoints/`, `logs/`, `reports/todos_los_experimentos.csv`,
