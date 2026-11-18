@@ -88,11 +88,12 @@ contrato quedan rechazados y no generan órdenes.
 
 ## Executor USDⓈ-M Futures
 
-Compose ejecuta `python -m bot.execution`, pero **no envía órdenes por defecto**:
-`BOT_BINANCE_TRADING_ENABLED=false`. Usa el SDK oficial
-`binance-sdk-derivatives-trading-usds-futures`; el entorno predeterminado es
-testnet. Producción requiere `BOT_BINANCE_ENVIRONMENT=production`,
-`BOT_BINANCE_TRADING_ENABLED=true` y `BOT_BINANCE_ALLOW_LIVE_TRADING=true`.
+Compose ejecuta `python -m bot.execution`. El perfil dev usa testnet y mantiene
+`BOT_BINANCE_TRADING_ENABLED=false`; `config.prod.yaml` selecciona production y
+habilita explícitamente `BOT_BINANCE_TRADING_ENABLED=true` y
+`BOT_BINANCE_ALLOW_LIVE_TRADING=true`, por lo que puede enviar órdenes reales
+con credenciales mainnet válidas. Usa el SDK oficial
+`binance-sdk-derivatives-trading-usds-futures`.
 El executor es el único componente que configura y aplica leverage en Binance:
 `BOT_BINANCE_SET_LEVERAGE=true` fija el tope definido por
 `BOT_BINANCE_MAX_LEVERAGE` (10x por defecto). Si se desactiva, usa el leverage
