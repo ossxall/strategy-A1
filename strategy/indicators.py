@@ -104,7 +104,7 @@ def gaussian_filter_trend(
     efficiency_smooth: int = 5,
     source: str = "close",
 ) -> pd.DataFrame:
-    """Gaussian Filter Trend line and direction, matching the Pine indicator.
+    """Gaussian Filter Trend line and direction, matching the  indicator.
 
     ``trend_dir`` is +1 when the stepped main line is bullish/rising, -1 when
     bearish/falling, and 0 before its first directional step. The efficiency
@@ -149,7 +149,7 @@ def gaussian_filter_trend(
             previous = stages[stage, i]
         filtered[i] = stages[poles - 1, i]
 
-    # Pine's ta.atr is an RMA seeded by the first full SMA window.
+    # ta.atr is an RMA seeded by the first full SMA window.
     high, low = bars["high"].to_numpy(float), bars["low"].to_numpy(float)
     tr = (
         true_range(high, low, bars["close"].to_numpy(dtype=float))
