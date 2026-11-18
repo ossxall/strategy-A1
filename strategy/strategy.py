@@ -73,7 +73,7 @@ API para bots:
     # En ejecución real, actuar en la siguiente apertura/iteración.
 
 Dependencias:
-    pip install "pandas>=2" pyarrow numpy matplotlib TA-Lib
+    pip install pandas==3.1.1 pyarrow==26.0.1 numpy==2.5.5 matplotlib==3.11.2 TA-Lib==0.8.3
 """
 from __future__ import annotations
 from dataclasses import asdict

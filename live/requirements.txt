@@ -1,15 +1,14 @@
 # Dependencias comunes de los servicios live: colector, bot, monitor y estrategia.
-# Mínimos compatibles; los tests se hicieron con pandas 3.0.3 / numpy 2.5.1.
-pandas>=2.2
-numpy>=1.26
-TA-Lib>=0.4.32
-requests>=2.31
-websocket-client>=1.7
-python-dotenv>=1.0
-plotly>=5.18
+pandas==3.1.1
+numpy==2.5.5
+TA-Lib==0.8.3
+requests==2.34.2
+websocket-client==1.9.2
+python-dotenv==1.2.4
+plotly==7.1.0
 binance-sdk-derivatives-trading-usds-futures==18.3.1
-aiogram>=3.13,<4
-PyYAML>=6.0
+aiogram==3.32.0
+PyYAML==6.0.3
 glances[web]==4.5.9
 webssh==1.6.3
-sqlite-web>=0.8.2
+sqlite-web==0.8.2

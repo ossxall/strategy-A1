@@ -1,5 +1,5 @@
 # El contexto de build es la raíz del repositorio para incluir live/ y strategy/.
-FROM python:3.12-slim
+FROM python:3.12.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
