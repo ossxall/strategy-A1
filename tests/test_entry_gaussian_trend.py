@@ -5,6 +5,7 @@ import pytest
 import strategy.strategy as strategy_module
 from strategy.config import Config
 from strategy.indicators import gaussian_filter_trend
+from strategy.models import Position
 from strategy.strategy import Backtester, EMACrossStrategy
 from live.bot.config import build_strategy_config
 
@@ -149,6 +150,118 @@ def test_backtester_applies_gaussian_filter_to_custom_entry_signals(monkeypatch)
     assert trades.empty
 
 
+@pytest.mark.parametrize(
+    ("side", "directions", "reason"),
+    [
+        (1, [1, -1, -1, 1], "GAUSSIAN_TREND_BEAR_40%"),
+        (-1, [-1, 1, 1, -1], "GAUSSIAN_TREND_BULL_40%"),
+    ],
+)
+def test_gaussian_reversal_partially_closes_position_once_per_flip(
+    side, directions, reason
+):
+    bars = make_bars(4)
+    bars["open"] = [100.0, 101.0, 102.0, 103.0]
+    signals = pd.DataFrame(
+        {
+            "valid": True,
+            "target": 0,
+            "trend_bias": 0,
+            "entry_gaussian_trend_dir": directions,
+        },
+        index=bars.index,
+    )
+    engine = Backtester(
+        bars,
+        make_config(gaussian_trend_reversal_exit_pct=40.0),
+        signals=signals,
+    )
+    engine.position = Position(
+        position_id=1,
+        side=side,
+        quantity=1.0,
+        initial_quantity=1.0,
+        entry_price=100.0,
+        entry_time=bars.index[0],
+        entry_fee=0.0,
+        stop_pct=0.0,
+        risk_amount=0.0,
+    )
+
+    trades, _ = engine.run()
+
+    assert trades.reason.tolist() == [reason]
+    assert trades.quantity.tolist() == pytest.approx([0.4])
+    assert trades.exit_time.iloc[0] == bars.index[2]
+    assert engine.position is not None
+    assert engine.position.quantity == pytest.approx(0.6)
+
+
+def test_gaussian_reversal_exit_calculates_trend_when_entry_filter_is_disabled(
+    monkeypatch,
+):
+    configure_crosses(monkeypatch)
+    directions = np.array([0, 1, 1, -1])
+    monkeypatch.setattr(
+        strategy_module,
+        "gaussian_filter_trend",
+        lambda bars, *args: pd.DataFrame(
+            {"trend_line": np.arange(len(bars)), "trend_dir": directions},
+            index=bars.index,
+        ),
+    )
+
+    signals = EMACrossStrategy(
+        make_config(entry_gaussian_trend_enabled=False)
+    ).generate_signals(make_bars())
+
+    assert signals.entry_gaussian_trend_dir.tolist() == directions.tolist()
+    assert signals.target.tolist() == [0, 1, 0, -1]
+
+
+def test_gaussian_reversal_exit_does_not_trigger_from_neutral_warmup():
+    bars = make_bars(3)
+    signals = pd.DataFrame(
+        {
+            "valid": True,
+            "target": 0,
+            "trend_bias": 0,
+            "entry_gaussian_trend_dir": [0, -1, -1],
+        },
+        index=bars.index,
+    )
+    engine = Backtester(bars, make_config(), signals=signals)
+    engine.position = Position(
+        position_id=1,
+        side=1,
+        quantity=1.0,
+        initial_quantity=1.0,
+        entry_price=100.0,
+        entry_time=bars.index[0],
+        entry_fee=0.0,
+        stop_pct=0.0,
+        risk_amount=0.0,
+    )
+
+    trades, _ = engine.run()
+
+    assert trades.empty
+    assert engine.position is not None
+
+
+def test_backtester_accepts_empty_bars_with_gaussian_exit_enabled():
+    bars = make_bars().iloc[:0]
+    signals = pd.DataFrame(
+        {"valid": pd.Series(dtype=bool), "target": pd.Series(dtype=int)},
+        index=bars.index,
+    )
+
+    trades, equity = Backtester(bars, make_config(), signals=signals).run()
+
+    assert trades.empty
+    assert equity.empty
+
+
 def test_gaussian_filter_config_defaults_and_validation():
     config = Config()
 
@@ -158,20 +271,28 @@ def test_gaussian_filter_config_defaults_and_validation():
     assert config.entry_gaussian_poles == 4
     assert config.entry_gaussian_atr_length == 14
     assert config.entry_gaussian_adaptive_width
+    assert config.gaussian_trend_reversal_exit_enabled
+    assert config.gaussian_trend_reversal_exit_pct == 50.0
 
     with pytest.raises(ValueError, match="Gaussian"):
         Config(entry_gaussian_source="volume")
     with pytest.raises(ValueError, match="Gaussian"):
         Config(entry_gaussian_poles=5)
+    with pytest.raises(ValueError, match="gaussian_trend_reversal_exit_pct"):
+        Config(gaussian_trend_reversal_exit_pct=0)
 
 
 def test_live_config_reads_gaussian_filter_settings_from_environment(monkeypatch):
     monkeypatch.setenv("BOT_STRATEGY_ENTRY_GAUSSIAN_TREND", "false")
     monkeypatch.setenv("BOT_STRATEGY_ENTRY_GAUSSIAN_SOURCE", "hl2")
     monkeypatch.setenv("BOT_STRATEGY_ENTRY_GAUSSIAN_LENGTH", "8")
+    monkeypatch.setenv("BOT_STRATEGY_GAUSSIAN_TREND_REVERSAL_EXIT", "false")
+    monkeypatch.setenv("BOT_STRATEGY_GAUSSIAN_TREND_REVERSAL_EXIT_PCT", "35")
 
     config = build_strategy_config()
 
     assert not config.entry_gaussian_trend_enabled
     assert config.entry_gaussian_source == "hl2"
     assert config.entry_gaussian_length == 8
+    assert not config.gaussian_trend_reversal_exit_enabled
+    assert config.gaussian_trend_reversal_exit_pct == 35.0

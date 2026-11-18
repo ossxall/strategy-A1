@@ -179,6 +179,12 @@ _CONFIG_ENV = {
     "entry_gaussian_efficiency_smooth": (
         "STRATEGY_ENTRY_GAUSSIAN_EFFICIENCY_SMOOTH", env_int
     ),
+    "gaussian_trend_reversal_exit_enabled": (
+        "STRATEGY_GAUSSIAN_TREND_REVERSAL_EXIT", env_bool
+    ),
+    "gaussian_trend_reversal_exit_pct": (
+        "STRATEGY_GAUSSIAN_TREND_REVERSAL_EXIT_PCT", env_float
+    ),
     "entry_mfi_risk_scaling_enabled": ("STRATEGY_ENTRY_MFI_RISK_SCALING", env_bool),
     "entry_mfi_len": ("STRATEGY_ENTRY_MFI_LEN", env_int),
     "entry_mfi_risk_base": ("STRATEGY_ENTRY_MFI_RISK_BASE", env_float),
