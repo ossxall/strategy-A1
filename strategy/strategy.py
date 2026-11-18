@@ -922,7 +922,13 @@ class Backtester:
     def _tp3_slow_ema_touch_exit(self, i: int) -> bool:
         """Cierra el SHORT restante si supera la EMA lenta tras TP3."""
         pos = self.position
-        if pos is None or pos.side != -1 or not pos.partial3_done or i >= len(self.ema_slow_line):
+        if (
+            not self.cfg.tp3_ema_slow_exit_enabled
+            or pos is None
+            or pos.side != -1
+            or not pos.partial3_done
+            or i >= len(self.ema_slow_line)
+        ):
             return False
         line = self.ema_slow_line[i]
         if not np.isfinite(line):

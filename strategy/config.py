@@ -275,6 +275,7 @@ class Config:
     # After TP3, the remaining SHORT exits if price exceeds the slow EMA by
     # this %. 0 = touching it is enough.
     #
+    tp3_ema_slow_exit_enabled: bool = True
     tp3_ema_slow_penetration_pct: float = 1.75
     #
     # Whether to move the stop to breakeven after a partial take-profit.

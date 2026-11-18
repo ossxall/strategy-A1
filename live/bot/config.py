@@ -217,6 +217,7 @@ _CONFIG_ENV = {
     "partial_tp6_pct": ("STRATEGY_PARTIAL_TP6_PCT", env_float),
     "partial_tp7_r": ("STRATEGY_PARTIAL_TP7_R", env_float),
     "partial_tp7_pct": ("STRATEGY_PARTIAL_TP7_PCT", env_float),
+    "tp3_ema_slow_exit_enabled": ("STRATEGY_TP3_EMA_SLOW_EXIT", env_bool),
     "tp3_ema_slow_penetration_pct": (
         "STRATEGY_TP3_EMA_SLOW_PENETRATION_PCT", env_float
     ),

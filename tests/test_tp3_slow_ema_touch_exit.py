@@ -7,7 +7,7 @@ from strategy.strategy import Backtester
 
 
 def make_engine(*, touches_ema_before_tp3=False, slow_touch_high=82.0,
-                penetration_pct=0.1):
+                penetration_pct=0.1, slow_ema_exit_enabled=True):
     index = pd.date_range("2026-01-01", periods=3, freq="30min", tz="UTC")
     if touches_ema_before_tp3:
         bars = pd.DataFrame(
@@ -48,6 +48,7 @@ def make_engine(*, touches_ema_before_tp3=False, slow_touch_high=82.0,
         partial_tp3_pct=10.0,
         partial_tp4_r=0.0,
         partial_tp4_pct=0.0,
+        tp3_ema_slow_exit_enabled=slow_ema_exit_enabled,
         tp3_ema_slow_penetration_pct=penetration_pct,
         entry_adx_enabled=False,
         entry_atr_enabled=False,
@@ -111,6 +112,15 @@ def test_custom_penetration_percentage_is_respected():
 
     assert engine.bars.high.iloc[2] > engine.ema_slow_line[2] * 1.001
     assert engine.bars.high.iloc[2] < engine.ema_slow_line[2] * 1.005
+    assert "EMA_SLOW_TOUCH_SHORT_AFTER_TP3" not in trades.reason.tolist()
+    assert engine.position is not None
+
+
+def test_slow_ema_exit_can_be_disabled():
+    engine = make_engine(slow_ema_exit_enabled=False)
+
+    trades, _ = engine.run()
+
     assert "EMA_SLOW_TOUCH_SHORT_AFTER_TP3" not in trades.reason.tolist()
     assert engine.position is not None
 
