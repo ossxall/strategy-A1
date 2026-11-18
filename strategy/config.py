@@ -238,7 +238,7 @@ class Config:
     #
     partial_tp_enabled: bool = True
     partial_tp_r: float = 1.0
-    partial_tp_pct: float = 10.0
+    partial_tp_pct: float = 5.0
     #
     # Second partial take-profit (optional). If enabled (>0), it triggers at
     # partial_tp2_r (R-multiple of initial risk) closing partial_tp2_pct of the
