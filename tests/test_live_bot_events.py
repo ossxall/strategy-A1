@@ -62,8 +62,6 @@ def make_config(**overrides):
         "adx_exit_enabled": False,
         "ema_weakening_exit_enabled": False,
         "rsi_divergence_exit_enabled": False,
-        "ema55_touch_exit_enabled": False,
-        "volume_exit_enabled": False,
         "partial_tp_enabled": False,
         "stop_loss_pct": 0.1,
         "monthly_loss_limit_pct": 0,
@@ -114,7 +112,7 @@ def test_backtest_mode_generates_report_without_publishing_signals(
 
     class Engine:
         def __init__(self, *args):
-            self.volume_exit = np.array([False, False, False])
+            pass
 
         def run(self):
             return pd.DataFrame(), pd.DataFrame(
@@ -153,7 +151,6 @@ def test_backtest_mode_generates_report_without_publishing_signals(
     assert bot._backtest_complete is True
     assert len(calls) == 1
     assert calls[0][1]["output_dir"] == tmp_path / "backtest_out"
-    assert calls[0][1]["volume_exit"].tolist() == [False, False, False]
     assert calls[0][0][2] is bot.cfg
     assert calls[0][0][4] == "BTCUSDT 1m feed.db"
 

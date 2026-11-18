@@ -58,7 +58,6 @@ def make_engine(*, touches_ema_before_tp3=False, slow_touch_high=82.0,
         adx_exit_enabled=False,
         ema_weakening_exit_enabled=False,
         rsi_divergence_exit_enabled=False,
-        ema55_touch_exit_enabled=False,
         streak_trend_only=False,
         monthly_loss_limit_pct=0,
         force_close_at_end=False,
@@ -74,7 +73,6 @@ def make_engine(*, touches_ema_before_tp3=False, slow_touch_high=82.0,
         entry_fee=0.0,
         stop_pct=0.1,
         risk_amount=10.0,
-        entry_bar_index=0,
     )
     return engine
 

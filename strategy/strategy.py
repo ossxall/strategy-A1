@@ -21,11 +21,6 @@ con máximos más altos, RSI con máximos más bajos) cierra un LONG y la alcist
 pivote de precio se confirma tras `rsi_divergence_pivot` velas y se compara con
 el pivote anterior del mismo tipo en `rsi_divergence_lookback` velas.
 
-Además, una **caída de volumen en las últimas `volume_exit_bars` velas** cierra
-`volume_exit_pct` % de la posición (una vez por posición): se compara la media
-de volumen de la mitad reciente del rango con la de la mitad anterior y se exige
-una caída mínima de `volume_exit_min_drop_pct` % (`volume_exit_enabled`).
-
 Archivo único con API reutilizable para backtesting y bots.
 
 Protecciones de riesgo (ver `Config`):
@@ -66,8 +61,8 @@ Uso:
     python run_backtest.py
 
 Los parámetros de la estrategia se toman de los defaults de
-`strategy.config.Config`; los de ejecución (dataset, salida, gráfico y logs)
-están hardcodeados como constantes al final de este módulo.
+`strategy.config.Config`; los de ejecución (dataset, salida y gráfico) están
+hardcodeados como constantes al final de este módulo.
 
 API para bots:
     cfg = Config()
@@ -94,13 +89,11 @@ from strategy.models import (
     RSI_DIVERGENCE_BEAR_REASON,
     GAUSSIAN_TREND_BULL_REASON,
     GAUSSIAN_TREND_BEAR_REASON,
-    VOLUME_DECLINE_REASON,
     DEFAULT_OUTPUT_DIR,
     empty_trades,
 )
 from strategy.indicators import (
     ema,
-    ema_band_touch_flags,
     efficiency_ratio,
     adx,
     atr_volatility_filter,
@@ -112,7 +105,6 @@ from strategy.indicators import (
     build_rsi_divergence_flags,
     build_rsi_divergence_exit,
     spread_flags,
-    volume_decline_flags,
 )
 from strategy.utils import (
     load_parquet,
@@ -490,8 +482,8 @@ class Backtester:
 
     def __init__(self, bars: pd.DataFrame, config: Config, signals: Optional[pd.DataFrame] = None,
                  adx_exit: Optional[np.ndarray] = None, weak_exit: Optional[np.ndarray] = None,
-                 rsi_div_exit: Optional[np.ndarray] = None, verbose: bool = False):
-        self.bars, self.cfg, self.verbose = bars, config, verbose
+                 rsi_div_exit: Optional[np.ndarray] = None):
+        self.bars, self.cfg = bars, config
         self.signals = signals if signals is not None else EMACrossStrategy(config).generate_signals(bars)
         if config.entry_atr_enabled:
             if "atr_filter_allowed" in self.signals:
@@ -583,26 +575,6 @@ class Backtester:
         self.weak_exit = np.asarray(weak_exit, bool) if weak_exit is not None else np.zeros(len(bars), bool)
         # Divergencia RSI: +1 alcista (cierra SHORT), -1 bajista (cierra LONG), 0 sin señal.
         self.rsi_div = np.asarray(rsi_div_exit, int) if rsi_div_exit is not None else np.zeros(len(bars), int)
-        self.volume_exit = (
-            volume_decline_flags(
-                bars["volume"].to_numpy(float),
-                config.volume_exit_bars,
-                config.volume_exit_min_drop_pct,
-            )
-            if config.volume_exit_enabled and "volume" in bars
-            else np.zeros(len(bars), dtype=bool)
-        )
-        self.ema55_touch_exit_active = (
-            config.ema55_touch_exit_enabled
-            and pd.Timedelta(config.timeframe) == pd.Timedelta("30min")
-        )
-        if self.ema55_touch_exit_active:
-            self.ema55_line, self.ema55_touches = ema_band_touch_flags(
-                bars, 55, config.ema55_touch_tolerance_pct
-            )
-        else:
-            self.ema55_line = np.full(len(bars), np.nan, dtype=float)
-            self.ema55_touches = np.zeros(len(bars), dtype=bool)
         self.ema_slow_line = (
             self.signals["ema_slow"].to_numpy(float)
             if "ema_slow" in self.signals
@@ -712,7 +684,6 @@ class Backtester:
             partial5_done=False,
             partial6_done=False,
             partial7_done=False,
-            entry_bar_index=self._bar_index,
         )
         self.opened.append({
             "position_id": self.position_id, "time": ts, "price": price, "side": side,
@@ -874,51 +845,6 @@ class Backtester:
             return RSI_DIVERGENCE_BULL_REASON
         return None
 
-    def _ema55_touch_weakness_exit_reason(self, i: int) -> Optional[str]:
-        """Cierra LONG tras toques repetidos a EMA55 sin ruptura confirmada.
-
-        El toque se cuenta cuando el rango de la vela roza/cruza EMA55 ± banda.
-        Se exige una secuencia de toques o varios dentro de la ventana y una
-        pérdida abierta mínima. Para LONG, el cierre no debe confirmar ruptura
-        arriba; para SHORT, no debe confirmar ruptura abajo. Sólo corre en 30m.
-        """
-        pos = self.position
-        cfg = self.cfg
-        if (pos is None or pos.side not in (1, -1) or not self.ema55_touch_exit_active
-                or i >= len(self.ema55_touches)):
-            return None
-        line = self.ema55_line[i]
-        if not np.isfinite(line):
-            return None
-        open_pnl_pct = (self.c[i] / pos.entry_price - 1.0) * pos.side * 100.0
-        loss_threshold = cfg.ema55_touch_exit_loss_pct if pos.side == 1 \
-            else cfg.ema55_touch_short_exit_loss_pct
-        if open_pnl_pct > -loss_threshold:
-            return None
-
-        start = max(0, i - cfg.ema55_touch_lookback_bars + 1, pos.entry_bar_index)
-        window = self.ema55_touches[start : i + 1]
-        repeated = int(window.sum()) >= cfg.ema55_touch_min_touches
-        consecutive = 0
-        for touched in self.ema55_touches[i : start - 1 if start else None : -1]:
-            if not touched:
-                break
-            consecutive += 1
-        if not (repeated or consecutive >= cfg.ema55_touch_consecutive):
-            return None
-
-        failed_break_level = line * (1.0 + cfg.ema55_touch_breakout_buffer_pct / 100.0)
-        if pos.side == 1:
-            if self.c[i] > failed_break_level:
-                return None
-            return "EMA55_REPEATED_TOUCH_WEAKNESS"
-        failed_downside_break_level = line * (
-            1.0 - cfg.ema55_touch_breakout_buffer_pct / 100.0
-        )
-        if self.c[i] < failed_downside_break_level:
-            return None
-        return "EMA55_REPEATED_TOUCH_WEAKNESS_SHORT"
-
     def _tp3_slow_ema_touch_exit(self, i: int) -> bool:
         """Cierra el SHORT restante si supera la EMA lenta tras TP3."""
         pos = self.position
@@ -1040,7 +966,6 @@ class Backtester:
         fill = min(self.o[i], stop) if pos.side == 1 else max(self.o[i], stop)
         reason = "BREAKEVEN" if pos.breakeven else f"STOP_LOSS_{pos.stop_pct*100:.2f}%"
         self.close_position(100, fill, self.times[i], reason)
-        if self.verbose: print(f"[STOP] {self.times[i]} fill={fill:.8f}", flush=True)
         return True
 
     def _execute_target(self, i: int, target: int, signal_bias: int = 0) -> str | None:
@@ -1052,9 +977,6 @@ class Backtester:
             # aplicarse con el sesgo conocido al cierre que generó la señal.
             if (self.cfg.streak_trend_only and self.streak_in_loss
                     and signal_bias != target):
-                if self.verbose:
-                    print(f"[RACHA] {self.times[i]} reversión {target:+d} "
-                          f"contra tendencia {signal_bias:+d}: ignorada", flush=True)
                 return f"filtro de tendencia (sesgo {signal_bias:+d})"
             self.open_position(target, self.o[i], self.times[i])
         return None
@@ -1115,11 +1037,6 @@ class Backtester:
         if (weak_fast, weak_slow) != (cfg.ema_fast, cfg.ema_slow):
             weak_base = f"{weak_base}_{weak_len}"
         weak_reason = weak_base if cfg.ema_weakening_exit_pct >= 100 else f"{weak_base}_{cfg.ema_weakening_exit_pct:g}%"
-        volume_base = f"{VOLUME_DECLINE_REASON}_{cfg.volume_exit_bars}B"
-        volume_reason = (
-            volume_base if cfg.volume_exit_pct >= 100
-            else f"{volume_base}_{cfg.volume_exit_pct:g}%"
-        )
         started = time.perf_counter()
         print(f"[BACKTEST] {n:,} velas {cfg.timeframe}", flush=True)
         month_key: Optional[tuple[int, int]] = None
@@ -1250,10 +1167,6 @@ class Backtester:
                         rejection_time = self.times[i]
                         rejection_target = signal_target
                         skip_exit_checks = True
-                        if self.verbose:
-                            print(f"[RACHA] {self.times[i]} señal {target:+d} "
-                                  f"contra tendencia {bias_val:+d}: ignorada",
-                                  flush=True)
                     else:
                         self.pending_target = target
                         skip_exit_checks = True
@@ -1270,10 +1183,7 @@ class Backtester:
                             div_reason = f"{div_reason}_{div_pct:g}%"
                         self.pending_exit = (div_reason, div_pct)
                     else:
-                        ema55_reason = self._ema55_touch_weakness_exit_reason(i)
-                        if ema55_reason is not None:
-                            self.pending_exit = (ema55_reason, 100.0)
-                        elif (cfg.gaussian_trend_reversal_exit_enabled
+                        if (cfg.gaussian_trend_reversal_exit_enabled
                               and self.position.side == 1
                               and i < len(self.gaussian_trend_turned_bearish)
                               and self.gaussian_trend_turned_bearish[i]):
@@ -1293,10 +1203,6 @@ class Backtester:
                             self.pending_exit = (
                                 reason, cfg.gaussian_trend_reversal_exit_pct
                             )
-                        elif (cfg.volume_exit_enabled and not self.position.volume_exit_done
-                              and i < len(self.volume_exit) and self.volume_exit[i]):
-                            self.position.volume_exit_done = True
-                            self.pending_exit = (volume_reason, cfg.volume_exit_pct)
 
             self._mark(
                 self.times[i] + pd.Timedelta(cfg.timeframe), self.c[i],
@@ -1344,17 +1250,12 @@ DATASET = "dataset/binance/futures/um/BTCUSDT/merged/BTCUSDT-1m.parquet"
 OUTPUT_DIR = DEFAULT_OUTPUT_DIR
 #: Escribir los archivos del informe.
 WRITE_OUTPUTS = True
-#: Generar además el CSV con la curva de equity.
-EQUITY_CSV = False
 #: Generar el gráfico de equity.
 PLOT_ENABLED = True
 #: Ruta del gráfico; ``None`` usa la ruta por defecto del informe.
 PLOT_PATH: str | None = None
 #: Resolución del gráfico en puntos por pulgada.
 PLOT_DPI = 150
-#: Mostrar el log detallado del motor de backtest.
-VERBOSE = False
-
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -1383,14 +1284,12 @@ def main() -> int:
     if cfg.rsi_divergence_exit_enabled:
         print(f"[RSI DIV] {'disponible' if rsi_div_exit is not None else 'sin datos suficientes/timeframe incompatible'}", flush=True)
 
-    engine = Backtester(bars, cfg, signals, adx_exit, weak_exit, rsi_div_exit,
-                        verbose=VERBOSE)
+    engine = Backtester(bars, cfg, signals, adx_exit, weak_exit, rsi_div_exit)
     trades, equity = engine.run()
     generate_report(
         trades, equity, cfg, bars, str(dataset),
         output_dir=OUTPUT_DIR,
         write_outputs_enabled=WRITE_OUTPUTS,
-        write_equity_csv=EQUITY_CSV,
         plot_enabled=PLOT_ENABLED,
         plot_path=PLOT_PATH,
         plot_dpi=PLOT_DPI,
@@ -1399,7 +1298,6 @@ def main() -> int:
         adx_exit=adx_exit,
         weak_exit=weak_exit,
         rsi_div_exit=rsi_div_exit,
-        volume_exit=engine.volume_exit,
     )
     return 0
 

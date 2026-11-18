@@ -241,22 +241,6 @@ _CONFIG_ENV = {
     "rsi_divergence_len": ("STRATEGY_RSI_DIVERGENCE_LEN", env_int),
     "rsi_divergence_pivot": ("STRATEGY_RSI_DIVERGENCE_PIVOT", env_int),
     "rsi_divergence_lookback": ("STRATEGY_RSI_DIVERGENCE_LOOKBACK", env_int),
-    "ema55_touch_exit_enabled": ("STRATEGY_EMA55_TOUCH_EXIT", env_bool),
-    "ema55_touch_tolerance_pct": ("STRATEGY_EMA55_TOUCH_TOLERANCE_PCT", env_float),
-    "ema55_touch_lookback_bars": ("STRATEGY_EMA55_TOUCH_LOOKBACK_BARS", env_int),
-    "ema55_touch_min_touches": ("STRATEGY_EMA55_TOUCH_MIN_TOUCHES", env_int),
-    "ema55_touch_consecutive": ("STRATEGY_EMA55_TOUCH_CONSECUTIVE", env_int),
-    "ema55_touch_breakout_buffer_pct": (
-        "STRATEGY_EMA55_TOUCH_BREAKOUT_BUFFER_PCT", env_float
-    ),
-    "ema55_touch_exit_loss_pct": ("STRATEGY_EMA55_TOUCH_EXIT_LOSS_PCT", env_float),
-    "ema55_touch_short_exit_loss_pct": (
-        "STRATEGY_EMA55_TOUCH_SHORT_EXIT_LOSS_PCT", env_float
-    ),
-    "volume_exit_enabled": ("STRATEGY_VOLUME_EXIT", env_bool),
-    "volume_exit_bars": ("STRATEGY_VOLUME_EXIT_BARS", env_int),
-    "volume_exit_pct": ("STRATEGY_VOLUME_EXIT_PCT", env_float),
-    "volume_exit_min_drop_pct": ("STRATEGY_VOLUME_EXIT_MIN_DROP_PCT", env_float),
 }
 
 

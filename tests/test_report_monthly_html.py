@@ -118,7 +118,6 @@ def test_backtest_figure_visualizes_atr_filter_and_hides_it_when_disabled():
             adx_exit=exit_flags,
             weak_exit=exit_flags,
             rsi_div_exit=np.zeros(len(index), dtype=int),
-            volume_exit=exit_flags,
         )
 
     figure = build(Config(entry_atr_enabled=True, entry_adx_enabled=False))
@@ -216,7 +215,6 @@ def test_backtest_figure_shows_rejections_position_risk_and_drawdown():
         Config(
             entry_atr_enabled=False,
             entry_adx_enabled=False,
-            volume_exit_enabled=False,
             adx_exit_enabled=False,
             ema_weakening_exit_enabled=False,
             streak_trend_only=True,
@@ -227,7 +225,6 @@ def test_backtest_figure_shows_rejections_position_risk_and_drawdown():
         adx_exit=no_flags,
         weak_exit=no_flags,
         rsi_div_exit=np.zeros(len(index), dtype=int),
-        volume_exit=no_flags,
     )
 
     trace_names = {trace.name for trace in figure.data}

@@ -270,7 +270,6 @@ def get_data_segments(
             config.macd_slow,
             config.entry_atr_lookback,
             config.rsi_divergence_lookback,
-            config.volume_exit_bars,
             config.adx_exit_range,
         )
     else:
@@ -1836,7 +1835,7 @@ def backtest_metrics(data: pd.DataFrame, cfg: Config) -> tuple[dict[str, Any], p
         signals = strategy.generate_signals(bars, data)
         adx_exit, weak_exit, rsi_exit = strategy.prepare_exits(data, bars)
         trades, equity = Backtester(
-            bars, cfg, signals, adx_exit, weak_exit, rsi_exit, verbose=False
+            bars, cfg, signals, adx_exit, weak_exit, rsi_exit
         ).run()
     metrics = calculate_metrics(trades, equity, cfg.initial_capital)
     positions = positions_from_trades(trades)

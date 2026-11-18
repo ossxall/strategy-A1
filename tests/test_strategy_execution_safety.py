@@ -23,8 +23,6 @@ def quiet_config(**overrides):
         "adx_exit_enabled": False,
         "ema_weakening_exit_enabled": False,
         "rsi_divergence_exit_enabled": False,
-        "ema55_touch_exit_enabled": False,
-        "volume_exit_enabled": False,
         "streak_trend_only": False,
         "stop_loss_pct": 0,
         "monthly_loss_limit_pct": 0,
