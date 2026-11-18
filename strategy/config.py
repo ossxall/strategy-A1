@@ -56,7 +56,7 @@ class Config:
     #
     # Initial account equity.
     #
-    initial_capital: float = 10_000.0
+    initial_capital: float = 60.0
     #
     # Commission cost in basis points per trade.
     #
