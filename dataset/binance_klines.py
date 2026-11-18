@@ -2,7 +2,10 @@
 """Descarga masiva de klines (OHLCV) de Binance Vision.
 
 Mercados: spot, um (USDⓈ-M / USDT), cm (COIN-M / inversos).
-Endpoints: https://data.binance.vision/?prefix=data/futures/um/monthly/klines/<SYM>/<interval>/
+Los archivos se guardan en subdirectorios separados por mercado:
+  <out>/spot/<SYM>/...
+  <out>/futures/um/<SYM>/...
+  <out>/futures/cm/<SYM>/...
 
 MÉTODO RECOMENDADO: los archivos mensuales (un .zip por mes, ~2 MB para 1m de BTCUSDT).
   - Son inmutables: se pueden volver a bajar cuando quieras sin perder nada.
@@ -58,6 +61,11 @@ FLOAT_COLS = {"open", "high", "low", "close", "volume", "quote_volume",
 INT_COLS = {"open_time", "close_time", "count", "ignore"}
 
 MARKETS = {"um": "data/futures/um", "cm": "data/futures/cm", "spot": "data/spot"}
+MARKET_OUTPUT_PARTS = {
+    "um": ("futures", "um"),
+    "cm": ("futures", "cm"),
+    "spot": ("spot",),
+}
 INTERVALS = {"1s", "1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d", "3d", "1w", "1M"}
 MONTH_RE = re.compile(r"^(\d{4})-(\d{2})$")
 
@@ -465,7 +473,8 @@ def main() -> int:
     out.set_defaults(verify=True, keep_zip=True, keep_csv=True)
     default_out = Path(__file__).parent / "binance"
     out.add_argument("-o", "--out", default=default_out,
-                     help="directorio raíz (default: dataset/binance)")
+                     help="directorio raíz; separa spot y futures/um, futures/cm "
+                          "(default: dataset/binance)")
     out.add_argument("--workers", type=int, default=4, help="descargas simultáneas (default: 4)")
     out.add_argument("--retries", type=int, default=5, help="reintentos por archivo (default: 5)")
     out.add_argument("--merge-format", choices=["csv", "parquet"], help="además genera un archivo combinado")
@@ -489,7 +498,7 @@ def main() -> int:
         sys.exit("--from necesita --to (o usa --iterations).")
 
     prefix = f"{MARKETS[args.market]}/monthly/klines/{args.symbol}/{args.interval}/"
-    base = Path(args.out) / args.symbol
+    base = Path(args.out).joinpath(*MARKET_OUTPUT_PARTS[args.market], args.symbol)
 
     say(f"Listando {CDN}?prefix={prefix}")
     objects = available_months(prefix, args.symbol, args.interval)

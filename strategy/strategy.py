@@ -66,7 +66,7 @@ están hardcodeados como constantes al final de este módulo.
 
 API para bots:
     cfg = Config()
-    bars = load_parquet("dataset/binance/BTCUSDT/merged/BTCUSDT-1m.parquet")
+    bars = load_parquet("dataset/binance/futures/um/BTCUSDT/merged/BTCUSDT-1m.parquet")
     strategy = EMACrossStrategy(cfg)
     signals = strategy.generate_signals(bars)
     # signals contiene señales conocidas al cierre de cada vela.
@@ -1224,7 +1224,7 @@ class Backtester:
 # ---------------------------------------------------------------------------
 
 #: Dataset OHLCV en Parquet; las rutas relativas cuelgan de la raíz del proyecto.
-DATASET = "dataset/binance/BTCUSDT/merged/BTCUSDT-1m.parquet"
+DATASET = "dataset/binance/spot/BTCUSDT/merged/BTCUSDT-1m.parquet"
 #: Directorio donde se escriben los informes del backtest.
 OUTPUT_DIR = DEFAULT_OUTPUT_DIR
 #: Escribir los archivos del informe.

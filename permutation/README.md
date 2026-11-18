@@ -21,7 +21,7 @@ Prepara el análisis y el plan (todavía **no** hace la búsqueda):
 
 ```bash
 python permutation/run.py prepare \
-  --dataset dataset/binance/BTCUSDT/csv \
+  --dataset dataset/binance/futures/um/BTCUSDT/csv \
   --source "Binance Vision" \
   --instrument BTCUSDT \
   --timeframe 30min \
