@@ -4,9 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Reporte Backtest - Trading Profesional</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
-    <script src="https://cdn.jsdelivr.net/npm/date-fns"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/date-fns@3.6.0/cdn.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -470,6 +470,30 @@
             </div>
         </div>
         
+        <!-- Monthly PNL averages -->
+        <section class="grid" style="margin-bottom: 24px;">
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <div class="card-title">Promedio de Pérdida y Ganancia Mensual</div>
+                        <div class="card-subtitle">Promedio del PNL total de los meses con operaciones, separados por resultado</div>
+                    </div>
+                </div>
+                <div class="kpi-grid">
+                    <div class="kpi">
+                        <div class="kpi-label">Pérdida mensual promedio</div>
+                        <div class="kpi-value negative" id="monthly-average-loss">—</div>
+                        <div class="kpi-subvalue" id="monthly-loss-count"></div>
+                    </div>
+                    <div class="kpi">
+                        <div class="kpi-label">Ganancia mensual promedio</div>
+                        <div class="kpi-value positive" id="monthly-average-gain">—</div>
+                        <div class="kpi-subvalue" id="monthly-gain-count"></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
         <!-- Top Exit Reasons -->
         <section class="grid" style="margin-bottom: 24px;">
             <div class="card">
@@ -1151,6 +1175,23 @@
 
         function renderMonthlyTables(equityData, initialCapital) {
             const months = computeMonthlyStats(equityData, initialCapital);
+            const losingMonths = months.filter(month => month.pnlTotal < 0);
+            const winningMonths = months.filter(month => month.pnlTotal > 0);
+            const averageLoss = losingMonths.length
+                ? losingMonths.reduce((total, month) => total + month.pnlTotal, 0) / losingMonths.length
+                : null;
+            const averageGain = winningMonths.length
+                ? winningMonths.reduce((total, month) => total + month.pnlTotal, 0) / winningMonths.length
+                : null;
+
+            document.getElementById('monthly-average-loss').textContent =
+                averageLoss === null ? 'N/A' : formatCurrency(averageLoss);
+            document.getElementById('monthly-loss-count').textContent =
+                `${losingMonths.length} ${losingMonths.length === 1 ? 'mes con pérdida' : 'meses con pérdida'}`;
+            document.getElementById('monthly-average-gain').textContent =
+                averageGain === null ? 'N/A' : `+${formatCurrency(averageGain)}`;
+            document.getElementById('monthly-gain-count').textContent =
+                `${winningMonths.length} ${winningMonths.length === 1 ? 'mes con ganancia' : 'meses con ganancia'}`;
 
             const recentBody = document.getElementById('monthly-table-body');
             if (recentBody) {

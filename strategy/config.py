@@ -104,6 +104,27 @@ class Config:
     #
     entry_price_ema_filter_enabled: bool = True
     #
+    # Require the Gaussian Filter Trend line to be rising for LONG entries and
+    # falling for SHORT entries. Parameters match the indicator's Default preset.
+    #
+    entry_gaussian_trend_enabled: bool = True
+    entry_gaussian_source: str = "close"
+    entry_gaussian_length: int = 14
+    entry_gaussian_poles: int = 4
+    entry_gaussian_atr_length: int = 14
+    entry_gaussian_fixed_multiplier: float = 1.5
+    entry_gaussian_adaptive_width: bool = True
+    entry_gaussian_efficiency_length: int = 10
+    entry_gaussian_trend_multiplier: float = 0.8
+    entry_gaussian_chop_multiplier: float = 2.5
+    entry_gaussian_efficiency_smooth: int = 5
+    #
+    # Partially close positions when the Gaussian trend changes direction
+    # against them. The transition is evaluated once on the closed signal bar.
+    #
+    gaussian_trend_reversal_exit_enabled: bool = True
+    gaussian_trend_reversal_exit_pct: float = 25.0
+    #
     # Block LONG entries after a bullish RSI divergence and SHORT entries after a
     # bearish one, within the last N bars of the strategy timeframe.
     #
@@ -204,7 +225,7 @@ class Config:
     # E.g. with 10 bars and 20%, the mean of the last 5 must be <= 80% of the
     # mean of the previous 5.
     #
-    volume_exit_enabled: bool = True
+    volume_exit_enabled: bool = False
     volume_exit_bars: int = 20
     volume_exit_pct: float = 20.0
     volume_exit_min_drop_pct: float = 20.0
@@ -229,27 +250,27 @@ class Config:
     # Third partial take-profit, at a larger distance than TP2.
     #
     partial_tp3_r: float = 2.0
-    partial_tp3_pct: float = 10.0
+    partial_tp3_pct: float = 5.0
     #
     # Fourth partial take-profit, at a larger distance than TP3.
     #
     partial_tp4_r: float = 2.5
-    partial_tp4_pct: float = 10.0
+    partial_tp4_pct: float = 5.0
     #
     # Fifth partial take-profit, at a larger distance than TP4.
     #
     partial_tp5_r: float = 3.0
-    partial_tp5_pct: float = 10.0
+    partial_tp5_pct: float = 5.0
     #
     # Sixth partial take-profit, at a larger distance than TP5.
     #
     partial_tp6_r: float = 3.5
-    partial_tp6_pct: float = 10.0
+    partial_tp6_pct: float = 5.0
     #
     # Seventh partial take-profit, at a larger distance than TP6.
     #
     partial_tp7_r: float = 4.0
-    partial_tp7_pct: float = 10.0
+    partial_tp7_pct: float = 5.0
     #
     # After TP3, the remaining SHORT exits if price exceeds the slow EMA by
     # this %. 0 = touching it is enough.
@@ -384,6 +405,21 @@ class Config:
             or self.entry_atr_max_ratio <= self.entry_atr_min_ratio
         ):
             raise ValueError("Invalid entry ATR filter configuration.")
+        if (
+            self.entry_gaussian_trend_enabled
+            or self.gaussian_trend_reversal_exit_enabled
+        ) and (
+            self.entry_gaussian_source not in {"close", "hl2", "hlc3"}
+            or self.entry_gaussian_length < 2
+            or not 1 <= self.entry_gaussian_poles <= 4
+            or self.entry_gaussian_atr_length <= 0
+            or self.entry_gaussian_fixed_multiplier <= 0
+            or self.entry_gaussian_efficiency_length < 2
+            or self.entry_gaussian_trend_multiplier <= 0
+            or self.entry_gaussian_chop_multiplier <= 0
+            or self.entry_gaussian_efficiency_smooth <= 0
+        ):
+            raise ValueError("Invalid Gaussian Filter Trend entry configuration.")
         if self.entry_rsi_divergence_enabled and self.entry_rsi_divergence_lookback < 1:
             raise ValueError("entry_rsi_divergence_lookback must be >= 1.")
         if self.entry_mfi_risk_scaling_enabled and (
@@ -422,6 +458,10 @@ class Config:
                 raise ValueError("rsi_divergence_lookback must be >= 1.")
         if self.rsi_divergence_exit_enabled and not 0 < self.rsi_divergence_exit_pct <= 100:
             raise ValueError("rsi_divergence_exit_pct must be in (0, 100].")
+        if self.gaussian_trend_reversal_exit_enabled and not (
+            0 < self.gaussian_trend_reversal_exit_pct <= 100
+        ):
+            raise ValueError("gaussian_trend_reversal_exit_pct must be in (0, 100].")
         if (self.ema55_touch_tolerance_pct < 0 or self.ema55_touch_breakout_buffer_pct < 0
                 or self.ema55_touch_exit_loss_pct < 0
                 or self.ema55_touch_short_exit_loss_pct < 0):

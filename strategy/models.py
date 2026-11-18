@@ -64,6 +64,9 @@ MONTHLY_LIMIT_REASON = "MONTHLY_LOSS_LIMIT"
 #: un LONG (`RSI_DIVERGENCE_BEAR`) y la alcista cierra un SHORT.
 RSI_DIVERGENCE_BULL_REASON = "RSI_DIVERGENCE_BULL"
 RSI_DIVERGENCE_BEAR_REASON = "RSI_DIVERGENCE_BEAR"
+#: Salida parcial al girar el Gaussian Filter Trend contra una posición.
+GAUSSIAN_TREND_BULL_REASON = "GAUSSIAN_TREND_BULL"
+GAUSSIAN_TREND_BEAR_REASON = "GAUSSIAN_TREND_BEAR"
 #: Salida parcial cuando el volumen cae en las últimas `volume_exit_bars` velas.
 VOLUME_DECLINE_REASON = "VOLUME_DECLINE"
 DEFAULT_OUTPUT_DIR = "strategy/report/backtest_out"

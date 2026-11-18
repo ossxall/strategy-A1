@@ -34,6 +34,11 @@ Protecciones de riesgo (ver `Config`):
   alcista no se entra si el cierre queda por debajo de las EMAs rápida y lenta;
   tras un cruce bajista no se entra si queda por encima de ambas. Evita
   entradas contra el precio cuando el cruce ya se ha girado.
+* `entry_gaussian_trend_enabled` (default True): exige que la línea principal del
+  Gaussian Filter Trend esté alcista para LONG y bajista para SHORT.
+* `gaussian_trend_reversal_exit_enabled` (default True): cierra parcialmente
+  cuando la línea Gaussian gira contra la posición (`gaussian_trend_reversal_exit_pct`,
+  50 % por defecto).
 * `streak_trend_only` (default True): tras una posición cerrada en pérdida,
   la siguiente entrada sólo se abre si la señal coincide con el sesgo de
   tendencia de `trend_timeframe` (vela superior ya cerrada, sin lookahead).
@@ -66,14 +71,14 @@ están hardcodeados como constantes al final de este módulo.
 
 API para bots:
     cfg = Config()
-    bars = load_parquet("dataset/binance/BTCUSDT/merged/BTCUSDT-1m.parquet")
+    bars = load_parquet("dataset/binance/futures/um/BTCUSDT/merged/BTCUSDT-1m.parquet")
     strategy = EMACrossStrategy(cfg)
     signals = strategy.generate_signals(bars)
     # signals contiene señales conocidas al cierre de cada vela.
     # En ejecución real, actuar en la siguiente apertura/iteración.
 
 Dependencias:
-    pip install "pandas>=2" pyarrow numpy matplotlib TA-Lib
+    pip install pandas==3.1.1 pyarrow==26.0.1 numpy==2.5.5 matplotlib==3.11.2 TA-Lib==0.8.3
 """
 from __future__ import annotations
 from dataclasses import asdict
@@ -87,6 +92,8 @@ from strategy.models import (
     MONTHLY_LIMIT_REASON,
     RSI_DIVERGENCE_BULL_REASON,
     RSI_DIVERGENCE_BEAR_REASON,
+    GAUSSIAN_TREND_BULL_REASON,
+    GAUSSIAN_TREND_BEAR_REASON,
     VOLUME_DECLINE_REASON,
     DEFAULT_OUTPUT_DIR,
     empty_trades,
@@ -97,6 +104,7 @@ from strategy.indicators import (
     efficiency_ratio,
     adx,
     atr_volatility_filter,
+    gaussian_filter_trend,
     confirmed_crosses,
     align_closed_values,
     build_adx_exit,
@@ -353,6 +361,40 @@ class EMACrossStrategy:
         else:
             entry_rsi_bull_divergence_blocked = np.zeros(len(bars), dtype=bool)
             entry_rsi_bear_divergence_blocked = np.zeros(len(bars), dtype=bool)
+        if cfg.entry_gaussian_trend_enabled or cfg.gaussian_trend_reversal_exit_enabled:
+            gaussian_trend = gaussian_filter_trend(
+                bars,
+                cfg.entry_gaussian_length,
+                cfg.entry_gaussian_poles,
+                cfg.entry_gaussian_atr_length,
+                cfg.entry_gaussian_fixed_multiplier,
+                cfg.entry_gaussian_adaptive_width,
+                cfg.entry_gaussian_efficiency_length,
+                cfg.entry_gaussian_trend_multiplier,
+                cfg.entry_gaussian_chop_multiplier,
+                cfg.entry_gaussian_efficiency_smooth,
+                cfg.entry_gaussian_source,
+            )
+            gaussian_trend_line = gaussian_trend["trend_line"].to_numpy(float)
+            gaussian_trend_dir = gaussian_trend["trend_dir"].to_numpy(int)
+        else:
+            gaussian_trend_line = np.full(len(bars), np.nan)
+            gaussian_trend_dir = np.zeros(len(bars), dtype=int)
+        gaussian_long_allowed = (
+            (gaussian_trend_dir == 1) if cfg.entry_gaussian_trend_enabled
+            else np.ones(len(bars), dtype=bool)
+        )
+        gaussian_short_allowed = (
+            (gaussian_trend_dir == -1) if cfg.entry_gaussian_trend_enabled
+            else np.ones(len(bars), dtype=bool)
+        )
+        record_rejection(
+            candidate_up & ~gaussian_long_allowed,
+            candidate_down & ~gaussian_short_allowed,
+            "Gaussian Filter Trend",
+        )
+        up &= gaussian_long_allowed
+        down &= gaussian_short_allowed
         if cfg.entry_adx_enabled:
             allowed = np.ones(len(bars), dtype=bool)
             for values in entry_adx_by_timeframe.values():
@@ -404,6 +446,10 @@ class EMACrossStrategy:
             "entry_rsi_bear_divergence_blocked": entry_rsi_bear_divergence_blocked,
             # Alias histórico del filtro LONG (ahora la divergencia bajista bloquea LONG).
             "entry_rsi_divergence_blocked": entry_rsi_bear_divergence_blocked,
+            "entry_gaussian_trend_line": gaussian_trend_line,
+            "entry_gaussian_trend_dir": gaussian_trend_dir,
+            "entry_gaussian_long_allowed": gaussian_long_allowed,
+            "entry_gaussian_short_allowed": gaussian_short_allowed,
             "cross_up_candidate": candidate_up | unconfirmed_up,
             "cross_down_candidate": candidate_down | unconfirmed_down,
             "cross_up_rejected": long_rejected,
@@ -492,6 +538,39 @@ class Backtester:
         else:
             self.entry_rsi_bull_divergence_blocked = np.zeros(len(bars), dtype=bool)
             self.entry_rsi_bear_divergence_blocked = np.zeros(len(bars), dtype=bool)
+        if "entry_gaussian_trend_dir" in self.signals:
+            self.entry_gaussian_trend_dir = self.signals[
+                "entry_gaussian_trend_dir"
+            ].to_numpy(int)
+        elif (config.entry_gaussian_trend_enabled
+              or config.gaussian_trend_reversal_exit_enabled):
+            gaussian_trend = gaussian_filter_trend(
+                bars,
+                config.entry_gaussian_length,
+                config.entry_gaussian_poles,
+                config.entry_gaussian_atr_length,
+                config.entry_gaussian_fixed_multiplier,
+                config.entry_gaussian_adaptive_width,
+                config.entry_gaussian_efficiency_length,
+                config.entry_gaussian_trend_multiplier,
+                config.entry_gaussian_chop_multiplier,
+                config.entry_gaussian_efficiency_smooth,
+                config.entry_gaussian_source,
+            )
+            self.entry_gaussian_trend_dir = gaussian_trend["trend_dir"].to_numpy(int)
+        else:
+            self.entry_gaussian_trend_dir = np.zeros(len(bars), dtype=int)
+        previous_gaussian_dir = np.zeros(
+            len(self.entry_gaussian_trend_dir), dtype=int
+        )
+        if len(previous_gaussian_dir) > 1:
+            previous_gaussian_dir[1:] = self.entry_gaussian_trend_dir[:-1]
+        self.gaussian_trend_turned_bullish = (
+            (self.entry_gaussian_trend_dir == 1) & (previous_gaussian_dir == -1)
+        )
+        self.gaussian_trend_turned_bearish = (
+            (self.entry_gaussian_trend_dir == -1) & (previous_gaussian_dir == 1)
+        )
         self.entry_mfi = (
             self.signals["entry_mfi"].to_numpy(float)
             if "entry_mfi" in self.signals else None
@@ -1118,6 +1197,16 @@ class Backtester:
                     execution_reasons.append("filtro ATR")
                     target = 0
                     rejected_before_execution = True
+                if cfg.entry_gaussian_trend_enabled and target == 1 \
+                        and self.entry_gaussian_trend_dir[i] != 1:
+                    execution_reasons.append("Gaussian Filter Trend")
+                    target = 0
+                    rejected_before_execution = True
+                if cfg.entry_gaussian_trend_enabled and target == -1 \
+                        and self.entry_gaussian_trend_dir[i] != -1:
+                    execution_reasons.append("Gaussian Filter Trend")
+                    target = 0
+                    rejected_before_execution = True
                 if target == 1 and cfg.entry_rsi_divergence_enabled \
                         and self.entry_rsi_bear_divergence_blocked[i]:
                     execution_reasons.append("divergencia RSI")
@@ -1178,6 +1267,26 @@ class Backtester:
                         ema55_reason = self._ema55_touch_weakness_exit_reason(i)
                         if ema55_reason is not None:
                             self.pending_exit = (ema55_reason, 100.0)
+                        elif (cfg.gaussian_trend_reversal_exit_enabled
+                              and self.position.side == 1
+                              and i < len(self.gaussian_trend_turned_bearish)
+                              and self.gaussian_trend_turned_bearish[i]):
+                            reason = GAUSSIAN_TREND_BEAR_REASON
+                            if cfg.gaussian_trend_reversal_exit_pct < 100:
+                                reason += f"_{cfg.gaussian_trend_reversal_exit_pct:g}%"
+                            self.pending_exit = (
+                                reason, cfg.gaussian_trend_reversal_exit_pct
+                            )
+                        elif (cfg.gaussian_trend_reversal_exit_enabled
+                              and self.position.side == -1
+                              and i < len(self.gaussian_trend_turned_bullish)
+                              and self.gaussian_trend_turned_bullish[i]):
+                            reason = GAUSSIAN_TREND_BULL_REASON
+                            if cfg.gaussian_trend_reversal_exit_pct < 100:
+                                reason += f"_{cfg.gaussian_trend_reversal_exit_pct:g}%"
+                            self.pending_exit = (
+                                reason, cfg.gaussian_trend_reversal_exit_pct
+                            )
                         elif (cfg.volume_exit_enabled and not self.position.volume_exit_done
                               and i < len(self.volume_exit) and self.volume_exit[i]):
                             self.position.volume_exit_done = True
@@ -1224,7 +1333,7 @@ class Backtester:
 # ---------------------------------------------------------------------------
 
 #: Dataset OHLCV en Parquet; las rutas relativas cuelgan de la raíz del proyecto.
-DATASET = "dataset/binance/BTCUSDT/merged/BTCUSDT-1m.parquet"
+DATASET = "dataset/binance/futures/um/BTCUSDT/merged/BTCUSDT-1m.parquet"
 #: Directorio donde se escriben los informes del backtest.
 OUTPUT_DIR = DEFAULT_OUTPUT_DIR
 #: Escribir los archivos del informe.

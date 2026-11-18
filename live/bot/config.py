@@ -156,6 +156,35 @@ _CONFIG_ENV = {
     "entry_atr_min_ratio": ("STRATEGY_ENTRY_ATR_MIN_RATIO", env_float),
     "entry_atr_max_ratio": ("STRATEGY_ENTRY_ATR_MAX_RATIO", env_float),
     "entry_price_ema_filter_enabled": ("STRATEGY_ENTRY_PRICE_EMA_FILTER", env_bool),
+    "entry_gaussian_trend_enabled": ("STRATEGY_ENTRY_GAUSSIAN_TREND", env_bool),
+    "entry_gaussian_source": ("STRATEGY_ENTRY_GAUSSIAN_SOURCE", env_str),
+    "entry_gaussian_length": ("STRATEGY_ENTRY_GAUSSIAN_LENGTH", env_int),
+    "entry_gaussian_poles": ("STRATEGY_ENTRY_GAUSSIAN_POLES", env_int),
+    "entry_gaussian_atr_length": ("STRATEGY_ENTRY_GAUSSIAN_ATR_LENGTH", env_int),
+    "entry_gaussian_fixed_multiplier": (
+        "STRATEGY_ENTRY_GAUSSIAN_FIXED_MULTIPLIER", env_float
+    ),
+    "entry_gaussian_adaptive_width": (
+        "STRATEGY_ENTRY_GAUSSIAN_ADAPTIVE_WIDTH", env_bool
+    ),
+    "entry_gaussian_efficiency_length": (
+        "STRATEGY_ENTRY_GAUSSIAN_EFFICIENCY_LENGTH", env_int
+    ),
+    "entry_gaussian_trend_multiplier": (
+        "STRATEGY_ENTRY_GAUSSIAN_TREND_MULTIPLIER", env_float
+    ),
+    "entry_gaussian_chop_multiplier": (
+        "STRATEGY_ENTRY_GAUSSIAN_CHOP_MULTIPLIER", env_float
+    ),
+    "entry_gaussian_efficiency_smooth": (
+        "STRATEGY_ENTRY_GAUSSIAN_EFFICIENCY_SMOOTH", env_int
+    ),
+    "gaussian_trend_reversal_exit_enabled": (
+        "STRATEGY_GAUSSIAN_TREND_REVERSAL_EXIT", env_bool
+    ),
+    "gaussian_trend_reversal_exit_pct": (
+        "STRATEGY_GAUSSIAN_TREND_REVERSAL_EXIT_PCT", env_float
+    ),
     "entry_mfi_risk_scaling_enabled": ("STRATEGY_ENTRY_MFI_RISK_SCALING", env_bool),
     "entry_mfi_len": ("STRATEGY_ENTRY_MFI_LEN", env_int),
     "entry_mfi_risk_base": ("STRATEGY_ENTRY_MFI_RISK_BASE", env_float),

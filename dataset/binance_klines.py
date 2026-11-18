@@ -2,7 +2,10 @@
 """Descarga masiva de klines (OHLCV) de Binance Vision.
 
 Mercados: spot, um (USDⓈ-M / USDT), cm (COIN-M / inversos).
-Endpoints: https://data.binance.vision/?prefix=data/futures/um/monthly/klines/<SYM>/<interval>/
+Los archivos se guardan en subdirectorios separados por mercado:
+  <out>/spot/<SYM>/...
+  <out>/futures/um/<SYM>/...
+  <out>/futures/cm/<SYM>/...
 
 MÉTODO RECOMENDADO: los archivos mensuales (un .zip por mes, ~2 MB para 1m de BTCUSDT).
   - Son inmutables: se pueden volver a bajar cuando quieras sin perder nada.
@@ -56,8 +59,15 @@ COLUMNS = [
 FLOAT_COLS = {"open", "high", "low", "close", "volume", "quote_volume",
               "taker_buy_volume", "taker_buy_quote_volume"}
 INT_COLS = {"open_time", "close_time", "count", "ignore"}
+TIMESTAMP_COLS = ("open_time", "close_time")
+MICROSECOND_TIMESTAMP_THRESHOLD = 100_000_000_000_000
 
 MARKETS = {"um": "data/futures/um", "cm": "data/futures/cm", "spot": "data/spot"}
+MARKET_OUTPUT_PARTS = {
+    "um": ("futures", "um"),
+    "cm": ("futures", "cm"),
+    "spot": ("spot",),
+}
 INTERVALS = {"1s", "1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d", "3d", "1w", "1M"}
 MONTH_RE = re.compile(r"^(\d{4})-(\d{2})$")
 
@@ -294,6 +304,7 @@ def merge_parquet(csvs: Sequence[Path], out: Path) -> int:
     try:
         import pyarrow as pa
         import pyarrow.csv as pacsv
+        import pyarrow.compute as pc
         import pyarrow.parquet as pq
     except ImportError:
         raise SystemExit("Parquet requiere 'pyarrow'. Instálalo con: pip install pyarrow")
@@ -320,7 +331,21 @@ def merge_parquet(csvs: Sequence[Path], out: Path) -> int:
                                      column_names=COLUMNS,
                                      skip_rows=1 if header else 0)
             table = pacsv.read_csv(path, read_options=read, convert_options=conv)
-            table = table.rename_columns(COLUMNS).cast(schema)
+            table = table.rename_columns(COLUMNS)
+            for col in TIMESTAMP_COLS:
+                values = table[col]
+                is_microseconds = pc.greater_equal(
+                    pc.abs(values), MICROSECOND_TIMESTAMP_THRESHOLD
+                )
+                normalized = pc.if_else(
+                    is_microseconds,
+                    pc.divide_checked(values, 1000),
+                    values,
+                )
+                table = table.set_column(
+                    table.schema.get_field_index(col), col, normalized
+                )
+            table = table.cast(schema)
             writer.write_table(table, row_group_size=250_000)
             rows += table.num_rows
     finally:
@@ -331,6 +356,8 @@ def merge_parquet(csvs: Sequence[Path], out: Path) -> int:
 
 def ts_to_iso(ms: int) -> str:
     import datetime as dt
+    if abs(ms) >= MICROSECOND_TIMESTAMP_THRESHOLD:
+        ms //= 1000
     return dt.datetime.fromtimestamp(ms / 1000, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
@@ -465,7 +492,8 @@ def main() -> int:
     out.set_defaults(verify=True, keep_zip=True, keep_csv=True)
     default_out = Path(__file__).parent / "binance"
     out.add_argument("-o", "--out", default=default_out,
-                     help="directorio raíz (default: dataset/binance)")
+                     help="directorio raíz; separa spot y futures/um, futures/cm "
+                          "(default: dataset/binance)")
     out.add_argument("--workers", type=int, default=4, help="descargas simultáneas (default: 4)")
     out.add_argument("--retries", type=int, default=5, help="reintentos por archivo (default: 5)")
     out.add_argument("--merge-format", choices=["csv", "parquet"], help="además genera un archivo combinado")
@@ -489,7 +517,7 @@ def main() -> int:
         sys.exit("--from necesita --to (o usa --iterations).")
 
     prefix = f"{MARKETS[args.market]}/monthly/klines/{args.symbol}/{args.interval}/"
-    base = Path(args.out) / args.symbol
+    base = Path(args.out).joinpath(*MARKET_OUTPUT_PARTS[args.market], args.symbol)
 
     say(f"Listando {CDN}?prefix={prefix}")
     objects = available_months(prefix, args.symbol, args.interval)

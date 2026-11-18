@@ -13,8 +13,8 @@
   "license": "ISC",
   "type": "commonjs",
   "devDependencies": {
-    "electron": "^45.3.3",
-    "electron-builder": "^26.18.0"
+    "electron": "45.3.3",
+    "electron-builder": "26.18.0"
   },
   "build": {
     "appId": "com.strategy-a1.desktop",
@@ -40,6 +40,6 @@
     }
   },
   "dependencies": {
-    "lucide": "^1.73.0"
+    "lucide": "1.73.0"
   }
 }

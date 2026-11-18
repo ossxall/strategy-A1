@@ -189,7 +189,7 @@ services:
     pid: host
 
   dozzle:
-    image: amir20/dozzle:latest
+    image: amir20/dozzle:v11.4.3-alpine
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -246,7 +246,7 @@ services:
       - lovelacers.com
 
   redis:
-    image: redis:7-alpine
+    image: redis:7.4.12-alpine
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes", "--save", "60", "1"]
     networks:
@@ -268,7 +268,7 @@ services:
         max-file: "5"
 
   nginx:
-    image: nginx:stable-alpine
+    image: nginx:1.30.6-alpine
     networks:
       - default
       - auth_egress
