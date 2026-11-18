@@ -91,6 +91,132 @@ def atr(bars: pd.DataFrame, length: int = 14) -> pd.Series:
     return pd.Series(tr, index=bars.index).ewm(alpha=1 / length, adjust=False).mean()
 
 
+def gaussian_filter_trend(
+    bars: pd.DataFrame,
+    length: int = 14,
+    poles: int = 4,
+    atr_length: int = 14,
+    fixed_multiplier: float = 1.5,
+    adaptive_width: bool = True,
+    efficiency_length: int = 10,
+    trend_multiplier: float = 0.8,
+    chop_multiplier: float = 2.5,
+    efficiency_smooth: int = 5,
+    source: str = "close",
+) -> pd.DataFrame:
+    """Gaussian Filter Trend line and direction, matching the Pine indicator.
+
+    ``trend_dir`` is +1 when the stepped main line is bullish/rising, -1 when
+    bearish/falling, and 0 before its first directional step. The efficiency
+    ratio and ATR use only current and earlier candles, so this is safe to use
+    as a closed-bar entry filter.
+    """
+    if length < 2 or not 1 <= poles <= 4:
+        raise ValueError("Gaussian length must be >= 2 and poles must be in [1, 4].")
+    if (atr_length <= 0 or efficiency_length < 2 or efficiency_smooth <= 0
+            or fixed_multiplier <= 0 or trend_multiplier <= 0 or chop_multiplier <= 0):
+        raise ValueError("Invalid Gaussian Filter Trend parameters.")
+    if source not in {"close", "hl2", "hlc3"}:
+        raise ValueError("Gaussian source must be 'close', 'hl2' or 'hlc3'.")
+
+    source_values = (
+        bars["close"].to_numpy(dtype=float)
+        if source == "close"
+        else (
+            (bars["high"] + bars["low"]).to_numpy(dtype=float) / 2.0
+            if source == "hl2"
+            else (bars["high"] + bars["low"] + bars["close"]).to_numpy(dtype=float) / 3.0
+        )
+    )
+    n = len(source_values)
+    filtered = np.full(n, np.nan, dtype=float)
+    beta = (1.0 - np.cos(2.0 * np.pi / length)) / (
+        np.power(1.414, 2.0 / poles) - 1.0
+    )
+    alpha = -beta + np.sqrt(beta * beta + 2.0 * beta)
+
+    # Four cascaded one-pole stages; the selected pole count determines output.
+    stages = np.full((4, n), np.nan, dtype=float)
+    for i, value in enumerate(source_values):
+        if not np.isfinite(value):
+            continue
+        previous = value
+        for stage in range(4):
+            prior = stages[stage, i - 1] if i else np.nan
+            if not np.isfinite(prior):
+                prior = value
+            stages[stage, i] = alpha * previous + (1.0 - alpha) * prior
+            previous = stages[stage, i]
+        filtered[i] = stages[poles - 1, i]
+
+    # Pine's ta.atr is an RMA seeded by the first full SMA window.
+    high, low = bars["high"].to_numpy(float), bars["low"].to_numpy(float)
+    tr = (
+        true_range(high, low, bars["close"].to_numpy(dtype=float))
+        if n else np.empty(0, dtype=float)
+    )
+    atr_values = np.full(n, np.nan, dtype=float)
+    if n >= atr_length:
+        atr_values[atr_length - 1] = np.mean(tr[:atr_length])
+        for i in range(atr_length, n):
+            atr_values[i] = (
+                atr_values[i - 1] * (atr_length - 1) + tr[i]
+            ) / atr_length
+
+    source_series = pd.Series(source_values, index=bars.index)
+    net_move = (source_series - source_series.shift(efficiency_length)).abs()
+    path_length = source_series.diff().abs().rolling(
+        efficiency_length, min_periods=efficiency_length
+    ).sum()
+    efficiency = net_move.div(path_length.where(path_length != 0))
+    efficiency = efficiency.mask(path_length.eq(0), 0.0).clip(0.0, 1.0)
+    smoothed_efficiency = efficiency.ewm(
+        alpha=1.0 / efficiency_smooth, adjust=False
+    ).mean().to_numpy(float)
+
+    if adaptive_width:
+        width_multiplier = chop_multiplier + (
+            trend_multiplier - chop_multiplier
+        ) * smoothed_efficiency
+    else:
+        width_multiplier = np.full(n, fixed_multiplier, dtype=float)
+    width = atr_values * width_multiplier
+    upper_band, lower_band = filtered + width, filtered - width
+
+    trend_line = np.full(n, np.nan, dtype=float)
+    trend_dir = np.zeros(n, dtype=int)
+    if n:
+        trend_line[0] = filtered[0]
+        for i in range(1, n):
+            previous_line = trend_line[i - 1]
+            current_line = previous_line
+            if not np.isfinite(current_line):
+                current_line = filtered[i]
+            if np.isfinite(upper_band[i]) and upper_band[i] < current_line:
+                current_line = upper_band[i]
+            if np.isfinite(lower_band[i]) and lower_band[i] > current_line:
+                current_line = lower_band[i]
+            trend_line[i] = current_line
+            trend_dir[i] = trend_dir[i - 1]
+            if np.isfinite(previous_line) and current_line > previous_line:
+                trend_dir[i] = 1
+            elif np.isfinite(previous_line) and current_line < previous_line:
+                trend_dir[i] = -1
+
+    return pd.DataFrame(
+        {
+            "filtered_price": filtered,
+            "trend_line": trend_line,
+            "trend_dir": trend_dir,
+            "atr": atr_values,
+            "efficiency_ratio": efficiency.to_numpy(float),
+            "smoothed_efficiency": smoothed_efficiency,
+            "source": source_values,
+        },
+        index=bars.index,
+    )
+
+
 def atr_volatility_filter(
     bars: pd.DataFrame,
     length: int = 14,

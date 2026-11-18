@@ -42,6 +42,7 @@ def make_config():
         macd_timeframe=None,
         confirm_bars=0,
         entry_adx_enabled=False,
+        entry_gaussian_trend_enabled=False,
         entry_mfi_risk_scaling_enabled=False,
         entry_er_risk_scaling_enabled=False,
         entry_price_ema_filter_enabled=False,

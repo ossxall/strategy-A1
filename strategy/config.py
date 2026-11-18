@@ -104,6 +104,21 @@ class Config:
     #
     entry_price_ema_filter_enabled: bool = True
     #
+    # Require the Gaussian Filter Trend line to be rising for LONG entries and
+    # falling for SHORT entries. Parameters match the indicator's Default preset.
+    #
+    entry_gaussian_trend_enabled: bool = True
+    entry_gaussian_source: str = "close"
+    entry_gaussian_length: int = 14
+    entry_gaussian_poles: int = 4
+    entry_gaussian_atr_length: int = 14
+    entry_gaussian_fixed_multiplier: float = 1.5
+    entry_gaussian_adaptive_width: bool = True
+    entry_gaussian_efficiency_length: int = 10
+    entry_gaussian_trend_multiplier: float = 0.8
+    entry_gaussian_chop_multiplier: float = 2.5
+    entry_gaussian_efficiency_smooth: int = 5
+    #
     # Block LONG entries after a bullish RSI divergence and SHORT entries after a
     # bearish one, within the last N bars of the strategy timeframe.
     #
@@ -204,7 +219,7 @@ class Config:
     # E.g. with 10 bars and 20%, the mean of the last 5 must be <= 80% of the
     # mean of the previous 5.
     #
-    volume_exit_enabled: bool = True
+    volume_exit_enabled: bool = False
     volume_exit_bars: int = 20
     volume_exit_pct: float = 20.0
     volume_exit_min_drop_pct: float = 20.0
@@ -384,6 +399,18 @@ class Config:
             or self.entry_atr_max_ratio <= self.entry_atr_min_ratio
         ):
             raise ValueError("Invalid entry ATR filter configuration.")
+        if self.entry_gaussian_trend_enabled and (
+            self.entry_gaussian_source not in {"close", "hl2", "hlc3"}
+            or self.entry_gaussian_length < 2
+            or not 1 <= self.entry_gaussian_poles <= 4
+            or self.entry_gaussian_atr_length <= 0
+            or self.entry_gaussian_fixed_multiplier <= 0
+            or self.entry_gaussian_efficiency_length < 2
+            or self.entry_gaussian_trend_multiplier <= 0
+            or self.entry_gaussian_chop_multiplier <= 0
+            or self.entry_gaussian_efficiency_smooth <= 0
+        ):
+            raise ValueError("Invalid Gaussian Filter Trend entry configuration.")
         if self.entry_rsi_divergence_enabled and self.entry_rsi_divergence_lookback < 1:
             raise ValueError("entry_rsi_divergence_lookback must be >= 1.")
         if self.entry_mfi_risk_scaling_enabled and (

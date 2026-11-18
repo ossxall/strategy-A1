@@ -50,6 +50,7 @@ def make_config(**overrides):
         "entry_mfi_risk_scaling_enabled": False,
         "entry_er_risk_scaling_enabled": False,
         "entry_rsi_divergence_enabled": False,
+        "entry_gaussian_trend_enabled": False,
         "streak_trend_only": False,
     }
     values.update(overrides)

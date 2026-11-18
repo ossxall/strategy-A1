@@ -17,6 +17,7 @@ def quiet_config(**overrides):
         "entry_adx_enabled": False,
         "entry_atr_enabled": False,
         "entry_rsi_divergence_enabled": False,
+        "entry_gaussian_trend_enabled": False,
         "entry_mfi_risk_scaling_enabled": False,
         "entry_er_risk_scaling_enabled": False,
         "adx_exit_enabled": False,

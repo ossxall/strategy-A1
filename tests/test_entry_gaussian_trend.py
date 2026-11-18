@@ -1,0 +1,177 @@
+import numpy as np
+import pandas as pd
+import pytest
+
+import strategy.strategy as strategy_module
+from strategy.config import Config
+from strategy.indicators import gaussian_filter_trend
+from strategy.strategy import Backtester, EMACrossStrategy
+from live.bot.config import build_strategy_config
+
+
+def make_bars(periods=4, close=None):
+    index = pd.date_range("2026-01-01", periods=periods, freq="30min", tz="UTC")
+    close = np.asarray(close if close is not None else np.full(periods, 100.0), float)
+    return pd.DataFrame(
+        {
+            "open": close,
+            "high": close + 1.0,
+            "low": close - 1.0,
+            "close": close,
+            "volume": 1.0,
+        },
+        index=index,
+    )
+
+
+def make_config(**overrides):
+    values = {
+        "timeframe": "30min",
+        "macd_timeframe": None,
+        "confirm_bars": 0,
+        "entry_adx_enabled": False,
+        "entry_atr_enabled": False,
+        "entry_mfi_risk_scaling_enabled": False,
+        "entry_er_risk_scaling_enabled": False,
+        "entry_rsi_divergence_enabled": False,
+        "entry_price_ema_filter_enabled": False,
+        "streak_trend_only": False,
+        "monthly_loss_limit_pct": 0,
+        "partial_tp_enabled": False,
+        "partial_tp2_r": 0,
+        "partial_tp2_pct": 0,
+        "partial_tp3_r": 0,
+        "partial_tp3_pct": 0,
+        "partial_tp4_r": 0,
+        "partial_tp4_pct": 0,
+        "partial_tp5_r": 0,
+        "partial_tp5_pct": 0,
+        "partial_tp6_r": 0,
+        "partial_tp6_pct": 0,
+        "partial_tp7_r": 0,
+        "partial_tp7_pct": 0,
+        "volume_exit_enabled": False,
+        "adx_exit_enabled": False,
+        "ema_weakening_exit_enabled": False,
+        "rsi_divergence_exit_enabled": False,
+        "ema55_touch_exit_enabled": False,
+        "force_close_at_end": False,
+    }
+    values.update(overrides)
+    return Config(**values)
+
+
+def configure_crosses(monkeypatch):
+    fast = np.array([1.0, 3.0, 3.0, 1.0])
+    slow = np.array([2.0, 2.0, 2.0, 2.0])
+    monkeypatch.setattr(
+        strategy_module,
+        "ema",
+        lambda values, period: pd.Series(
+            fast if period == 55 else slow, index=values.index
+        ),
+    )
+    monkeypatch.setattr(
+        strategy_module.talib,
+        "MACD",
+        lambda *args, **kwargs: (
+            np.array([0.0, 1.0, 1.0, -1.0]),
+            np.zeros(4),
+            np.zeros(4),
+        ),
+    )
+
+
+def test_gaussian_trend_filter_requires_matching_direction_for_each_side(monkeypatch):
+    configure_crosses(monkeypatch)
+    directions = np.array([0, -1, 1, 1])
+    monkeypatch.setattr(
+        strategy_module,
+        "gaussian_filter_trend",
+        lambda bars, *args: pd.DataFrame(
+            {"trend_line": np.arange(len(bars)), "trend_dir": directions},
+            index=bars.index,
+        ),
+    )
+
+    signals = EMACrossStrategy(make_config()).generate_signals(make_bars())
+
+    assert signals.target.tolist() == [0, 0, 0, 0]
+    assert signals.cross_up_rejected.iloc[1]
+    assert signals.cross_down_rejected.iloc[3]
+    assert "Gaussian Filter Trend" in signals.entry_rejection_reasons_long.iloc[1]
+    assert "Gaussian Filter Trend" in signals.entry_rejection_reasons_short.iloc[3]
+
+    directions[:] = [0, 1, 1, -1]
+    signals = EMACrossStrategy(make_config()).generate_signals(make_bars())
+    assert signals.target.tolist() == [0, 1, 0, -1]
+
+
+def test_gaussian_filter_trend_is_causal_and_detects_both_directions():
+    close = np.r_[np.linspace(100, 150, 50), np.linspace(149, 90, 50)]
+    bars = make_bars(len(close), close)
+
+    full = gaussian_filter_trend(bars)
+    prefix = gaussian_filter_trend(bars.iloc[:70])
+
+    assert (full.trend_dir == 1).any()
+    assert (full.trend_dir == -1).any()
+    np.testing.assert_allclose(
+        full.trend_line.iloc[:70], prefix.trend_line, equal_nan=True
+    )
+    np.testing.assert_array_equal(full.trend_dir.iloc[:70], prefix.trend_dir)
+
+
+def test_gaussian_filter_trend_accepts_empty_bars():
+    result = gaussian_filter_trend(make_bars().iloc[:0])
+
+    assert result.empty
+    assert {"trend_line", "trend_dir"} <= set(result.columns)
+
+
+def test_backtester_applies_gaussian_filter_to_custom_entry_signals(monkeypatch):
+    bars = make_bars(4)
+    monkeypatch.setattr(
+        strategy_module,
+        "gaussian_filter_trend",
+        lambda frame, *args: pd.DataFrame(
+            {"trend_line": np.zeros(len(frame)), "trend_dir": np.array([0, -1, -1, -1])},
+            index=frame.index,
+        ),
+    )
+    signals = pd.DataFrame(
+        {"valid": True, "target": [0, 1, 0, 0], "trend_bias": 0},
+        index=bars.index,
+    )
+
+    trades, _ = Backtester(bars, make_config(), signals=signals).run()
+
+    assert trades.empty
+
+
+def test_gaussian_filter_config_defaults_and_validation():
+    config = Config()
+
+    assert config.entry_gaussian_trend_enabled
+    assert config.entry_gaussian_source == "close"
+    assert config.entry_gaussian_length == 14
+    assert config.entry_gaussian_poles == 4
+    assert config.entry_gaussian_atr_length == 14
+    assert config.entry_gaussian_adaptive_width
+
+    with pytest.raises(ValueError, match="Gaussian"):
+        Config(entry_gaussian_source="volume")
+    with pytest.raises(ValueError, match="Gaussian"):
+        Config(entry_gaussian_poles=5)
+
+
+def test_live_config_reads_gaussian_filter_settings_from_environment(monkeypatch):
+    monkeypatch.setenv("BOT_STRATEGY_ENTRY_GAUSSIAN_TREND", "false")
+    monkeypatch.setenv("BOT_STRATEGY_ENTRY_GAUSSIAN_SOURCE", "hl2")
+    monkeypatch.setenv("BOT_STRATEGY_ENTRY_GAUSSIAN_LENGTH", "8")
+
+    config = build_strategy_config()
+
+    assert not config.entry_gaussian_trend_enabled
+    assert config.entry_gaussian_source == "hl2"
+    assert config.entry_gaussian_length == 8

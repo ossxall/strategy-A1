@@ -32,6 +32,7 @@ def setup_entry():
         timeframe="30min",
         stop_loss_pct=0.10,
         entry_atr_enabled=False,
+        entry_gaussian_trend_enabled=False,
         entry_rsi_divergence_enabled=False,
         partial_tp_enabled=False,
         partial_tp2_r=0.0,
