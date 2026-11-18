@@ -63,6 +63,12 @@ def test_monthly_backtest_html_renders_isolated_panels_per_page(tmp_path, monkey
     assert "domain:[0, 1]" in document
     assert 'id="previous"' in document
     assert 'id="next"' in document
+    assert "function requestedPage(pageCount)" in document
+    assert 'url.searchParams.set("page", String(pageNumber))' in document
+    assert 'await showPage(requestedPage(manifest.pages.length) - 1, "replace")' in document
+    assert 'id="page-select" aria-label="Seleccionar página" disabled' in document
+    assert 'pageSelect.addEventListener("change"' in document
+    assert 'showPage(Number(pageSelect.value) - 1)' in document
     assert 'id="monthly-data"' not in document
     assert "2024-01" not in document
     manifest = json.loads(

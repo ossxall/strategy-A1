@@ -21,19 +21,19 @@
     body { overflow-x:hidden; font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
            line-height:1.45; -webkit-font-smoothing:antialiased; }
     .page-header {
-      position:relative; z-index:2; display:flex; align-items:center; justify-content:space-between;
-      gap:1.5rem; padding:1.1rem clamp(1rem,3vw,2.5rem);
+       position:relative; z-index:2; display:flex; align-items:center; justify-content:space-between;
+      gap:1.5rem; padding:1rem;
       background:rgba(17,26,36,.96); border-bottom:1px solid var(--border);
       box-shadow:0 8px 24px rgba(0,0,0,.16);
     }
     .title-block { min-width:0; }
-    .eyebrow { display:block; margin-bottom:.25rem; color:var(--accent); font-size:.68rem;
+    .eyebrow { display:block; margin-bottom:.25rem; color:var(--accent); font-size:.85rem;
                font-weight:700; letter-spacing:.14em; text-transform:uppercase; }
-    h1 { margin:0; color:var(--text); font-size:clamp(1.1rem,2vw,1.45rem);
+    h1 { margin:0; color:var(--text); font-size:.85rem;
          font-weight:650; letter-spacing:-.025em; overflow-wrap:anywhere; }
-    .subtitle { margin:.3rem 0 0; color:var(--muted); font-size:.86rem; }
+    .subtitle { margin:.3rem 0 0; color:var(--muted); font-size:.85rem; }
     .pager {
-      display:grid; grid-template-columns:auto minmax(10rem,auto) auto auto; align-items:center;
+      display:grid; grid-template-columns:auto minmax(10rem,auto) auto auto auto; align-items:center;
       gap:.45rem; padding:.35rem; border:1px solid var(--border); border-radius:.75rem;
       background:var(--page); flex-shrink:0;
     }
@@ -47,7 +47,16 @@
     .pager-button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
     .pager-button:disabled { color:#637282; cursor:not-allowed; opacity:.62; }
     .page-label { min-width:10rem; padding:0 .35rem; color:#c8d4df; text-align:center;
-                  font-size:.82rem; font-variant-numeric:tabular-nums; }
+                  font-size:.85rem; font-variant-numeric:tabular-nums; }
+    .page-selector { display:flex; align-items:center; gap:.4rem; color:var(--muted);
+                     font-size:.85rem; white-space:nowrap; }
+    .page-selector select {
+      min-height:2.45rem; min-width:5.25rem; padding:.45rem .6rem; border:1px solid var(--border);
+      border-radius:.5rem; background:var(--surface-raised); color:var(--text); font:inherit;
+      font-variant-numeric:tabular-nums;
+    }
+    .page-selector select:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+    .page-selector select:disabled { color:#637282; cursor:not-allowed; opacity:.62; }
     main { display:block; width:100%; padding:0; }
     .chart-shell {
       display:block; width:100%; max-width:none; margin:0; overflow:hidden; padding:16px;
@@ -67,15 +76,19 @@
     .status { padding:2rem; color:var(--muted); text-align:center; }
     @media (max-width:700px) {
       .page-header { align-items:stretch; flex-direction:column; gap:.9rem; padding:1rem; }
-      .pager { width:100%; grid-template-columns:auto minmax(0,1fr) auto auto; }
-      .page-label { min-width:0; }
+      .pager { width:100%; grid-template-columns:minmax(0,1fr) auto minmax(0,1fr); }
+      .pager #previous { grid-column:1; grid-row:1; }
+      .pager #next { grid-column:3; grid-row:1; }
+      .page-label { grid-column:1; grid-row:2; min-width:0; text-align:left; }
+      .page-selector { grid-column:2; grid-row:2; }
+      .pager #last { grid-column:3; grid-row:2; }
       .chart-shell { padding:8px; }
       .chart-panels { gap:8px; }
       .panel-card { padding:8px; border-radius:.55rem; }
     }
     @media (max-width:390px) {
-      .pager-button { padding:.5rem .6rem; font-size:.8rem; }
-      .page-label { font-size:.75rem; }
+      .pager-button { padding:.5rem .6rem; font-size:.85rem; }
+      .page-label { font-size:.85rem; }
     }
   </style>
 </head>
@@ -89,6 +102,10 @@
     <nav class="pager" aria-label="Paginación mensual">
       <button class="pager-button" id="previous" type="button" disabled>← Anterior</button>
       <span class="page-label" id="page-label" aria-live="polite"></span>
+      <label class="page-selector" for="page-select">
+        Página
+        <select id="page-select" aria-label="Seleccionar página" disabled></select>
+      </label>
       <button class="pager-button" id="next" type="button" disabled>Siguiente →</button>
       <button class="pager-button" id="last" type="button" disabled>Última »</button>
     </nav>
@@ -108,6 +125,7 @@
     const previous = document.getElementById("previous");
     const next = document.getElementById("next");
     const last = document.getElementById("last");
+    const pageSelect = document.getElementById("page-select");
     const status = document.getElementById("status");
     const config = {responsive:true, displaylogo:false, scrollZoom:true,
                     displayModeBar:"hover",
@@ -117,6 +135,23 @@
     let activePlots = [];
     let renderSequence = 0;
     let chartHeight = 0;
+
+    function requestedPage(pageCount) {
+      const value = Number(new URLSearchParams(window.location.search).get("page"));
+      const page = Number.isInteger(value) && value >= 1 ? value : 1;
+      return Math.min(page, pageCount);
+    }
+
+    function updatePageUrl(pageNumber, historyMode) {
+      const url = new URL(window.location.href);
+      url.searchParams.set("page", String(pageNumber));
+      if (url.href === window.location.href || historyMode === "none") return;
+      if (historyMode === "push") {
+        window.history.pushState(window.history.state, "", url);
+      } else {
+        window.history.replaceState(window.history.state, "", url);
+      }
+    }
 
     async function loadJson(url) {
       const response = await fetch(url, {cache:"no-store"});
@@ -223,7 +258,7 @@
       }).filter(panel => panel.data.length);
     }
 
-    async function showPage(index) {
+    async function showPage(index, historyMode = "push") {
       if (!manifest || !manifest.pages.length) {
         label.textContent = "No hay meses para mostrar";
         previous.disabled = true;
@@ -231,7 +266,9 @@
         last.disabled = true;
         return;
       }
-      current = index;
+      current = Math.max(0, Math.min(index, manifest.pages.length - 1));
+      updatePageUrl(current + 1, historyMode);
+      pageSelect.value = String(current + 1);
       const sequence = ++renderSequence;
       const entry = manifest.pages[current];
       previous.disabled = true;
@@ -297,13 +334,26 @@
           label.textContent = "Sin datos";
           return;
         }
+        pageSelect.replaceChildren(...manifest.pages.map((page, index) => {
+          const option = document.createElement("option");
+          option.value = String(index + 1);
+          option.textContent = `${index + 1} · ${page.label || "Página"}`;
+          return option;
+        }));
+        pageSelect.disabled = false;
         previous.addEventListener("click", () => showPage(current - 1));
         next.addEventListener("click", () => showPage(current + 1));
         last.addEventListener("click", () => showPage(manifest.pages.length - 1));
+        pageSelect.addEventListener("change", () => {
+          showPage(Number(pageSelect.value) - 1);
+        });
         window.addEventListener("resize", () => {
           activePlots.forEach(plot => Plotly.Plots.resize(plot));
         });
-        await showPage(0);
+        window.addEventListener("popstate", () => {
+          showPage(requestedPage(manifest.pages.length) - 1, "none");
+        });
+        await showPage(requestedPage(manifest.pages.length) - 1, "replace");
       } catch (error) {
         console.error("No se pudo cargar el manifiesto del backtest:", error);
         document.getElementById("subtitle").textContent = "Datos no disponibles";
