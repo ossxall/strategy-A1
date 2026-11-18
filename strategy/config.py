@@ -209,7 +209,7 @@ class Config:
     # after 2 consecutive touches or 3 within 5 bars, without a breakout and
     # with an open loss.
     #
-    ema55_touch_exit_enabled: bool = True
+    ema55_touch_exit_enabled: bool = False
     ema55_touch_tolerance_pct: float = 0.1
     ema55_touch_lookback_bars: int = 5
     ema55_touch_min_touches: int = 3
