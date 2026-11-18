@@ -5,7 +5,7 @@ from pathlib import Path
 
 from env_profiles import load_direct_profile
 
-load_direct_profile(Path(__file__).resolve().parents[1])
+load_direct_profile(Path(__file__).resolve().parents[1], service="feed")
 
 run = importlib.import_module("feed.cli").run
 

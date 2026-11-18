@@ -280,7 +280,7 @@ def test_gaussian_filter_config_defaults_and_validation():
         Config(gaussian_trend_reversal_exit_pct=0)
 
 
-def test_live_config_reads_gaussian_filter_settings_from_environment(monkeypatch):
+def test_live_config_ignores_gaussian_environment_overrides(monkeypatch):
     monkeypatch.setenv("BOT_STRATEGY_ENTRY_GAUSSIAN_TREND", "false")
     monkeypatch.setenv("BOT_STRATEGY_ENTRY_GAUSSIAN_SOURCE", "hl2")
     monkeypatch.setenv("BOT_STRATEGY_ENTRY_GAUSSIAN_LENGTH", "8")
@@ -289,8 +289,8 @@ def test_live_config_reads_gaussian_filter_settings_from_environment(monkeypatch
 
     config = build_strategy_config()
 
-    assert not config.entry_gaussian_trend_enabled
-    assert config.entry_gaussian_source == "hl2"
-    assert config.entry_gaussian_length == 8
-    assert not config.gaussian_trend_reversal_exit_enabled
-    assert config.gaussian_trend_reversal_exit_pct == 35.0
+    assert config.entry_gaussian_trend_enabled
+    assert config.entry_gaussian_source == "close"
+    assert config.entry_gaussian_length == 14
+    assert config.gaussian_trend_reversal_exit_enabled
+    assert config.gaussian_trend_reversal_exit_pct == 25.0

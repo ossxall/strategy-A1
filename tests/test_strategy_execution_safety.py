@@ -137,7 +137,7 @@ def test_partial_closes_reconcile_cash_and_allocate_entry_fee_once():
             }
         ]
     )
-    config = quiet_config(commission_bps=10.0)
+    config = quiet_config(initial_capital=10_000.0, commission_bps=10.0)
     engine = Backtester(
         bars,
         config,
@@ -196,7 +196,7 @@ def test_monthly_loss_limit_closes_position_and_blocks_reentry_until_month_end()
     )
     engine = Backtester(
         bars,
-        quiet_config(monthly_loss_limit_pct=5.0),
+        quiet_config(initial_capital=10_000.0, monthly_loss_limit_pct=5.0),
         signals=manual_signals(bars, [1, 0, 1]),
     )
 

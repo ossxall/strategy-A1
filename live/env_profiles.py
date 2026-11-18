@@ -7,6 +7,46 @@ import re
 import sys
 from pathlib import Path
 
+_SECRET_ENV = frozenset(
+    {
+        "BOT_BINANCE_ACCOUNT_ID",
+        "BOT_BINANCE_API_KEY",
+        "BOT_BINANCE_API_SECRET",
+        "BOT_BINANCE_PRODUCTION_AUDIT_API_KEY",
+        "BOT_BINANCE_PRODUCTION_AUDIT_API_SECRET",
+        "LETSENCRYPT_EMAIL",
+        "MONITOR_BOT_URL",
+        "MONITOR_EXECUTOR_URL",
+        "MONITOR_FEED_URL",
+        "MONITOR_PASSWORD",
+        "MONITOR_TELEGRAM_BOT_TOKEN",
+        "SQLITE_WEB_PASSWORD",
+    }
+)
+
+_SERVICE_SECRETS = {
+    "executor": frozenset(
+        {
+            "BOT_BINANCE_ACCOUNT_ID",
+            "BOT_BINANCE_API_KEY",
+            "BOT_BINANCE_API_SECRET",
+            "BOT_BINANCE_PRODUCTION_AUDIT_API_KEY",
+            "BOT_BINANCE_PRODUCTION_AUDIT_API_SECRET",
+        }
+    ),
+    "healthcheck": frozenset({"BOT_BINANCE_ACCOUNT_ID"}),
+    "monitor": frozenset(
+        {
+            "MONITOR_BOT_URL",
+            "MONITOR_EXECUTOR_URL",
+            "MONITOR_FEED_URL",
+            "MONITOR_PASSWORD",
+            "MONITOR_TELEGRAM_BOT_TOKEN",
+        }
+    ),
+    "sqlweb": frozenset({"SQLITE_WEB_PASSWORD"}),
+}
+
 _PROD_REQUIRED_ENV = {
     "feed": (
         "FEED_SYMBOL",
@@ -17,9 +57,6 @@ _PROD_REQUIRED_ENV = {
     "bot": (
         "BOT_SYMBOL",
         "BOT_INTERVAL",
-        "BOT_STRATEGY_TIMEFRAME",
-        "BOT_STRATEGY_RISK_PCT",
-        "BOT_STRATEGY_STOP_LOSS_PCT",
         "BOT_LIVE_ONLY",
     ),
     "executor": (
@@ -35,8 +72,8 @@ _PROD_REQUIRED_ENV = {
 }
 
 
-def _load_simple_env(path: Path) -> None:
-    """Fallback para perfiles sencillos KEY=VALUE si python-dotenv falta."""
+def _load_simple_env(path: Path, allowed_keys: frozenset[str]) -> None:
+    """Fallback para leer solo las claves privadas de un archivo KEY=VALUE."""
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except OSError:
@@ -49,7 +86,11 @@ def _load_simple_env(path: Path) -> None:
             text = text[7:].lstrip()
         key, separator, raw_value = text.partition("=")
         key = key.strip()
-        if not separator or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
+        if (
+            not separator
+            or key not in allowed_keys
+            or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key)
+        ):
             continue
         if key in os.environ:
             continue
@@ -62,30 +103,102 @@ def _load_simple_env(path: Path) -> None:
         os.environ[key] = os.path.expandvars(value)
 
 
-def load_direct_profile(live_dir: Path) -> None:
-    """Carga .env.dev por defecto o el perfil indicado por APP_ENV."""
+def _load_yaml_profile(live_dir: Path, profile: str) -> None:
+    """Carga config.dev.yaml y en producción aplica config.prod.yaml encima."""
+    try:
+        import yaml
+    except ImportError as exc:
+        raise RuntimeError(
+            "Falta PyYAML; instala las dependencias de live/requirements.txt."
+        ) from exc
+
+    selected_profiles = ("dev", "prod") if profile == "prod" else ("dev",)
+    merged: dict[str, object] = {}
+    for selected_profile in selected_profiles:
+        path = live_dir / f"config.{selected_profile}.yaml"
+        try:
+            with path.open("r", encoding="utf-8") as stream:
+                values = yaml.safe_load(stream)
+        except OSError as exc:
+            raise ValueError(
+                f"No se pudo leer la configuración {path}: {exc}"
+            ) from exc
+
+        if not isinstance(values, dict):
+            raise ValueError(f"{path} debe contener un mapa YAML de variables.")
+
+        for name, value in values.items():
+            if (
+                not isinstance(name, str)
+                or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name)
+            ):
+                raise ValueError(f"Nombre de variable no válido en {path}: {name!r}")
+            if name.startswith("BOT_STRATEGY_"):
+                raise ValueError(
+                    f"{name} no se puede configurar por entorno; "
+                    "la estrategia usa los valores de strategy/config.py."
+                )
+            if name in _SECRET_ENV:
+                raise ValueError(
+                    f"{name} es privada y debe configurarse en el entorno "
+                    "o en el .env del perfil."
+                )
+            if isinstance(value, (dict, list, tuple, set)):
+                raise ValueError(f"{name} debe tener un valor YAML escalar.")
+            merged[name] = value
+
+    # Aplicar solo tras fusionar mantiene la prioridad de variables exportadas
+    # y permite que el perfil prod reemplace correctamente los valores base.
+    for name, value in merged.items():
+        os.environ.setdefault(name, "" if value is None else str(value))
+
+
+def _load_profile_secrets(
+    live_dir: Path, profile: str, service: str | None
+) -> None:
+    """Carga del .env del perfil solo los secretos requeridos por el servicio."""
+    allowed_keys = _SERVICE_SECRETS.get(service or "", frozenset())
+    if not allowed_keys:
+        return
+
+    path = live_dir / f".env.{profile}"
+    if not path.is_file():
+        return
+
+    try:
+        from dotenv import dotenv_values
+    except ImportError:
+        _load_simple_env(path, allowed_keys)
+        return
+
+    for name, value in dotenv_values(path).items():
+        if name in allowed_keys and value is not None and name not in os.environ:
+            os.environ[name] = value
+
+
+def load_direct_profile(live_dir: Path, *, service: str | None = None) -> None:
+    """Carga la base dev y, si APP_ENV=prod, sus overrides de producción.
+
+    Carga además, solo, las claves privadas del servicio desde ``.env.dev`` o
+    ``.env.prod``. ``.env.example`` es únicamente una plantilla.
+    """
     profile = os.getenv("APP_ENV", "dev").strip().lower() or "dev"
     if profile not in {"dev", "prod"}:
         raise ValueError("APP_ENV debe ser dev o prod")
 
-    profile_path = live_dir / f".env.{profile}"
-    common_path = live_dir / ".env"
-    try:
-        from dotenv import load_dotenv
-    except ImportError:
-        _load_simple_env(profile_path)
-        _load_simple_env(common_path)
-        cwd_env = Path.cwd() / ".env"
-        if cwd_env.resolve() != common_path.resolve():
-            _load_simple_env(cwd_env)
-        return
+    if service is not None and service not in {
+        "bot",
+        "executor",
+        "feed",
+        "healthcheck",
+        "monitor",
+        "sqlweb",
+        "webssh",
+    }:
+        raise ValueError(f"Servicio desconocido para cargar secretos: {service}")
 
-    # El perfil prevalece sobre el .env común; las variables exportadas en
-    # la shell mantienen prioridad por override=False.
-    if profile_path.is_file():
-        load_dotenv(profile_path, override=False)
-    load_dotenv(common_path, override=False)
-    load_dotenv(override=False)
+    _load_yaml_profile(live_dir, profile)
+    _load_profile_secrets(live_dir, profile, service)
 
 
 def validate_prod_environment(service: str) -> None:

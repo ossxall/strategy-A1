@@ -5,7 +5,7 @@ el paquete desde el directorio live con `python -m bot`; no hay opciones CLI.
 
 ## Módulos
 
-- `config.py`: defaults, lectura de `.env` y configuración de `strategy.Config`.
+- `config.py`: defaults, carga del perfil YAML y configuración de `strategy.Config`.
 - `storage.py`: persistencia idempotente en `signal.db` y lectura de velas
   cerradas de `feed.db`.
 - `series.py`: remuestreo y construcción de series para diagnóstico.
@@ -24,9 +24,11 @@ el paquete desde el directorio live con `python -m bot`; no hay opciones CLI.
 - `executor.py`: ruta de compatibilidad del worker para consumidores existentes.
 - `__main__.py`: entrypoint sin opciones de CLI.
 
-La configuración operativa se toma del perfil de Compose (`live/.env.dev` por
-defecto o `live/.env.prod` con `APP_ENV=prod`) y de las variables de entorno.
-Al ejecutar directamente `python live/bot.py`, `python -m bot` o
+`config.dev.yaml` contiene la base no secreta; `APP_ENV=dev` la usa directamente
+y `APP_ENV=prod` aplica encima solo los cambios de `config.prod.yaml`. Las
+variables ya exportadas tienen prioridad. Los secretos de cada perfil se cargan
+por separado desde `.env.dev` o `.env.prod`. Al ejecutar directamente
+`python live/bot.py`, `python -m bot` o
 `python live/bot/executor.py`, el perfil también se carga antes de iniciar el
 proceso. No se admiten argumentos de terminal.
 
@@ -97,7 +99,9 @@ El executor es el único componente que configura y aplica leverage en Binance:
 actual de Binance, limitado por ese tope. Estos ajustes no tienen efecto mientras
 el trading siga deshabilitado. El tamaño también puede ser menor por `risk_pct`,
 los multiplicadores adaptativos y el límite de exposición.
-`BOT_STRATEGY_INITIAL_CAPITAL=100` es la referencia del backtest; el worker lee el
+La estrategia live usa exclusivamente los valores definidos en
+`strategy/config.py`; las variables `BOT_STRATEGY_*` del proceso no los modifican.
+El `initial_capital` hardcodeado sirve para simulaciones; el worker lee el
 equity/margen real de Binance para calcular la cantidad live.
 El executor fija un corte inicial por cuenta con un margen corto de recuperación
 (`BOT_EXECUTOR_INITIAL_BACKFILL_SECONDS`) para no ejecutar el histórico al activarlo.

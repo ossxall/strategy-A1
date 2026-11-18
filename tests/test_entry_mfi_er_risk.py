@@ -85,6 +85,7 @@ def test_entry_sizing_factors_and_quantity_impact_are_saved_on_trade():
     )
     config = Config(
         timeframe="30min",
+        initial_capital=10_000.0,
         stop_loss_pct=0.1,
         entry_mfi_risk_scaling_enabled=True,
         entry_er_risk_scaling_enabled=True,

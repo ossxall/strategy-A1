@@ -1,0 +1,7 @@
+# Overrides no secretos sobre config.dev.yaml cuando APP_ENV=prod.
+# ADVERTENCIA: trading real y ambos opt-ins están activos en este perfil.
+FEED_START_DATE: "2026-11-01"
+BOT_BINANCE_TRADING_ENABLED: "true"
+BOT_BINANCE_ENVIRONMENT: "production"
+BOT_BINANCE_ALLOW_LIVE_TRADING: "true"
+BOT_MODE: "live"

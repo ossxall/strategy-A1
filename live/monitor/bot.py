@@ -436,7 +436,7 @@ async def run() -> None:
     except TelegramUnauthorizedError:
         logger.error(
             "Telegram rechazó el token. Revisa MONITOR_TELEGRAM_BOT_TOKEN "
-            "en el perfil activo (.env.dev por defecto; .env.prod con APP_ENV=prod)."
+            "en el archivo .env correspondiente al valor de APP_ENV."
         )
         raise SystemExit(1) from None
     finally:

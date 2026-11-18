@@ -19,7 +19,7 @@ for _parent in (_PACKAGE_DIR, *_PACKAGE_DIR.parents):
 if __name__ == "bot" and len(sys.argv) == 1:
     from .env import load_direct_profile
 
-    load_direct_profile(_PACKAGE_DIR.parent)
+    load_direct_profile(_PACKAGE_DIR.parent, service="bot")
 
 from .app import HTTP_SERVER_AVAILABLE, SignalBot, main, request_stop
 from .config import (

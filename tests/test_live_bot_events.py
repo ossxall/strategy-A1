@@ -85,16 +85,22 @@ def test_bot_rejects_terminal_arguments_instead_of_parsing_cli():
     assert "no acepta argumentos" in result.stderr
 
 
-def test_strategy_parameters_continue_to_load_from_environment(monkeypatch):
+def test_strategy_parameters_ignore_environment_overrides(monkeypatch):
+    defaults = Config()
     monkeypatch.setenv("BOT_STRATEGY_TIMEFRAME", "15min")
     monkeypatch.setenv("BOT_STRATEGY_EMA_FAST", "8")
     monkeypatch.setenv("BOT_STRATEGY_EMA_SLOW", "21")
+    monkeypatch.setenv("BOT_STRATEGY_INITIAL_CAPITAL", "12345")
+    monkeypatch.setenv("BOT_STRATEGY_PARTIAL_TP3_PCT", "10")
 
     config = build_strategy_config()
 
-    assert config.timeframe == "15min"
-    assert config.ema_fast == 8
-    assert config.ema_slow == 21
+    assert config == defaults
+    assert config.timeframe == "30min"
+    assert config.ema_fast == 55
+    assert config.ema_slow == 200
+    assert config.initial_capital == defaults.initial_capital
+    assert config.partial_tp3_pct == 5.0
 
 
 def test_backtest_mode_generates_report_without_publishing_signals(

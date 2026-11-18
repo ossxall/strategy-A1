@@ -12,6 +12,12 @@ import sys
 from pathlib import Path
 
 LIVE_DIR = Path(__file__).resolve().parents[1]
+if str(LIVE_DIR) not in sys.path:
+    sys.path.insert(0, str(LIVE_DIR))
+
+from env_profiles import load_direct_profile
+
+load_direct_profile(LIVE_DIR, service="sqlweb")
 
 
 def _port(value: str) -> int:

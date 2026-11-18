@@ -40,11 +40,12 @@ Desde el directorio `live/`:
 python -m feed
 ```
 
-`live/feed.py` se conserva como launcher compatible. Al ejecutar directamente,
-se carga `live/.env.dev` por defecto o `live/.env.prod` con `APP_ENV=prod`; luego
-se carga `live/.env` como complemento. Las variables ya exportadas en el proceso
-tienen prioridad. Docker Compose inyecta al contenedor el perfil seleccionado por
-`APP_ENV`.
+`live/feed.py` se conserva como launcher compatible. `config.dev.yaml` contiene
+la base común; `APP_ENV=dev` la usa directamente y `APP_ENV=prod` aplica encima
+los overrides de `config.prod.yaml`. Las variables ya exportadas en el proceso
+tienen prioridad. Además, cada perfil carga solo los secretos requeridos por el
+servicio desde `live/.env.dev` o `live/.env.prod`. `.env.example` es una plantilla
+y no se carga. Docker Compose pasa `APP_ENV` al contenedor.
 
 Los endpoints locales son `http://127.0.0.1:8787/live/feed/health` y
 `http://127.0.0.1:8787/live/feed/status`. El gráfico interactivo se sirve en

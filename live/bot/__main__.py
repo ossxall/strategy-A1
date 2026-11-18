@@ -1,7 +1,8 @@
-"""Entrypoint del paquete bot; la configuración se toma de `.env`."""
+"""Entrypoint del paquete bot; la configuración se toma del perfil APP_ENV."""
 
 from __future__ import annotations
 
+import os
 import signal
 import sys
 
@@ -12,7 +13,11 @@ from .config import logger
 def run() -> int:
     """Inicia la aplicación y rechaza cualquier argumento de terminal."""
     if len(sys.argv) > 1:
-        logger.error("El bot no acepta argumentos; configura los valores en live/.env.")
+        logger.error(
+            "El bot no acepta argumentos; configura los valores en "
+            "live/config.%s.yaml y los secretos en el entorno.",
+            os.getenv("APP_ENV", "dev"),
+        )
         return 2
 
     signal.signal(signal.SIGINT, request_stop)

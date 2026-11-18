@@ -13,7 +13,7 @@ if __package__ in {None, ""}:
         sys.path.insert(0, str(live_dir))
     from bot.env import load_direct_profile
 
-    load_direct_profile(live_dir)
+    load_direct_profile(live_dir, service="executor")
     from bot.execution.worker import ExecutionWorker, ExecutorSettings, main
 else:
     from .execution.worker import ExecutionWorker, ExecutorSettings, main

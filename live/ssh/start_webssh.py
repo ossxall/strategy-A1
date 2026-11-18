@@ -9,6 +9,14 @@ import sys
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+LIVE_DIR = SCRIPT_DIR.parent
+if str(LIVE_DIR) not in sys.path:
+    sys.path.insert(0, str(LIVE_DIR))
+
+from env_profiles import load_direct_profile
+
+load_direct_profile(LIVE_DIR, service="webssh")
+
 VENV_DIR = SCRIPT_DIR / ".venv"
 VENV_PYTHON = VENV_DIR / "bin" / "python"
 REQUIREMENTS = SCRIPT_DIR.parent / "requirements.txt"
