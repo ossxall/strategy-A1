@@ -101,6 +101,8 @@ def test_backtest_figure_visualizes_atr_filter_and_hides_it_when_disabled():
             "atr_ratio": [np.nan, 1.5, 0.4, 1.0],
             "atr_filter_ready": [False, True, True, True],
             "atr_filter_allowed": [True, True, False, True],
+            "entry_gaussian_trend_line": [10.0, 10.1, 10.2, 10.3],
+            "entry_gaussian_trend_dir": [1, 1, -1, -1],
             "target": [0, 1, 0, -1],
         },
         index=index,
@@ -127,6 +129,8 @@ def test_backtest_figure_visualizes_atr_filter_and_hides_it_when_disabled():
     assert "ATR ratio · permitido" in trace_names
     assert "ATR ratio · bloquea entrada" in trace_names
     assert "ATR warm-up · permitido" in trace_names
+    assert "Gaussian Filter Trend ↑" in trace_names
+    assert "Gaussian Filter Trend ↓" in trace_names
     assert len(figure.layout.shapes) >= 3
     assert figure.to_json()
 
@@ -134,6 +138,7 @@ def test_backtest_figure_visualizes_atr_filter_and_hides_it_when_disabled():
     disabled_trace_names = {trace.name for trace in disabled_figure.data}
     assert "ATR" not in disabled_trace_names
     assert "ATR ratio · permitido" not in disabled_trace_names
+    assert "Gaussian Filter Trend ↑" in disabled_trace_names
     empty_adx_figure = build(Config(entry_atr_enabled=False, entry_adx_enabled=True))
     assert "ADX entrada" not in {trace.name for trace in empty_adx_figure.data}
 

@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 
 from strategy.config import Config
+from strategy.indicators import gaussian_filter_trend
 from strategy.models import DEFAULT_OUTPUT_DIR
 
 # ---------------------------------------------------------------------------
@@ -498,6 +499,37 @@ def build_backtest_figure(
             weak_exit = auto_weak if weak_exit is None else weak_exit
             rsi_div_exit = auto_div if rsi_div_exit is None else rsi_div_exit
 
+    if signals is not None:
+        gaussian_line_available = (
+            "entry_gaussian_trend_line" in signals
+            and np.isfinite(
+                signals["entry_gaussian_trend_line"].to_numpy(float)
+            ).any()
+        )
+        gaussian_dir_available = "entry_gaussian_trend_dir" in signals
+        if not gaussian_line_available or not gaussian_dir_available:
+            gaussian = gaussian_filter_trend(
+                bars,
+                length=cfg.entry_gaussian_length,
+                poles=cfg.entry_gaussian_poles,
+                atr_length=cfg.entry_gaussian_atr_length,
+                fixed_multiplier=cfg.entry_gaussian_fixed_multiplier,
+                adaptive_width=cfg.entry_gaussian_adaptive_width,
+                efficiency_length=cfg.entry_gaussian_efficiency_length,
+                trend_multiplier=cfg.entry_gaussian_trend_multiplier,
+                chop_multiplier=cfg.entry_gaussian_chop_multiplier,
+                efficiency_smooth=cfg.entry_gaussian_efficiency_smooth,
+                source=cfg.entry_gaussian_source,
+            )
+            signals = signals.copy()
+            # Keep the line visible even when the entry filter is disabled or
+            # custom signals do not carry its diagnostics.
+            if not gaussian_line_available:
+                signals["entry_gaussian_trend_line"] = gaussian["trend_line"]
+                signals["entry_gaussian_trend_dir"] = gaussian["trend_dir"]
+            elif not gaussian_dir_available:
+                signals["entry_gaussian_trend_dir"] = gaussian["trend_dir"]
+
     summary_trades = trades if trades is not None else pd.DataFrame()
     execution_events = (
         equity.loc[equity["execution_rejection"].fillna("").astype(str).ne("")].copy()
@@ -708,6 +740,23 @@ def build_backtest_figure(
             if column in signals:
                 fig.add_trace(_line_trace(bars_x, signals[column].to_numpy(float), label, color),
                               row=r, col=1, secondary_y=False)
+        if {"entry_gaussian_trend_line", "entry_gaussian_trend_dir"}.issubset(
+            signals.columns
+        ):
+            gaussian_line = signals["entry_gaussian_trend_line"].to_numpy(float)
+            gaussian_dir = signals["entry_gaussian_trend_dir"].to_numpy(int)
+            for direction, color, label in (
+                (1, UP_COLOR, "Gaussian Filter Trend ↑"),
+                (-1, DOWN_COLOR, "Gaussian Filter Trend ↓"),
+                (0, "#9e9e9e", "Gaussian Filter Trend neutral"),
+            ):
+                mask = (gaussian_dir == direction) & np.isfinite(gaussian_line)
+                if mask.any():
+                    line_values = np.where(mask, gaussian_line, np.nan)
+                    fig.add_trace(
+                        _line_trace(sig_x, line_values, label, color, width=2.2),
+                        row=r, col=1, secondary_y=False,
+                    )
     if "volume" in bars:
         vol = bars["volume"].to_numpy(float)
         # Barras de volumen tradicionales: color según la dirección de la vela.
