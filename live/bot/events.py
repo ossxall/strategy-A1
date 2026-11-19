@@ -49,6 +49,31 @@ def _reason_is_intrabar(reason: str) -> bool:
     ) or reason == "BREAKEVEN"
 
 
+def _simulation_cache_key(
+    bars: pd.DataFrame,
+    signals: pd.DataFrame,
+    adx_exit: np.ndarray | None,
+    weak_exit: np.ndarray | None,
+    rsi_div_exit: np.ndarray | None,
+    cfg: Config,
+) -> tuple:
+    """Identifica el baseline cerrado que puede reutilizarse entre polls 1m."""
+    last = bars.iloc[-1]
+    return (
+        repr(cfg),
+        len(bars),
+        bars.index[0].value,
+        bars.index[-1].value,
+        tuple(float(last[column]) for column in ("open", "high", "low", "close", "volume")),
+        int(signals["target"].iloc[-1]),
+        bool(signals["valid"].iloc[-1]),
+        int(signals["trend_bias"].iloc[-1]),
+        None if adx_exit is None else bool(np.asarray(adx_exit)[-1]),
+        None if weak_exit is None else bool(np.asarray(weak_exit)[-1]),
+        None if rsi_div_exit is None else int(np.asarray(rsi_div_exit)[-1]),
+    )
+
+
 def build_events_and_result(
     bars: pd.DataFrame,
     signals: pd.DataFrame,
@@ -58,11 +83,14 @@ def build_events_and_result(
     cfg: Config,
     symbol: str,
     interval: str,
+    intrabar_bars: pd.DataFrame | None = None,
+    simulation_cache: dict | None = None,
 ) -> tuple[list[dict], pd.DataFrame, pd.DataFrame]:
     """Ejecuta una vez el backtester y devuelve eventos, trades y equity.
 
     Las intenciones de la última vela se publican para la siguiente apertura,
-    sin esperar al cierre de esa vela futura.
+    sin esperar al cierre de esa vela futura. En live, ``simulation_cache``
+    conserva el baseline cerrado mientras sólo crece la ventana 1m actual.
     """
     if len(bars) < 2:
         return (
@@ -79,16 +107,51 @@ def build_events_and_result(
             ),
         )
 
-    engine = Backtester(
-        bars,
-        replace(cfg, force_close_at_end=False),
-        signals,
-        adx_exit,
-        weak_exit,
-        rsi_div_exit,
-    )
-    with contextlib.redirect_stdout(io.StringIO()):
-        backtest_trades, equity = engine.run()
+    live_cache_enabled = simulation_cache is not None and intrabar_bars is not None
+    if live_cache_enabled:
+        cache_key = _simulation_cache_key(
+            bars, signals, adx_exit, weak_exit, rsi_div_exit, cfg
+        )
+        baseline = simulation_cache.get("baseline")
+        if baseline is None or simulation_cache.get("key") != cache_key:
+            baseline = Backtester(
+                bars,
+                replace(cfg, force_close_at_end=False),
+                signals,
+                adx_exit,
+                weak_exit,
+                rsi_div_exit,
+                intrabar_bars=intrabar_bars,
+                process_intrabar_tail=False,
+                intrabar_timeframe=interval,
+            )
+            with contextlib.redirect_stdout(io.StringIO()):
+                baseline.run()
+            # El estado de cartera y los timestamps de salidas bastan para el
+            # checkpoint; conservar millones de velas/arrays 1m no.
+            baseline.release_intrabar_source()
+            simulation_cache.clear()
+            simulation_cache.update({"key": cache_key, "baseline": baseline})
+        engine = baseline.fork_for_intrabar_tail(
+            intrabar_bars,
+            intrabar_timeframe=interval,
+        )
+        with contextlib.redirect_stdout(io.StringIO()):
+            backtest_trades, equity = engine.run_intrabar_tail()
+    else:
+        engine = Backtester(
+            bars,
+            replace(cfg, force_close_at_end=False),
+            signals,
+            adx_exit,
+            weak_exit,
+            rsi_div_exit,
+            intrabar_bars=intrabar_bars,
+            process_intrabar_tail=intrabar_bars is not None,
+            intrabar_timeframe=interval if intrabar_bars is not None else None,
+        )
+        with contextlib.redirect_stdout(io.StringIO()):
+            backtest_trades, equity = engine.run()
 
     timeframe_ms = int(pd.Timedelta(cfg.timeframe).total_seconds() * 1000)
     created_at = utc_iso()
@@ -103,6 +166,9 @@ def build_events_and_result(
         )
     )
     closes = dict(zip(bar_times, bars["close"].to_numpy(float)))
+    replayed_minute_times = {
+        ts_ms(timestamp) for timestamp in engine.intrabar_exit_times
+    }
 
     def make_event(
         event: str,
@@ -182,6 +248,10 @@ def build_events_and_result(
     for position_id in sorted(entries):
         side, entry_time, entry_price = entries[position_id]
         signal_time = ts_ms(entry_time)
+        entry_bar_time = ts_ms(
+            pd.Timestamp(entry_time).floor(cfg.timeframe)
+            - pd.Timedelta(cfg.timeframe)
+        )
         payload = {
             "action": "OPEN",
             "position_id": position_id,
@@ -194,7 +264,7 @@ def build_events_and_result(
                 "ENTRY",
                 side,
                 "EMA_CROSS",
-                signal_time - timeframe_ms,
+                entry_bar_time,
                 signal_time,
                 entry_price,
                 payload,
@@ -210,9 +280,27 @@ def build_events_and_result(
         for leg in legs:
             intrabar = _reason_is_intrabar(leg.reason)
             leg_time = ts_ms(leg.exit_time)
-            bar_time = leg_time if intrabar else leg_time - timeframe_ms
-            # Solo se cargan velas cerradas: un evento intrabar se observa al cierre.
-            signal_time = bar_time + timeframe_ms if intrabar else leg_time
+            minute_replay = leg_time in replayed_minute_times
+            if intrabar and minute_replay:
+                minute_time = pd.Timestamp(leg.exit_time)
+                bar_time = ts_ms(minute_time.floor(cfg.timeframe))
+                # El feed sólo entrega minutos cerrados: se publica al cierre
+                # del minuto que detectó el toque, no al cierre del timeframe.
+                signal_time = ts_ms(minute_time + pd.Timedelta("1min"))
+            elif intrabar:
+                # Compatibilidad para cierres simulados con OHLC agregado
+                # cuando no se recorrió una ventana completa de 1m.
+                bar_time = leg_time
+                signal_time = bar_time + timeframe_ms
+            else:
+                # Salidas por señal de cierre: el evento corresponde a la vela
+                # estrategia anterior a la apertura en la que se ejecutó.
+                execution_time = pd.Timestamp(leg.exit_time)
+                bar_time = ts_ms(
+                    execution_time.floor(cfg.timeframe)
+                    - pd.Timedelta(cfg.timeframe)
+                )
+                signal_time = leg_time
             quantity_before_close = initial_quantity - prior_closed_quantity
             close_pct = (
                 100.0 * leg.quantity / quantity_before_close
@@ -234,7 +322,17 @@ def build_events_and_result(
             if position_id in entry_sizing:
                 payload["sizing"] = entry_sizing[position_id]
             if intrabar:
-                event_price = closes.get(bar_time, leg.exit_price)
+                if minute_replay and intrabar_bars is not None:
+                    location = intrabar_bars.index.get_indexer(
+                        [pd.Timestamp(leg.exit_time)]
+                    )[0]
+                    event_price = (
+                        float(intrabar_bars["close"].iloc[location])
+                        if location >= 0
+                        else leg.exit_price
+                    )
+                else:
+                    event_price = closes.get(bar_time, leg.exit_price)
                 payload.update(
                     {
                         "fill_price_is_simulated": True,
@@ -357,6 +455,8 @@ def build_events(
     cfg: Config,
     symbol: str,
     interval: str,
+    intrabar_bars: pd.DataFrame | None = None,
+    simulation_cache: dict | None = None,
 ) -> list[dict]:
     """Compatibilidad: devuelve solo los eventos live generados."""
     events, _, _ = build_events_and_result(
@@ -368,5 +468,7 @@ def build_events(
         cfg,
         symbol,
         interval,
+        intrabar_bars,
+        simulation_cache,
     )
     return events

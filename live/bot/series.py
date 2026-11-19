@@ -11,11 +11,18 @@ from strategy.utils import resample_ohlcv, source_minutes
 from .config import logger
 
 
-def resample(raw: pd.DataFrame, timeframe: str) -> pd.DataFrame:
+def resample(
+    raw: pd.DataFrame,
+    timeframe: str,
+    source_interval_minutes: float | None = None,
+) -> pd.DataFrame:
     """Remuestrea OHLCV (copia si el origen ya es igual o superior)."""
-    if raw.empty or pd.Timedelta(minutes=source_minutes(raw)) >= pd.Timedelta(timeframe):
+    source_minutes_value = source_interval_minutes or source_minutes(raw)
+    if raw.empty or pd.Timedelta(minutes=source_minutes_value) >= pd.Timedelta(timeframe):
         return raw.copy()
-    return resample_ohlcv(raw, timeframe)
+    return resample_ohlcv(
+        raw, timeframe, source_interval_minutes=source_minutes_value
+    )
 
 
 def series_frame(
@@ -61,6 +68,7 @@ def build_series_frames(
 ) -> dict[str, tuple[list[str], pd.DataFrame]]:
     """Arma las series por timeframe para el endpoint de diagnóstico."""
     frames: dict[str, tuple[list[str], pd.DataFrame]] = {}
+    source_interval_minutes = pd.Timedelta(interval).total_seconds() / 60
 
     def add(role: str, timeframe: str, make) -> None:
         if timeframe not in frames:
@@ -87,7 +95,10 @@ def build_series_frames(
                 role,
                 timeframe,
                 lambda tf=timeframe: series_frame(
-                    strategy, raw, resample(raw, tf), tf
+                    strategy,
+                    raw,
+                    resample(raw, tf, source_interval_minutes),
+                    tf,
                 ),
             )
     return frames

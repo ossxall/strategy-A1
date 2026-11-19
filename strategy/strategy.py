@@ -62,7 +62,7 @@ Dependencias:
     pip install pandas==3.1.1 pyarrow==26.0.1 numpy==2.5.5 matplotlib==3.11.2 TA-Lib==0.8.3
 """
 from __future__ import annotations
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Optional
 from strategy.config import Config
@@ -459,12 +459,22 @@ class Backtester:
     def __init__(self, bars: pd.DataFrame, config: Config, signals: Optional[pd.DataFrame] = None,
                  adx_exit: Optional[np.ndarray] = None, weak_exit: Optional[np.ndarray] = None,
                  rsi_div_exit: Optional[np.ndarray] = None,
-                 intrabar_bars: Optional[pd.DataFrame] = None):
+                 intrabar_bars: Optional[pd.DataFrame] = None,
+                 process_intrabar_tail: bool = False,
+                 intrabar_timeframe: Optional[str] = None):
         self.bars, self.cfg = bars, config
         self.signals = signals if signals is not None else EMACrossStrategy(config).generate_signals(bars)
         self._intrabar_bars: Optional[pd.DataFrame] = None
         self._intrabar_slices: list[tuple[int, int, bool]] = []
         self._intrabar_o = self._intrabar_h = self._intrabar_l = None
+        self._intrabar_c = None
+        self._intrabar_times_ns: Optional[np.ndarray] = None
+        self._intrabar_timeframe = intrabar_timeframe
+        self._intrabar_tail_last: tuple[pd.Timestamp, float] | None = None
+        self.process_intrabar_tail = process_intrabar_tail
+        # Sólo conserva timestamps de salidas intrabar reales, no todos los
+        # minutos recorridos (el histórico puede contener millones).
+        self.intrabar_exit_times: set[pd.Timestamp] = set()
         if intrabar_bars is not None and not intrabar_bars.empty:
             self._prepare_intrabar_bars(intrabar_bars)
         if config.entry_atr_enabled:
@@ -581,8 +591,8 @@ class Backtester:
         self.streak_in_loss = False
         self._position_pnl = 0.0
 
-    def _prepare_intrabar_bars(self, intrabar_bars: pd.DataFrame) -> None:
-        """Indexa velas 1m por vela de estrategia; nunca las usa para señales."""
+    def _set_intrabar_source(self, intrabar_bars: pd.DataFrame) -> pd.Timedelta:
+        """Valida y carga la fuente intrabar declarada como velas de 1m."""
         if not isinstance(intrabar_bars.index, pd.DatetimeIndex):
             raise ValueError("intrabar_bars debe tener un DatetimeIndex.")
         if not intrabar_bars.index.is_monotonic_increasing or intrabar_bars.index.has_duplicates:
@@ -591,27 +601,45 @@ class Backtester:
         if missing:
             raise ValueError(f"Faltan columnas OHLC en intrabar_bars: {missing}.")
 
-        source_delta = pd.Timedelta(minutes=source_minutes(intrabar_bars))
-        strategy_delta = pd.Timedelta(self.cfg.timeframe)
+        # En live, el intervalo configurado es la fuente de verdad. La mediana
+        # de diferencias no sirve para inferir resolución cuando hay huecos.
+        source_delta = (
+            pd.Timedelta(self._intrabar_timeframe)
+            if self._intrabar_timeframe is not None
+            else pd.Timedelta(minutes=source_minutes(intrabar_bars))
+        )
         if source_delta != pd.Timedelta("1min"):
             raise ValueError(
                 "intrabar_bars debe tener resolución de 1m "
-                f"(resolución detectada: {source_delta})."
+                f"(resolución declarada/detectada: {source_delta})."
             )
+        source_ns = intrabar_bars.index.as_unit("ns").asi8
+        if np.any(source_ns % source_delta.value):
+            raise ValueError("Los timestamps intrabar deben estar alineados al minuto.")
+
+        self._intrabar_bars = intrabar_bars
+        self._intrabar_o = intrabar_bars["open"].to_numpy(float)
+        self._intrabar_h = intrabar_bars["high"].to_numpy(float)
+        self._intrabar_l = intrabar_bars["low"].to_numpy(float)
+        self._intrabar_c = intrabar_bars["close"].to_numpy(float)
+        self._intrabar_times_ns = source_ns
+        return source_delta
+
+    def _prepare_intrabar_bars(self, intrabar_bars: pd.DataFrame) -> None:
+        """Indexa velas 1m por vela de estrategia; nunca las usa para señales."""
+        source_delta = self._set_intrabar_source(intrabar_bars)
+        strategy_delta = pd.Timedelta(self.cfg.timeframe)
         if strategy_delta <= source_delta:
             # Si la estrategia ya corre en 1m (o menos), no hay timeframe
             # intrabar más fino que aplicar.
+            self.release_intrabar_source()
             return
         if strategy_delta.value % source_delta.value:
             raise ValueError(
                 "timeframe debe ser un múltiplo entero de 1m para la ejecución intrabar."
             )
 
-        self._intrabar_bars = intrabar_bars
-        self._intrabar_o = intrabar_bars["open"].to_numpy(float)
-        self._intrabar_h = intrabar_bars["high"].to_numpy(float)
-        self._intrabar_l = intrabar_bars["low"].to_numpy(float)
-        source_ns = intrabar_bars.index.as_unit("ns").asi8
+        source_ns = self._intrabar_times_ns
         strategy_ns = self.bars.index.as_unit("ns").asi8
         source_minute_ns = source_delta.value
         expected = int(strategy_delta.value // source_minute_ns)
@@ -632,6 +660,56 @@ class Backtester:
                     and bool(np.all(np.diff(minute_times) == source_minute_ns))
                 )
             self._intrabar_slices.append((left, right, complete))
+
+    def release_intrabar_source(self) -> None:
+        """Libera arrays 1m tras construir el baseline de velas cerradas."""
+        self._intrabar_bars = None
+        self._intrabar_o = self._intrabar_h = self._intrabar_l = None
+        self._intrabar_c = None
+        self._intrabar_times_ns = None
+        self._intrabar_slices = []
+
+    def fork_for_intrabar_tail(
+        self,
+        intrabar_bars: pd.DataFrame,
+        intrabar_timeframe: Optional[str] = None,
+    ) -> "Backtester":
+        """Clona sólo el estado mutable para reproducir el tail 1m actual."""
+        from copy import copy
+
+        fork = copy(self)
+        fork.position = replace(self.position) if self.position is not None else None
+        for name in (
+            "trades",
+            "opened",
+            "eq_time",
+            "eq_cash",
+            "eq_value",
+            "eq_side",
+            "eq_qty",
+            "eq_signal_time",
+            "eq_signal_target",
+            "eq_execution_rejection",
+            "eq_execution_rejection_time",
+            "eq_execution_rejection_target",
+            "eq_stop_price",
+            "eq_entry_price",
+            "eq_position_id",
+            "eq_breakeven_activated",
+            "eq_breakeven_price",
+        ):
+            setattr(fork, name, list(getattr(self, name)))
+        fork.intrabar_exit_times = set(self.intrabar_exit_times)
+        fork._intrabar_slices = []
+        fork._intrabar_tail_last = None
+        fork._breakeven_activated_this_bar = self._breakeven_activated_this_bar
+        fork._breakeven_activation_price = self._breakeven_activation_price
+        fork._stop_trigger_price_this_bar = self._stop_trigger_price_this_bar
+        fork.process_intrabar_tail = True
+        if intrabar_timeframe is not None:
+            fork._intrabar_timeframe = intrabar_timeframe
+        fork._set_intrabar_source(intrabar_bars)
+        return fork
 
     def _price(self, price: float, side: int) -> float:
         slip = self.cfg.slippage_bps / 10_000
@@ -764,6 +842,10 @@ class Backtester:
 
     def _risk_unit(self, pos: Position) -> float:
         return pos.risk_amount / pos.initial_quantity if pos.initial_quantity else 0.0
+
+    def _remember_intrabar_exits(self, first_trade: int) -> None:
+        for trade in self.trades[first_trade:]:
+            self.intrabar_exit_times.add(trade.exit_time)
 
     def _rsi_divergence_reason(self, i: int) -> Optional[str]:
         """Motivo de salida total si hay divergencia RSI en contra de la posición.
@@ -934,9 +1016,22 @@ class Backtester:
         self.close_position(100, fill, timestamp, reason)
         return True
 
-    def _execute_target(self, i: int, target: int, signal_bias: int = 0) -> str | None:
+    def _execute_target(
+        self,
+        i: int,
+        target: int,
+        signal_bias: int = 0,
+        *,
+        open_price: float | None = None,
+        timestamp: pd.Timestamp | None = None,
+    ) -> str | None:
         if self.position is not None and self.position.side != target:
-            self.close_position(100, self.o[i], self.times[i], CROSS_REASON)
+            self.close_position(
+                100,
+                self.o[i] if open_price is None else open_price,
+                self.times[i] if timestamp is None else timestamp,
+                CROSS_REASON,
+            )
         if self.position is None:
             # Cerrar la posición revertida puede convertir esta señal en la
             # primera entrada tras una pérdida. En ese caso el filtro debe
@@ -944,8 +1039,121 @@ class Backtester:
             if (self.cfg.streak_trend_only and self.streak_in_loss
                     and signal_bias != target):
                 return f"filtro de tendencia (sesgo {signal_bias:+d})"
-            self.open_position(target, self.o[i], self.times[i])
+            self.open_position(
+                target,
+                self.o[i] if open_price is None else open_price,
+                self.times[i] if timestamp is None else timestamp,
+            )
         return None
+
+    def _replay_intrabar_tail(self) -> None:
+        """Procesa los minutos cerrados posteriores a la última vela completa.
+
+        En live, el bucket actual del timeframe de estrategia todavía no está
+        en ``bars``. Se recorren los minutos disponibles sin esperar a completar
+        el bucket y sin usar su OHLC parcial como fallback.
+        """
+        if (
+            not self.process_intrabar_tail
+            or self._intrabar_bars is None
+            or self._intrabar_times_ns is None
+            or not len(self.bars)
+        ):
+            return
+
+        tail_start = self.times[-1] + pd.Timedelta(self.cfg.timeframe)
+        left = int(
+            np.searchsorted(
+                self._intrabar_times_ns,
+                pd.Timestamp(tail_start).as_unit("ns").value,
+                side="left",
+            )
+        )
+        right = len(self._intrabar_times_ns)
+        if left >= right:
+            return
+
+        self._bar_index = len(self.bars) - 1
+        first_time = self._intrabar_bars.index[left]
+        if self.pending_target is not None:
+            signal_bias = int(self.signals["trend_bias"].iloc[-1])
+            self._execute_target(
+                self._bar_index,
+                self.pending_target,
+                signal_bias,
+                open_price=self._intrabar_o[left],
+                timestamp=first_time,
+            )
+            self.pending_target = None
+            self.pending_exit = None
+        elif self.pending_exit is not None:
+            reason, percent = self.pending_exit
+            self.close_position(
+                percent,
+                self._intrabar_o[left],
+                first_time,
+                reason,
+            )
+            self.pending_exit = None
+
+        for minute in range(left, right):
+            minute_time = self._intrabar_bars.index[minute]
+            first_trade = len(self.trades)
+            stop_hit = self._stop(
+                self._bar_index,
+                open_price=self._intrabar_o[minute],
+                high=self._intrabar_h[minute],
+                low=self._intrabar_l[minute],
+                timestamp=minute_time,
+            )
+            if stop_hit:
+                self._remember_intrabar_exits(first_trade)
+                break
+            self._manage(
+                self._bar_index,
+                open_price=self._intrabar_o[minute],
+                high=self._intrabar_h[minute],
+                low=self._intrabar_l[minute],
+                timestamp=minute_time,
+            )
+            self._remember_intrabar_exits(first_trade)
+        self._intrabar_tail_last = (
+            self._intrabar_bars.index[right - 1],
+            float(self._intrabar_c[right - 1]),
+        )
+        if not self.cfg.force_close_at_end:
+            last_time, last_close = self._intrabar_tail_last
+            self._mark(
+                last_time + pd.Timedelta("1min"),
+                last_close,
+                signal_time=last_time,
+            )
+
+    def run_intrabar_tail(self) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """Ejecuta sólo los minutos posteriores al checkpoint de barras cerradas."""
+        self._replay_intrabar_tail()
+        trades = (
+            pd.DataFrame([asdict(trade) for trade in self.trades])
+            if self.trades else empty_trades()
+        )
+        equity = pd.DataFrame({
+            "timestamp": self.eq_time,
+            "cash": self.eq_cash,
+            "equity": self.eq_value,
+            "position_side": self.eq_side,
+            "position_quantity": self.eq_qty,
+            "signal_time": self.eq_signal_time,
+            "signal_target": self.eq_signal_target,
+            "execution_rejection": self.eq_execution_rejection,
+            "execution_rejection_time": self.eq_execution_rejection_time,
+            "execution_rejection_target": self.eq_execution_rejection_target,
+            "effective_stop_price": self.eq_stop_price,
+            "position_entry_price": self.eq_entry_price,
+            "position_id": self.eq_position_id,
+            "breakeven_activated": self.eq_breakeven_activated,
+            "breakeven_price": self.eq_breakeven_price,
+        })
+        return trades, equity
 
     def _equity_value(self, close: float) -> float:
         """Equity mark-to-market al precio ``close`` (caja + posición a precio de liquidación)."""
@@ -1054,6 +1262,7 @@ class Backtester:
                 intrabar_times = self._intrabar_bars.index
                 for minute in range(left, right):
                     minute_time = intrabar_times[minute]
+                    first_trade = len(self.trades)
                     stop_hit = self._stop(
                         i,
                         open_price=self._intrabar_o[minute],
@@ -1062,6 +1271,7 @@ class Backtester:
                         timestamp=minute_time,
                     )
                     if stop_hit:
+                        self._remember_intrabar_exits(first_trade)
                         break
                     self._manage(
                         i,
@@ -1070,6 +1280,7 @@ class Backtester:
                         low=self._intrabar_l[minute],
                         timestamp=minute_time,
                     )
+                    self._remember_intrabar_exits(first_trade)
                 slow_ema_touch_exit = False
                 if not stop_hit and tp3_previously_done:
                     slow_ema_touch_exit = self._tp3_slow_ema_touch_exit(i)
@@ -1218,10 +1429,18 @@ class Backtester:
             if (i + 1) % max(1, n // 10) == 0 or i == n - 1:
                 print(f"[BACKTEST] {(i+1)/n:6.1%} | {i+1:,}/{n:,} velas | trades={len(self.trades)}", flush=True)
 
+        self._replay_intrabar_tail()
+
         if self.position is not None and cfg.force_close_at_end:
-            ts = self.times[-1] + pd.Timedelta(cfg.timeframe)
-            self.close_position(100, self.c[-1], ts, "END_OF_DATA")
-            self._mark(ts, self.c[-1])
+            if self._intrabar_tail_last is not None:
+                last_minute, last_close = self._intrabar_tail_last
+                ts = last_minute + pd.Timedelta("1min")
+                close_price = last_close
+            else:
+                ts = self.times[-1] + pd.Timedelta(cfg.timeframe)
+                close_price = self.c[-1]
+            self.close_position(100, close_price, ts, "END_OF_DATA")
+            self._mark(ts, close_price)
         trades = pd.DataFrame([asdict(t) for t in self.trades]) if self.trades else empty_trades()
         equity = pd.DataFrame({
             "timestamp": self.eq_time,
@@ -1296,6 +1515,7 @@ def main() -> int:
         weak_exit,
         rsi_div_exit,
         intrabar_bars=raw,
+        intrabar_timeframe="1min",
     )
     trades, equity = engine.run()
     generate_report(

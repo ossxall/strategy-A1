@@ -105,7 +105,18 @@ def test_strategy_parameters_ignore_environment_overrides(monkeypatch):
 def test_backtest_mode_generates_report_without_publishing_signals(
     tmp_path, monkeypatch
 ):
-    bars = make_bars(3)
+    raw_index = pd.date_range("2026-01-01", periods=90, freq="1min", tz="UTC")
+    bars = pd.DataFrame(
+        {
+            "open": 100.0,
+            "high": 100.1,
+            "low": 99.9,
+            "close": 100.0,
+            "volume": 1.0,
+        },
+        index=raw_index,
+    )
+    strategy_bars = bot_app.resample(bars, "30min", 1.0)
 
     class Feed:
         def load_closed(self):
@@ -116,12 +127,15 @@ def test_backtest_mode_generates_report_without_publishing_signals(
             raise AssertionError("el backtest no debe publicar eventos live")
 
     class Engine:
-        def __init__(self, *args):
+        def __init__(self, *args, **kwargs):
             pass
 
         def run(self):
             return pd.DataFrame(), pd.DataFrame(
-                {"timestamp": bars.index, "equity": [100.0, 100.0, 100.0]}
+                {
+                    "timestamp": strategy_bars.index,
+                    "equity": [100.0] * len(strategy_bars),
+                }
             )
 
     calls = []
@@ -144,7 +158,7 @@ def test_backtest_mode_generates_report_without_publishing_signals(
     monkeypatch.setattr(
         bot.strategy,
         "generate_signals",
-        lambda frame, raw: make_signals(frame, [0, 0, 0]),
+        lambda frame, raw: make_signals(frame, [0] * len(frame)),
     )
     monkeypatch.setattr(
         bot.strategy,
@@ -158,6 +172,60 @@ def test_backtest_mode_generates_report_without_publishing_signals(
     assert calls[0][1]["output_dir"] == tmp_path / "backtest_out"
     assert calls[0][0][2] is bot.cfg
     assert calls[0][0][4] == "BTCUSDT 1m feed.db"
+
+
+def test_live_process_passes_closed_one_minute_feed_to_intrabar_replay(monkeypatch):
+    index = pd.date_range("2026-01-01", periods=90, freq="1min", tz="UTC")
+    raw = pd.DataFrame(
+        {
+            "open": np.full(len(index), 100.0),
+            "high": np.full(len(index), 100.1),
+            "low": np.full(len(index), 99.9),
+            "close": np.full(len(index), 100.0),
+            "volume": np.ones(len(index)),
+        },
+        index=index,
+    ).drop(index[-1])
+
+    class Feed:
+        def load_closed(self):
+            return raw
+
+    class Store:
+        def insert(self, events):
+            return len(events)
+
+    bot = SignalBot(
+        make_config(),
+        Feed(),
+        Store(),
+        "BTCUSDT",
+        "1m",
+        min_bars=2,
+    )
+    monkeypatch.setattr(
+        bot.strategy,
+        "generate_signals",
+        lambda frame, source: make_signals(frame, [0] * len(frame)),
+    )
+    monkeypatch.setattr(
+        bot.strategy,
+        "prepare_exits",
+        lambda source, frame: (None, None, None),
+    )
+    calls = []
+    monkeypatch.setattr(
+        bot_app,
+        "build_events_and_result",
+        lambda *args: (
+            calls.append(args)
+            or ([], pd.DataFrame(), pd.DataFrame())
+        ),
+    )
+
+    bot.process_once()
+
+    assert calls[0][-2] is raw
 
 
 def test_bot_rejects_unknown_mode():
@@ -1054,7 +1122,18 @@ def test_events_to_trades_orders_same_open_by_source_bar_then_exit_priority():
 def test_live_only_includes_event_actionable_at_start_even_if_signal_bar_started_before(
     monkeypatch,
 ):
-    bars = make_bars(2)
+    raw_index = pd.date_range("2026-01-01", periods=60, freq="1min", tz="UTC")
+    raw = pd.DataFrame(
+        {
+            "open": 100.0,
+            "high": 100.1,
+            "low": 99.9,
+            "close": 100.0,
+            "volume": 1.0,
+        },
+        index=raw_index,
+    )
+    bars = bot_app.resample(raw, "30min", 1.0)
     boundary = ts_ms(bars.index[-1] + pd.Timedelta("30min"))
     event = {
         "symbol": "BTCUSDT",
@@ -1077,7 +1156,7 @@ def test_live_only_includes_event_actionable_at_start_even_if_signal_bar_started
 
     class Feed:
         def load_closed(self):
-            return bars
+            return raw
 
     class Store:
         inserted = None

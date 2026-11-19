@@ -5,6 +5,8 @@ import pytest
 from strategy.config import Config
 from strategy.models import Position
 from strategy.strategy import Backtester
+from live.bot.events import build_events_and_result
+from live.bot.config import ts_ms
 
 
 def make_strategy_bars():
@@ -72,6 +74,9 @@ def make_signals(bars):
             "valid": np.ones(len(bars), dtype=bool),
             "target": np.zeros(len(bars), dtype=int),
             "trend_bias": np.zeros(len(bars), dtype=int),
+            "ema_fast": np.full(len(bars), 100.0),
+            "ema_slow": np.full(len(bars), 99.0),
+            "adx_entry": np.full(len(bars), 30.0),
         },
         index=bars.index,
     )
@@ -111,6 +116,24 @@ def test_one_minute_replay_processes_tp_then_breakeven_stop_chronologically():
     assert engine.position is None
 
 
+def test_stop_has_priority_when_tp_and_stop_are_both_touched_in_one_minute():
+    bars = make_strategy_bars()
+    one_minute = make_one_minute_bars()
+    one_minute.loc[one_minute.index[5], ["high", "low"]] = [111.0, 89.0]
+    engine = Backtester(
+        bars,
+        make_config(),
+        signals=make_signals(bars),
+        intrabar_bars=one_minute,
+    )
+    add_open_position(engine, bars.index[0])
+
+    trades, _ = engine.run()
+
+    assert trades.reason.tolist() == ["STOP_LOSS_10.00%"]
+    assert trades.exit_price.tolist() == pytest.approx([90.0])
+
+
 def test_incomplete_one_minute_window_falls_back_to_strategy_ohlc():
     bars = make_strategy_bars()
     bars.loc[bars.index[1], "low"] = 89.0
@@ -143,3 +166,154 @@ def test_intrabar_source_must_be_one_minute():
             signals=make_signals(bars),
             intrabar_bars=five_minute,
         )
+
+
+def test_live_tail_uses_available_minutes_even_when_feed_has_gaps():
+    bars = make_strategy_bars()
+    tail_index = pd.DatetimeIndex(
+        ["2026-01-01T00:10:00Z", "2026-01-01T00:12:00Z"]
+    )
+    sparse_tail = pd.DataFrame(
+        [
+            {"open": 100.0, "high": 111.0, "low": 100.0, "close": 109.0, "volume": 1.0},
+            {"open": 109.0, "high": 109.0, "low": 99.0, "close": 101.0, "volume": 1.0},
+        ],
+        index=tail_index,
+    )
+    signals = make_signals(bars)
+    signals.loc[bars.index[-1], "target"] = 1
+    engine = Backtester(
+        bars,
+        make_config(),
+        signals=signals,
+        intrabar_bars=sparse_tail,
+        process_intrabar_tail=True,
+        intrabar_timeframe="1min",
+    )
+
+    trades, _ = engine.run()
+
+    assert trades.reason.tolist() == ["PARTIAL_TP_1R", "BREAKEVEN"]
+    assert trades.exit_time.tolist() == [tail_index[0], tail_index[1]]
+
+
+def test_live_tail_replays_available_minutes_without_waiting_for_strategy_candle():
+    bars = make_strategy_bars()
+    one_minute = make_one_minute_bars()
+    tail_index = pd.date_range(
+        "2026-01-01T00:10:00Z", periods=2, freq="1min"
+    )
+    tail = pd.DataFrame(
+        [
+            {"open": 100.0, "high": 111.0, "low": 100.0, "close": 109.0, "volume": 1.0},
+            {"open": 109.0, "high": 109.0, "low": 99.0, "close": 101.0, "volume": 1.0},
+        ],
+        index=tail_index,
+    )
+    one_minute = pd.concat([one_minute, tail])
+    signals = make_signals(bars)
+    signals.loc[bars.index[-1], "target"] = 1
+    engine = Backtester(
+        bars,
+        make_config(),
+        signals=signals,
+        intrabar_bars=one_minute,
+        process_intrabar_tail=True,
+    )
+
+    trades, _ = engine.run()
+
+    assert engine.opened[0]["time"] == tail_index[0]
+    assert trades.reason.tolist() == ["PARTIAL_TP_1R", "BREAKEVEN"]
+    assert trades.exit_time.tolist() == [tail_index[0], tail_index[1]]
+
+
+def test_live_intrabar_events_are_published_at_each_minute_close():
+    bars = make_strategy_bars()
+    one_minute = make_one_minute_bars()
+    tail_index = pd.date_range(
+        "2026-01-01T00:10:00Z", periods=2, freq="1min"
+    )
+    tail = pd.DataFrame(
+        [
+            {"open": 100.0, "high": 111.0, "low": 100.0, "close": 109.0, "volume": 1.0},
+            {"open": 109.0, "high": 109.0, "low": 99.0, "close": 101.0, "volume": 1.0},
+        ],
+        index=tail_index,
+    )
+    signals = make_signals(bars)
+    signals.loc[bars.index[-1], "target"] = 1
+
+    events, trades, equity = build_events_and_result(
+        bars,
+        signals,
+        None,
+        None,
+        None,
+        make_config(),
+        "BTCUSDT",
+        "1m",
+        pd.concat([one_minute, tail]),
+    )
+
+    exits = [event for event in events if event["event"] == "EXIT"]
+    assert trades.reason.tolist() == ["PARTIAL_TP_1R", "BREAKEVEN"]
+    assert [event["reason"] for event in exits] == [
+        "PARTIAL_TP_1R",
+        "BREAKEVEN",
+    ]
+    assert [event["signal_time"] for event in exits] == [
+        ts_ms(tail_index[0] + pd.Timedelta("1min")),
+        ts_ms(tail_index[1] + pd.Timedelta("1min")),
+    ]
+    assert all(event["bar_time"] == ts_ms(tail_index[0]) for event in exits)
+    assert equity.timestamp.iloc[-1] == tail_index[1] + pd.Timedelta("1min")
+
+
+def test_live_simulation_cache_replays_only_the_growing_tail():
+    bars = make_strategy_bars()
+    closed_minutes = make_one_minute_bars()
+    tail_index = pd.date_range(
+        "2026-01-01T00:10:00Z", periods=2, freq="1min"
+    )
+    tail = pd.DataFrame(
+        [
+            {"open": 100.0, "high": 111.0, "low": 100.0, "close": 109.0, "volume": 1.0},
+            {"open": 109.0, "high": 109.0, "low": 99.0, "close": 101.0, "volume": 1.0},
+        ],
+        index=tail_index,
+    )
+    signals = make_signals(bars)
+    signals.loc[bars.index[-1], "target"] = 1
+    cache = {}
+    args = (
+        bars,
+        signals,
+        None,
+        None,
+        None,
+        make_config(),
+        "BTCUSDT",
+        "1m",
+    )
+
+    first_events, first_trades, _ = build_events_and_result(
+        *args,
+        pd.concat([closed_minutes, tail.iloc[:1]]),
+        cache,
+    )
+    baseline = cache["baseline"]
+    assert first_trades.reason.tolist() == ["PARTIAL_TP_1R"]
+
+    second_events, second_trades, _ = build_events_and_result(
+        *args,
+        pd.concat([closed_minutes, tail]),
+        cache,
+    )
+
+    assert cache["baseline"] is baseline
+    assert second_trades.reason.tolist() == ["PARTIAL_TP_1R", "BREAKEVEN"]
+    assert [event["reason"] for event in second_events if event["event"] == "EXIT"] == [
+        "PARTIAL_TP_1R",
+        "BREAKEVEN",
+    ]
