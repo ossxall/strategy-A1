@@ -6,8 +6,9 @@ from strategy.models import Position
 from strategy.strategy import Backtester
 
 
-def make_engine(*, touches_ema_before_tp3=False, slow_touch_high=82.0,
-                penetration_pct=0.1, slow_ema_exit_enabled=True):
+def make_engine(*, touches_ema_before_tp3=False, slow_touch_high=85.0,
+                slow_touch_close=84.0, penetration_pct=0.1,
+                slow_ema_exit_enabled=True):
     index = pd.date_range("2026-01-01", periods=3, freq="30min", tz="UTC")
     if touches_ema_before_tp3:
         bars = pd.DataFrame(
@@ -26,7 +27,7 @@ def make_engine(*, touches_ema_before_tp3=False, slow_touch_high=82.0,
                 "open": [100.0, 100.0, 80.0],
                 "high": [100.0, 101.0, slow_touch_high],
                 "low": [100.0, 74.0, 75.0],
-                "close": [100.0, 75.0, 80.0],
+                "close": [100.0, 75.0, slow_touch_close],
                 "volume": 1.0,
             },
             index=index,
@@ -85,29 +86,44 @@ def test_short_exits_remaining_position_at_slow_ema_after_tp3():
         "EMA_SLOW_TOUCH_SHORT_AFTER_TP3",
     ]
     assert trades.exit_time.iloc[1] == engine.bars.index[2]
-    trigger = engine.ema_slow_line[2] * 1.001
-    assert trades.exit_price.iloc[1] == trigger
+    assert trades.exit_price.iloc[1] == engine.bars.close.iloc[2]
     assert trades.quantity.iloc[1] == 0.9
     assert engine.position is None
 
 
-def test_touch_without_configured_ema_penetration_does_not_exit():
-    engine = make_engine(slow_touch_high=81.15)
+def test_intrabar_touch_without_close_above_trigger_does_not_exit():
+    engine = make_engine(slow_touch_high=82.0, slow_touch_close=80.0)
 
     trades, _ = engine.run()
 
-    assert engine.bars.low.iloc[2] < engine.ema_slow_line[2] < engine.bars.high.iloc[2]
+    trigger = engine.ema_slow_line[2] * 1.001
+    assert engine.bars.high.iloc[2] > trigger
+    assert engine.bars.close.iloc[2] < trigger
+    assert "EMA_SLOW_TOUCH_SHORT_AFTER_TP3" not in trades.reason.tolist()
+    assert engine.position is not None
+
+
+def test_close_above_ema_but_below_configured_penetration_does_not_exit():
+    engine = make_engine(slow_touch_high=85.0, slow_touch_close=83.5)
+
+    trades, _ = engine.run()
+
+    assert engine.bars.close.iloc[2] > engine.ema_slow_line[2]
+    assert engine.bars.close.iloc[2] < engine.ema_slow_line[2] * 1.001
     assert "EMA_SLOW_TOUCH_SHORT_AFTER_TP3" not in trades.reason.tolist()
     assert engine.position is not None
 
 
 def test_custom_penetration_percentage_is_respected():
-    engine = make_engine(slow_touch_high=81.3, penetration_pct=0.5)
+    engine = make_engine(
+        slow_touch_high=85.0, slow_touch_close=83.67, penetration_pct=0.5
+    )
 
     trades, _ = engine.run()
 
     assert engine.bars.high.iloc[2] > engine.ema_slow_line[2] * 1.001
-    assert engine.bars.high.iloc[2] < engine.ema_slow_line[2] * 1.005
+    assert engine.bars.close.iloc[2] > engine.ema_slow_line[2] * 1.001
+    assert engine.bars.close.iloc[2] < engine.ema_slow_line[2] * 1.005
     assert "EMA_SLOW_TOUCH_SHORT_AFTER_TP3" not in trades.reason.tolist()
     assert engine.position is not None
 

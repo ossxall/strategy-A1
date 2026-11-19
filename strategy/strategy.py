@@ -722,7 +722,7 @@ class Backtester:
         return None
 
     def _tp3_slow_ema_touch_exit(self, i: int) -> bool:
-        """Cierra el SHORT restante si supera la EMA lenta tras TP3."""
+        """Cierra el SHORT restante si la vela cierra sobre la EMA lenta tras TP3."""
         pos = self.position
         if (
             not self.cfg.tp3_ema_slow_exit_enabled
@@ -736,11 +736,11 @@ class Backtester:
         if not np.isfinite(line):
             return False
         trigger = line * (1.0 + self.cfg.tp3_ema_slow_penetration_pct / 100.0)
-        if self.h[i] < trigger:
+        if self.c[i] < trigger:
             return False
-        # Si abre más allá del nivel, el fill no puede ser mejor que la apertura.
-        fill = max(trigger, self.o[i])
-        self.close_position(100, fill, self.times[i], "EMA_SLOW_TOUCH_SHORT_AFTER_TP3")
+        self.close_position(
+            100, self.c[i], self.times[i], "EMA_SLOW_TOUCH_SHORT_AFTER_TP3"
+        )
         return True
 
     def _manage(self, i: int) -> None:
