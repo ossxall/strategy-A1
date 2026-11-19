@@ -45,7 +45,7 @@ def events_to_trades(events: list[dict]) -> list[dict]:
 def _reason_is_intrabar(reason: str) -> bool:
     """Indica las salidas modeladas por precio dentro de una vela OHLC."""
     return reason.startswith(
-        ("STOP_LOSS", "PARTIAL_TP", "EMA_SLOW_TOUCH", "CONFIRM_MOVE_AGAINST")
+        ("STOP_LOSS", "PARTIAL_TP", "CONFIRM_MOVE_AGAINST")
     ) or reason == "BREAKEVEN"
 
 

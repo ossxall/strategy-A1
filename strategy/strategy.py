@@ -739,7 +739,10 @@ class Backtester:
         if self.c[i] < trigger:
             return False
         self.close_position(
-            100, self.c[i], self.times[i], "EMA_SLOW_TOUCH_SHORT_AFTER_TP3"
+            100,
+            self.c[i],
+            self.times[i] + pd.Timedelta(self.cfg.timeframe),
+            "EMA_SLOW_TOUCH_SHORT_AFTER_TP3",
         )
         return True
 

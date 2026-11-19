@@ -85,13 +85,15 @@ def test_short_exits_remaining_position_at_slow_ema_after_tp3():
         "PARTIAL_TP3_2.5R",
         "EMA_SLOW_TOUCH_SHORT_AFTER_TP3",
     ]
-    assert trades.exit_time.iloc[1] == engine.bars.index[2]
+    assert trades.exit_time.iloc[1] == (
+        engine.bars.index[2] + pd.Timedelta("30min")
+    )
     assert trades.exit_price.iloc[1] == engine.bars.close.iloc[2]
     assert trades.quantity.iloc[1] == 0.9
     assert engine.position is None
 
 
-def test_intrabar_touch_without_close_above_trigger_does_not_exit():
+def test_intrabar_wick_without_close_above_trigger_does_not_exit():
     engine = make_engine(slow_touch_high=82.0, slow_touch_close=80.0)
 
     trades, _ = engine.run()
