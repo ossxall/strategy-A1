@@ -449,13 +449,24 @@ class EMACrossStrategy:
 # ---------------------------------------------------------------------------
 
 class Backtester:
-    """Motor de ejecución. Las señales se evalúan al cierre y se ejecutan en la apertura siguiente."""
+    """Motor de ejecución.
+
+    Las señales se evalúan al cierre del timeframe de estrategia y se ejecutan
+    en la apertura siguiente. Si se proporciona ``intrabar_bars`` de 1m, sólo
+    se usa para recorrer stops y take-profits dentro de cada vela de estrategia.
+    """
 
     def __init__(self, bars: pd.DataFrame, config: Config, signals: Optional[pd.DataFrame] = None,
                  adx_exit: Optional[np.ndarray] = None, weak_exit: Optional[np.ndarray] = None,
-                 rsi_div_exit: Optional[np.ndarray] = None):
+                 rsi_div_exit: Optional[np.ndarray] = None,
+                 intrabar_bars: Optional[pd.DataFrame] = None):
         self.bars, self.cfg = bars, config
         self.signals = signals if signals is not None else EMACrossStrategy(config).generate_signals(bars)
+        self._intrabar_bars: Optional[pd.DataFrame] = None
+        self._intrabar_slices: list[tuple[int, int, bool]] = []
+        self._intrabar_o = self._intrabar_h = self._intrabar_l = None
+        if intrabar_bars is not None and not intrabar_bars.empty:
+            self._prepare_intrabar_bars(intrabar_bars)
         if config.entry_atr_enabled:
             if "atr_filter_allowed" in self.signals:
                 self.entry_atr_allowed = self.signals["atr_filter_allowed"].to_numpy(bool)
@@ -569,6 +580,58 @@ class Backtester:
         self._bar_index = -1
         self.streak_in_loss = False
         self._position_pnl = 0.0
+
+    def _prepare_intrabar_bars(self, intrabar_bars: pd.DataFrame) -> None:
+        """Indexa velas 1m por vela de estrategia; nunca las usa para señales."""
+        if not isinstance(intrabar_bars.index, pd.DatetimeIndex):
+            raise ValueError("intrabar_bars debe tener un DatetimeIndex.")
+        if not intrabar_bars.index.is_monotonic_increasing or intrabar_bars.index.has_duplicates:
+            raise ValueError("intrabar_bars debe estar ordenado y no contener timestamps duplicados.")
+        missing = [column for column in ("open", "high", "low", "close") if column not in intrabar_bars]
+        if missing:
+            raise ValueError(f"Faltan columnas OHLC en intrabar_bars: {missing}.")
+
+        source_delta = pd.Timedelta(minutes=source_minutes(intrabar_bars))
+        strategy_delta = pd.Timedelta(self.cfg.timeframe)
+        if source_delta != pd.Timedelta("1min"):
+            raise ValueError(
+                "intrabar_bars debe tener resolución de 1m "
+                f"(resolución detectada: {source_delta})."
+            )
+        if strategy_delta <= source_delta:
+            # Si la estrategia ya corre en 1m (o menos), no hay timeframe
+            # intrabar más fino que aplicar.
+            return
+        if strategy_delta.value % source_delta.value:
+            raise ValueError(
+                "timeframe debe ser un múltiplo entero de 1m para la ejecución intrabar."
+            )
+
+        self._intrabar_bars = intrabar_bars
+        self._intrabar_o = intrabar_bars["open"].to_numpy(float)
+        self._intrabar_h = intrabar_bars["high"].to_numpy(float)
+        self._intrabar_l = intrabar_bars["low"].to_numpy(float)
+        source_ns = intrabar_bars.index.as_unit("ns").asi8
+        strategy_ns = self.bars.index.as_unit("ns").asi8
+        source_minute_ns = source_delta.value
+        expected = int(strategy_delta.value // source_minute_ns)
+        self._intrabar_slices = []
+        for start_ns in strategy_ns:
+            start_ns = int(start_ns)
+            end_ns = start_ns + strategy_delta.value
+            left = int(np.searchsorted(source_ns, start_ns, side="left"))
+            right = int(np.searchsorted(source_ns, end_ns, side="left"))
+            # Una ventana incompleta usa el OHLC agregado de ``bars`` como
+            # fallback. Así no se ignoran stops por falta de minutos fuente.
+            complete = right - left == expected
+            if complete:
+                minute_times = source_ns[left:right]
+                complete = (
+                    minute_times[0] == start_ns
+                    and minute_times[-1] == end_ns - source_minute_ns
+                    and bool(np.all(np.diff(minute_times) == source_minute_ns))
+                )
+            self._intrabar_slices.append((left, right, complete))
 
     def _price(self, price: float, side: int) -> float:
         slip = self.cfg.slippage_bps / 10_000
@@ -746,13 +809,25 @@ class Backtester:
         )
         return True
 
-    def _manage(self, i: int) -> None:
+    def _manage(
+        self,
+        i: int,
+        *,
+        open_price: float | None = None,
+        high: float | None = None,
+        low: float | None = None,
+        timestamp: pd.Timestamp | None = None,
+    ) -> None:
         """Gestiona take-profits parciales y el stop a breakeven."""
         cfg, pos = self.cfg, self.position
         if pos is None:
             return
         if not cfg.partial_tp_enabled:
             return
+        open_price = self.o[i] if open_price is None else open_price
+        high = self.h[i] if high is None else high
+        low = self.l[i] if low is None else low
+        timestamp = self.times[i] if timestamp is None else timestamp
         risk_unit = self._risk_unit(pos)
         if risk_unit <= 0:
             return
@@ -761,50 +836,50 @@ class Backtester:
         # por vela cuando el rango alcanza varios niveles.
         if cfg.partial_tp7_r > 0 and not pos.partial7_done:
             trigger7 = pos.entry_price + pos.side * cfg.partial_tp7_r * risk_unit
-            hit7 = self.h[i] >= trigger7 if pos.side == 1 else self.l[i] <= trigger7
+            hit7 = high >= trigger7 if pos.side == 1 else low <= trigger7
             if hit7:
-                fill7 = max(trigger7, self.o[i]) if pos.side == 1 else min(trigger7, self.o[i])
-                self.close_position(cfg.partial_tp7_pct, fill7, self.times[i], f"PARTIAL_TP7_{cfg.partial_tp7_r:g}R")
+                fill7 = max(trigger7, open_price) if pos.side == 1 else min(trigger7, open_price)
+                self.close_position(cfg.partial_tp7_pct, fill7, timestamp, f"PARTIAL_TP7_{cfg.partial_tp7_r:g}R")
                 pos_after = self.position
                 if pos_after is not None:
                     pos_after.partial7_done = True
                 return
         if cfg.partial_tp6_r > 0 and not pos.partial6_done:
             trigger6 = pos.entry_price + pos.side * cfg.partial_tp6_r * risk_unit
-            hit6 = self.h[i] >= trigger6 if pos.side == 1 else self.l[i] <= trigger6
+            hit6 = high >= trigger6 if pos.side == 1 else low <= trigger6
             if hit6:
-                fill6 = max(trigger6, self.o[i]) if pos.side == 1 else min(trigger6, self.o[i])
-                self.close_position(cfg.partial_tp6_pct, fill6, self.times[i], f"PARTIAL_TP6_{cfg.partial_tp6_r:g}R")
+                fill6 = max(trigger6, open_price) if pos.side == 1 else min(trigger6, open_price)
+                self.close_position(cfg.partial_tp6_pct, fill6, timestamp, f"PARTIAL_TP6_{cfg.partial_tp6_r:g}R")
                 pos_after = self.position
                 if pos_after is not None:
                     pos_after.partial6_done = True
                 return
         if cfg.partial_tp5_r > 0 and not pos.partial5_done:
             trigger5 = pos.entry_price + pos.side * cfg.partial_tp5_r * risk_unit
-            hit5 = self.h[i] >= trigger5 if pos.side == 1 else self.l[i] <= trigger5
+            hit5 = high >= trigger5 if pos.side == 1 else low <= trigger5
             if hit5:
-                fill5 = max(trigger5, self.o[i]) if pos.side == 1 else min(trigger5, self.o[i])
-                self.close_position(cfg.partial_tp5_pct, fill5, self.times[i], f"PARTIAL_TP5_{cfg.partial_tp5_r:g}R")
+                fill5 = max(trigger5, open_price) if pos.side == 1 else min(trigger5, open_price)
+                self.close_position(cfg.partial_tp5_pct, fill5, timestamp, f"PARTIAL_TP5_{cfg.partial_tp5_r:g}R")
                 pos_after = self.position
                 if pos_after is not None:
                     pos_after.partial5_done = True
                 return
         if cfg.partial_tp4_r > 0 and not pos.partial4_done:
             trigger4 = pos.entry_price + pos.side * cfg.partial_tp4_r * risk_unit
-            hit4 = self.h[i] >= trigger4 if pos.side == 1 else self.l[i] <= trigger4
+            hit4 = high >= trigger4 if pos.side == 1 else low <= trigger4
             if hit4:
-                fill4 = max(trigger4, self.o[i]) if pos.side == 1 else min(trigger4, self.o[i])
-                self.close_position(cfg.partial_tp4_pct, fill4, self.times[i], f"PARTIAL_TP4_{cfg.partial_tp4_r:g}R")
+                fill4 = max(trigger4, open_price) if pos.side == 1 else min(trigger4, open_price)
+                self.close_position(cfg.partial_tp4_pct, fill4, timestamp, f"PARTIAL_TP4_{cfg.partial_tp4_r:g}R")
                 pos_after = self.position
                 if pos_after is not None:
                     pos_after.partial4_done = True
                 return
         if cfg.partial_tp3_r > 0 and not pos.partial3_done:
             trigger3 = pos.entry_price + pos.side * cfg.partial_tp3_r * risk_unit
-            hit3 = self.h[i] >= trigger3 if pos.side == 1 else self.l[i] <= trigger3
+            hit3 = high >= trigger3 if pos.side == 1 else low <= trigger3
             if hit3:
-                fill3 = max(trigger3, self.o[i]) if pos.side == 1 else min(trigger3, self.o[i])
-                self.close_position(cfg.partial_tp3_pct, fill3, self.times[i], f"PARTIAL_TP3_{cfg.partial_tp3_r:g}R")
+                fill3 = max(trigger3, open_price) if pos.side == 1 else min(trigger3, open_price)
+                self.close_position(cfg.partial_tp3_pct, fill3, timestamp, f"PARTIAL_TP3_{cfg.partial_tp3_r:g}R")
                 pos_after = self.position
                 if pos_after is not None:
                     pos_after.partial3_done = True
@@ -812,10 +887,10 @@ class Backtester:
         # TP2 primero si no hecho y trigger alcanzado (mayor distancia)
         if cfg.partial_tp2_r > 0 and not pos.partial2_done:
             trigger2 = pos.entry_price + pos.side * cfg.partial_tp2_r * risk_unit
-            hit2 = self.h[i] >= trigger2 if pos.side == 1 else self.l[i] <= trigger2
+            hit2 = high >= trigger2 if pos.side == 1 else low <= trigger2
             if hit2:
-                fill2 = max(trigger2, self.o[i]) if pos.side == 1 else min(trigger2, self.o[i])
-                self.close_position(cfg.partial_tp2_pct, fill2, self.times[i], f"PARTIAL_TP2_{cfg.partial_tp2_r:g}R")
+                fill2 = max(trigger2, open_price) if pos.side == 1 else min(trigger2, open_price)
+                self.close_position(cfg.partial_tp2_pct, fill2, timestamp, f"PARTIAL_TP2_{cfg.partial_tp2_r:g}R")
                 pos_after = self.position
                 if pos_after is not None:
                     pos_after.partial2_done = True
@@ -823,10 +898,10 @@ class Backtester:
         # TP1
         if not pos.partial_done:
             trigger = pos.entry_price + pos.side * cfg.partial_tp_r * risk_unit
-            hit = self.h[i] >= trigger if pos.side == 1 else self.l[i] <= trigger
+            hit = high >= trigger if pos.side == 1 else low <= trigger
             if hit:
-                fill = max(trigger, self.o[i]) if pos.side == 1 else min(trigger, self.o[i])
-                self.close_position(cfg.partial_tp_pct, fill, self.times[i], f"PARTIAL_TP_{cfg.partial_tp_r:g}R")
+                fill = max(trigger, open_price) if pos.side == 1 else min(trigger, open_price)
+                self.close_position(cfg.partial_tp_pct, fill, timestamp, f"PARTIAL_TP_{cfg.partial_tp_r:g}R")
                 pos_after = self.position
                 if pos_after is not None:
                     pos_after.partial_done = True
@@ -835,16 +910,28 @@ class Backtester:
                             pos_after.breakeven = True
                             self._breakeven_activated_this_bar = True
                             self._breakeven_activation_price = pos_after.entry_price
-    def _stop(self, i: int) -> bool:
+    def _stop(
+        self,
+        i: int,
+        *,
+        open_price: float | None = None,
+        high: float | None = None,
+        low: float | None = None,
+        timestamp: pd.Timestamp | None = None,
+    ) -> bool:
         pos = self.position
         if pos is None or pos.stop_pct <= 0: return False
+        open_price = self.o[i] if open_price is None else open_price
+        high = self.h[i] if high is None else high
+        low = self.l[i] if low is None else low
+        timestamp = self.times[i] if timestamp is None else timestamp
         stop = pos.entry_price if pos.breakeven else self._stop_price(pos.side, pos.entry_price, pos.stop_pct)
-        hit = self.l[i] <= stop if pos.side == 1 else self.h[i] >= stop
+        hit = low <= stop if pos.side == 1 else high >= stop
         if not hit: return False
         self._stop_trigger_price_this_bar = stop
-        fill = min(self.o[i], stop) if pos.side == 1 else max(self.o[i], stop)
+        fill = min(open_price, stop) if pos.side == 1 else max(open_price, stop)
         reason = "BREAKEVEN" if pos.breakeven else f"STOP_LOSS_{pos.stop_pct*100:.2f}%"
-        self.close_position(100, fill, self.times[i], reason)
+        self.close_position(100, fill, timestamp, reason)
         return True
 
     def _execute_target(self, i: int, target: int, signal_bias: int = 0) -> str | None:
@@ -950,15 +1037,53 @@ class Backtester:
                 self.pending_exit = None
 
             # 2) Gestión de stops y salidas parciales
-            stop_hit = self._stop(i)
-            slow_ema_touch_exit = False
-            if not stop_hit:
-                # Se comprueba antes de gestionar TP en esta vela: si TP3 se
-                # activa ahora, el toque a EMA lenta sólo cuenta desde la vela
-                # siguiente.
-                slow_ema_touch_exit = self._tp3_slow_ema_touch_exit(i)
-            if not stop_hit and not slow_ema_touch_exit:
-                self._manage(i)
+            intrabar_slice = (
+                self._intrabar_slices[i]
+                if i < len(self._intrabar_slices)
+                else (0, 0, False)
+            )
+            if self._intrabar_bars is not None and intrabar_slice[2]:
+                # La salida EMA tras TP3 sigue siendo de cierre de vela de
+                # estrategia y no debe activarse en la misma vela que confirma
+                # TP3, aunque el TP3 se alcance en uno de sus minutos.
+                tp3_previously_done = (
+                    self.position is not None and self.position.partial3_done
+                )
+                stop_hit = False
+                left, right, _ = intrabar_slice
+                intrabar_times = self._intrabar_bars.index
+                for minute in range(left, right):
+                    minute_time = intrabar_times[minute]
+                    stop_hit = self._stop(
+                        i,
+                        open_price=self._intrabar_o[minute],
+                        high=self._intrabar_h[minute],
+                        low=self._intrabar_l[minute],
+                        timestamp=minute_time,
+                    )
+                    if stop_hit:
+                        break
+                    self._manage(
+                        i,
+                        open_price=self._intrabar_o[minute],
+                        high=self._intrabar_h[minute],
+                        low=self._intrabar_l[minute],
+                        timestamp=minute_time,
+                    )
+                slow_ema_touch_exit = False
+                if not stop_hit and tp3_previously_done:
+                    slow_ema_touch_exit = self._tp3_slow_ema_touch_exit(i)
+            else:
+                # Compatibilidad/fallback: sin una ventana completa de 1m se
+                # conserva la ejecución OHLC original de la vela estrategia.
+                stop_hit = self._stop(i)
+                slow_ema_touch_exit = False
+                if not stop_hit:
+                    # Si TP3 se activa ahora, el toque a EMA lenta sólo cuenta
+                    # desde la vela de estrategia siguiente.
+                    slow_ema_touch_exit = self._tp3_slow_ema_touch_exit(i)
+                if not stop_hit and not slow_ema_touch_exit:
+                    self._manage(i)
 
             # Equity mark-to-market para el límite de pérdida mensual.
             equity_now = self._equity_value(self.c[i])
@@ -1163,7 +1288,15 @@ def main() -> int:
     if cfg.rsi_divergence_exit_enabled:
         print(f"[RSI DIV] {'disponible' if rsi_div_exit is not None else 'sin datos suficientes/timeframe incompatible'}", flush=True)
 
-    engine = Backtester(bars, cfg, signals, adx_exit, weak_exit, rsi_div_exit)
+    engine = Backtester(
+        bars,
+        cfg,
+        signals,
+        adx_exit,
+        weak_exit,
+        rsi_div_exit,
+        intrabar_bars=raw,
+    )
     trades, equity = engine.run()
     generate_report(
         trades, equity, cfg, bars, str(dataset),
