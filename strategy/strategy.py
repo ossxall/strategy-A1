@@ -592,7 +592,20 @@ class Backtester:
         self._position_pnl = 0.0
 
     def _set_intrabar_source(self, intrabar_bars: pd.DataFrame) -> pd.Timedelta:
-        """Valida y carga la fuente intrabar declarada como velas de 1m."""
+        """Valida y carga la fuente intrabar declarada como velas de 1m.
+
+        Si la fuente conserva ``is_closed``, no se debe simular con la vela que
+        aún está formándose. Los históricos normalizados pueden no tener esa
+        columna y se consideran cerrados.
+        """
+        if "is_closed" in intrabar_bars:
+            closed = intrabar_bars["is_closed"]
+            if pd.api.types.is_bool_dtype(closed.dtype):
+                closed_mask = closed.fillna(False)
+            else:
+                closed_mask = pd.to_numeric(closed, errors="coerce").eq(1)
+            intrabar_bars = intrabar_bars.loc[closed_mask]
+
         if not isinstance(intrabar_bars.index, pd.DatetimeIndex):
             raise ValueError("intrabar_bars debe tener un DatetimeIndex.")
         if not intrabar_bars.index.is_monotonic_increasing or intrabar_bars.index.has_duplicates:

@@ -228,6 +228,51 @@ def test_live_tail_replays_available_minutes_without_waiting_for_strategy_candle
     assert trades.exit_time.tolist() == [tail_index[0], tail_index[1]]
 
 
+def test_intrabar_replay_ignores_unclosed_one_minute_candle():
+    bars = make_strategy_bars()
+    tail_index = pd.date_range(
+        "2026-01-01T00:10:00Z", periods=2, freq="1min"
+    )
+    tail = pd.DataFrame(
+        [
+            {
+                "open": 100.0,
+                "high": 111.0,
+                "low": 100.0,
+                "close": 109.0,
+                "volume": 1.0,
+                "is_closed": True,
+            },
+            {
+                "open": 109.0,
+                "high": 109.0,
+                "low": 89.0,
+                "close": 90.0,
+                "volume": 1.0,
+                "is_closed": False,
+            },
+        ],
+        index=tail_index,
+    )
+    signals = make_signals(bars)
+    signals.loc[bars.index[-1], "target"] = 1
+    engine = Backtester(
+        bars,
+        make_config(),
+        signals=signals,
+        intrabar_bars=tail,
+        process_intrabar_tail=True,
+        intrabar_timeframe="1min",
+    )
+
+    trades, _ = engine.run()
+
+    assert engine._intrabar_bars.index.tolist() == [tail_index[0]]
+    assert trades.reason.tolist() == ["PARTIAL_TP_1R"]
+    # La vela abierta habría tocado el stop del remanente; no debe simularse.
+    assert engine.position is not None
+
+
 def test_live_intrabar_events_are_published_at_each_minute_close():
     bars = make_strategy_bars()
     one_minute = make_one_minute_bars()

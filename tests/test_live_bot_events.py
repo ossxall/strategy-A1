@@ -18,7 +18,8 @@ from live.bot import (
     ts_ms,
 )
 from live.bot import app as bot_app
-from live.bot.storage import build_signal_id
+from live.bot.storage import FeedReader, build_signal_id
+from live.feed import database as feed_database
 from strategy.config import Config
 
 
@@ -226,6 +227,91 @@ def test_live_process_passes_closed_one_minute_feed_to_intrabar_replay(monkeypat
     bot.process_once()
 
     assert calls[0][-2] is raw
+
+
+def test_live_tail_uses_only_closed_feed_db_minutes(tmp_path, monkeypatch):
+    db_path = tmp_path / "feed.db"
+    monkeypatch.setattr(feed_database, "DB_PATH", str(db_path))
+    feed_database.init_db()
+
+    minute_index = pd.date_range(
+        "2026-01-01", periods=61, freq="1min", tz="UTC"
+    )
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.executemany(
+            """
+            INSERT INTO candles (
+                symbol, interval, open_time, close_time,
+                open, high, low, close, volume, is_closed, source, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    "BTCUSDT",
+                    "1m",
+                    timestamp.value // 1_000_000,
+                    timestamp.value // 1_000_000 + 59_999,
+                    100.0,
+                    100.1,
+                    99.9,
+                    100.0,
+                    1.0,
+                    int(index < 60),
+                    "test",
+                    "test",
+                )
+                for index, timestamp in enumerate(minute_index)
+            ],
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    reader = FeedReader(db_path, "BTCUSDT", "1m")
+
+    class Store:
+        def insert(self, events):
+            return len(events)
+
+    bot = SignalBot(
+        make_config(timeframe="30min"),
+        reader,
+        Store(),
+        "BTCUSDT",
+        "1m",
+        min_bars=2,
+        mode="live",
+    )
+    monkeypatch.setattr(
+        bot.strategy,
+        "generate_signals",
+        lambda bars, raw: make_signals(bars, [0] * len(bars)),
+    )
+    monkeypatch.setattr(
+        bot.strategy,
+        "prepare_exits",
+        lambda raw, bars: (None, None, None),
+    )
+    calls = []
+    monkeypatch.setattr(
+        bot_app,
+        "build_events_and_result",
+        lambda *args: (
+            calls.append(args)
+            or ([], pd.DataFrame(), pd.DataFrame())
+        ),
+    )
+
+    try:
+        bot.process_once()
+    finally:
+        reader.close()
+
+    intrabar_bars = calls[0][8]
+    assert len(intrabar_bars) == 60
+    assert intrabar_bars.index[-1] == minute_index[59]
+    assert minute_index[60] not in intrabar_bars.index
 
 
 def test_bot_rejects_unknown_mode():
