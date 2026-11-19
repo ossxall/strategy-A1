@@ -21,11 +21,6 @@ class Position:
     partial5_done: bool = False
     partial6_done: bool = False
     partial7_done: bool = False
-    entry_mfi_multiplier: float = 1.0
-    entry_er_multiplier: float = 1.0
-    entry_adaptive_multiplier: float = 1.0
-    entry_size_multiplier: float = 1.0
-    quantity_without_entry_scaling: float = 0.0
 
 
 @dataclass
@@ -45,11 +40,6 @@ class Trade:
     reason: str
     position_risk: float
     position_initial_quantity: float = 0.0
-    quantity_without_entry_scaling: float = 0.0
-    entry_mfi_multiplier: float = 1.0
-    entry_er_multiplier: float = 1.0
-    entry_adaptive_multiplier: float = 1.0
-    entry_size_multiplier: float = 1.0
 
 
 TRADE_COLUMNS = list(Trade.__dataclass_fields__)

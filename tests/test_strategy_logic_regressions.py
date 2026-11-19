@@ -28,8 +28,6 @@ def _quiet_config(**overrides):
         "entry_atr_enabled": False,
         "entry_rsi_divergence_enabled": False,
         "entry_gaussian_trend_enabled": False,
-        "entry_mfi_risk_scaling_enabled": False,
-        "entry_er_risk_scaling_enabled": False,
         "adx_exit_enabled": False,
         "ema_weakening_exit_enabled": False,
         "rsi_divergence_exit_enabled": False,

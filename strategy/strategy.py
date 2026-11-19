@@ -43,22 +43,6 @@ Protecciones de riesgo (ver `Config`):
 * `monthly_loss_limit_pct` (default 5.0): si la equity cae más de X% por
   debajo de la equity al inicio del mes calendario se cierra la posición (opcional)
   y no se abren nuevas hasta el siguiente mes (o `monthly_loss_limit_days` días).
-* `adaptive_risk_window` (default 20) + `adaptive_risk_k`: escala `risk_pct`
-  con el win rate de las últimas n posiciones: penaliza las rachas frías
-  (donde se concentran los meses rojos) y reutiliza el tamaño en las cálidas.
-
-Reducción de meses rojos (BTCUSDT 2020-2026, 30min, 82 meses). Partiendo del
-uso previo (`streak_trend_only`, `monthly_loss_limit_pct=5`, `adaptive_risk_window=0`):
-
-| variante                                   | meses en rojo | peor mes | suma meses rojos | retorno | max DD | PF   |
-|--------------------------------------------|---------------|----------|------------------|---------|--------|------|
-| sin tamaño adaptativo                      | 25 (30,5 %)   | -3,15 %  | -28,6 %          | 477,9 % | -8,70% | 2,43 |
-| `adaptive_risk_window=20` (**default**)    | 25 (30,5 %)   | -2,49 %  | -26,1 %          | 439,8 % | -7,96% | 2,49 |
-
-El mismo recorte se repite en train (2020-2023) y test (2024-2026) y con costes
-realistas (comisión 4 bps + slippage 2 bps), donde el tamaño adaptativo también
-mejora el drawdown (-10,1 % -> -8,2 %).
-
 Uso:
     python run_backtest.py
 
@@ -96,7 +80,6 @@ from strategy.models import (
 )
 from strategy.indicators import (
     ema,
-    efficiency_ratio,
     adx,
     atr_volatility_filter,
     gaussian_filter_trend,
@@ -324,17 +307,6 @@ class EMACrossStrategy:
             entry_atr = entry_atr_mean = entry_atr_ratio = np.full(len(bars), np.nan)
             entry_atr_ready = np.zeros(len(bars), dtype=bool)
             atr_allowed = np.ones(len(bars), dtype=bool)
-        entry_mfi = None
-        if cfg.entry_mfi_risk_scaling_enabled and "volume" in bars:
-            mfi_inputs = tuple(
-                np.ascontiguousarray(bars[column].to_numpy(dtype=np.float64))
-                for column in ("high", "low", "close", "volume")
-            )
-            entry_mfi = talib.MFI(*mfi_inputs, timeperiod=cfg.entry_mfi_len)
-        entry_er = (
-            efficiency_ratio(bars.close, cfg.entry_er_len).to_numpy(float)
-            if cfg.entry_er_risk_scaling_enabled else None
-        )
         if cfg.entry_rsi_divergence_enabled:
             divergence = build_rsi_divergence_flags(raw, bars, cfg)
             entry_rsi_bull_divergence_blocked = spread_flags(
@@ -461,10 +433,6 @@ class EMACrossStrategy:
         }
         for timeframe, values in entry_adx_by_timeframe.items():
             output[f"adx_entry_{timeframe}"] = values
-        if entry_mfi is not None:
-            output["entry_mfi"] = np.asarray(entry_mfi, dtype=float)
-        if entry_er is not None:
-            output["entry_er"] = entry_er
         return pd.DataFrame(output, index=bars.index)
 
     def prepare_exits(self, raw: pd.DataFrame, bars: pd.DataFrame) -> tuple[
@@ -566,14 +534,6 @@ class Backtester:
         self.gaussian_trend_turned_bearish = (
             (self.entry_gaussian_trend_dir == -1) & (previous_gaussian_dir == 1)
         )
-        self.entry_mfi = (
-            self.signals["entry_mfi"].to_numpy(float)
-            if "entry_mfi" in self.signals else None
-        )
-        self.entry_er = (
-            self.signals["entry_er"].to_numpy(float)
-            if "entry_er" in self.signals else None
-        )
         self.adx_exit = np.asarray(adx_exit, bool) if adx_exit is not None else np.zeros(len(bars), bool)
         self.weak_exit = np.asarray(weak_exit, bool) if weak_exit is not None else np.zeros(len(bars), bool)
         # Divergencia RSI: +1 alcista (cierra SHORT), -1 bajista (cierra LONG), 0 sin señal.
@@ -609,7 +569,6 @@ class Backtester:
         self._bar_index = -1
         self.streak_in_loss = False
         self._position_pnl = 0.0
-        self._recent_wins: list[bool] = []
 
     def _price(self, price: float, side: int) -> float:
         slip = self.cfg.slippage_bps / 10_000
@@ -636,28 +595,16 @@ class Backtester:
         risk_unit = self._risk_per_unit(side, price, pct_sl) if pct_sl > 0 else 0.0
         sizing = self.entry_sizing_context(
             side,
-            signal_index=self._bar_index - 1,
             sizing_equity=sizing_equity,
         )
-        adaptive_multiplier = sizing["adaptive_multiplier"]
-        mfi_multiplier = sizing["mfi_multiplier"]
-        er_multiplier = sizing["er_multiplier"]
-        unscaled_by_risk = (
-            self.cash * self.cfg.risk_pct * adaptive_multiplier / risk_unit
+        qty_by_risk = (
+            self.cash * self.cfg.risk_pct / risk_unit
             if risk_unit > 0 else self.cash / price
-        )
-        by_risk = (
-            unscaled_by_risk * mfi_multiplier * er_multiplier
-            if risk_unit > 0
-            else unscaled_by_risk
         )
         # La estrategia es cash-only: limita siempre el nominal a su equity.
         # El leverage de Binance pertenece exclusivamente al executor.
         equity_quantity_cap = sizing_equity / price
-        quantity_without_entry_scaling = min(
-            unscaled_by_risk, equity_quantity_cap
-        )
-        qty_total = min(by_risk, equity_quantity_cap)
+        qty_total = min(qty_by_risk, equity_quantity_cap)
         if not np.isfinite(qty_total) or qty_total <= 0:
             return
         fee = self._fee(price * qty_total)
@@ -677,11 +624,6 @@ class Backtester:
             breakeven=False,
             partial_done=False,
             partial2_done=False,
-            entry_mfi_multiplier=mfi_multiplier,
-            entry_er_multiplier=er_multiplier,
-            entry_adaptive_multiplier=adaptive_multiplier,
-            entry_size_multiplier=adaptive_multiplier * mfi_multiplier * er_multiplier,
-            quantity_without_entry_scaling=quantity_without_entry_scaling,
             partial3_done=False,
             partial4_done=False,
             partial5_done=False,
@@ -719,11 +661,7 @@ class Backtester:
             net / (pos.entry_price * qty) * 100 if pos.entry_price * qty else 0.0,
             reason, pos.risk_amount,
             position_initial_quantity=pos.initial_quantity,
-            quantity_without_entry_scaling=pos.quantity_without_entry_scaling,
-            entry_mfi_multiplier=pos.entry_mfi_multiplier,
-            entry_er_multiplier=pos.entry_er_multiplier,
-            entry_adaptive_multiplier=pos.entry_adaptive_multiplier,
-            entry_size_multiplier=pos.entry_size_multiplier))
+        ))
         remaining = pos.quantity - qty
         if percent >= 100 or remaining <= max(1e-12, pos.initial_quantity * 1e-12):
             self.position = None
@@ -732,42 +670,17 @@ class Backtester:
             pos.quantity = remaining
             pos.entry_fee -= entry_fee
 
-    def _risk_multiplier(self) -> float:
-        """Multiplicador de `risk_pct` según el resultado de las últimas posiciones.
-
-        Con `adaptive_risk_window` a 0 devuelve 1 (tamaño fijo). Si no,
-        ``1 + k * (win_rate de las últimas n posiciones - 0.5)`` recortado a
-        ``[adaptive_risk_min, adaptive_risk_max]``: penaliza las rachas frías
-        (donde salen los meses rojos) y reutiliza el tamaño en las cálidas.
-        """
-        cfg = self.cfg
-        if cfg.adaptive_risk_window <= 0 or not self._recent_wins:
-            return 1.0
-        wins = self._recent_wins[-cfg.adaptive_risk_window:]
-        win_rate = sum(wins) / len(wins)
-        factor = 1 + cfg.adaptive_risk_k * (win_rate - 0.5)
-        return float(min(max(factor, cfg.adaptive_risk_min), cfg.adaptive_risk_max))
-
     def entry_sizing_context(
         self,
         side: int,
         *,
-        signal_index: int | None = None,
         sizing_equity: float | None = None,
     ) -> dict[str, float]:
-        """Devuelve los factores de tamaño efectivos para una intención ENTRY."""
+        """Devuelve los parámetros fijos de riesgo para una intención ENTRY."""
         if side not in (1, -1):
             raise ValueError("side debe ser 1 (LONG) o -1 (SHORT)")
-        index = self._bar_index - 1 if signal_index is None else signal_index
-        adaptive = self._risk_multiplier()
-        mfi = self._entry_mfi_risk_multiplier(side, signal_index=index)
-        er = self._entry_er_risk_multiplier(signal_index=index)
         return {
             "risk_pct": float(self.cfg.risk_pct),
-            "adaptive_multiplier": float(adaptive),
-            "mfi_multiplier": float(mfi),
-            "er_multiplier": float(er),
-            "risk_multiplier": float(adaptive * mfi * er),
             "stop_loss_pct": float(self.cfg.stop_loss_pct),
             "commission_bps": float(self.cfg.commission_bps),
             "slippage_bps": float(self.cfg.slippage_bps),
@@ -776,49 +689,9 @@ class Backtester:
             ),
         }
 
-    def _entry_mfi_risk_multiplier(
-        self, side: int, *, signal_index: int | None = None
-    ) -> float:
-        """Escala tamaño por flujo MFI de la última vela de señal ya cerrada."""
-        cfg = self.cfg
-        if (not cfg.entry_mfi_risk_scaling_enabled or self.entry_mfi is None
-                or side not in (1, -1)):
-            return 1.0
-        if signal_index is None:
-            signal_index = self._bar_index - 1
-        if signal_index < 0 or signal_index >= len(self.entry_mfi):
-            return 1.0
-        value = self.entry_mfi[signal_index]
-        if not np.isfinite(value):
-            return 1.0
-        directional_flow = (value - 50.0) * side
-        factor = cfg.entry_mfi_risk_base + (
-            directional_flow / cfg.entry_mfi_risk_spread_scale
-        )
-        return float(np.clip(factor, cfg.entry_mfi_risk_min, cfg.entry_mfi_risk_max))
-
-    def _entry_er_risk_multiplier(self, *, signal_index: int | None = None) -> float:
-        """Escala riesgo por eficiencia direccional de los cierres previos."""
-        cfg = self.cfg
-        if not cfg.entry_er_risk_scaling_enabled or self.entry_er is None:
-            return 1.0
-        if signal_index is None:
-            signal_index = self._bar_index - 1
-        if signal_index < 0 or signal_index >= len(self.entry_er):
-            return 1.0
-        value = self.entry_er[signal_index]
-        if not np.isfinite(value):
-            return 1.0
-        factor = cfg.entry_er_risk_base + cfg.entry_er_risk_slope * value
-        return float(np.clip(factor, cfg.entry_er_risk_min, cfg.entry_er_risk_max))
-
     def _close_streak(self) -> None:
-        """Actualiza el historial adaptativo de resultados y el filtro de racha."""
-        cfg = self.cfg
+        """Actualiza el filtro de tendencia tras una pérdida."""
         won = self._position_pnl >= 0
-        if cfg.adaptive_risk_window > 0:
-            self._recent_wins.append(won)
-            del self._recent_wins[:-cfg.adaptive_risk_window]
         self.streak_in_loss = not won
         self._position_pnl = 0.0
 

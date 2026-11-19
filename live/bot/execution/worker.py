@@ -123,10 +123,7 @@ class ExecutorSettings:
     lease_seconds: int
     max_entry_age_seconds: int
     initial_backfill_seconds: int
-    max_leverage: int
-    set_leverage: bool
-    max_equity_fraction: float
-    max_risk_pct: float
+    leverage: int
     heartbeat_path: Path | None
     signal_db: Path
     production_audit_enabled: bool = False
@@ -178,18 +175,11 @@ class ExecutorSettings:
             initial_backfill_seconds=max(
                 0, env_int("EXECUTOR_INITIAL_BACKFILL_SECONDS", 90)
             ),
-            max_leverage=(
+            leverage=(
                 TEST_MODE_MAX_LEVERAGE
                 if test_mode
-                else max(1, env_int("BINANCE_MAX_LEVERAGE", 10))
+                else max(1, env_int("BINANCE_LEVERAGE", 50))
             ),
-            set_leverage=(
-                True if test_mode else env_bool("BINANCE_SET_LEVERAGE", True)
-            ),
-            max_equity_fraction=min(
-                1.0, max(0.01, env_float("BINANCE_MAX_EQUITY_FRACTION", 0.95))
-            ),
-            max_risk_pct=min(0.10, max(0.0001, env_float("BINANCE_MAX_RISK_PCT", 0.03))),
             heartbeat_path=resolve_path(heartbeat) if heartbeat else None,
             signal_db=signal_db,
             production_audit_enabled=env_bool(
@@ -621,11 +611,10 @@ class ExecutionWorker:
         if not isinstance(sizing, dict):
             raise TypeError("ENTRY sin payload.sizing; se rechaza por seguridad")
         risk_pct = _decimal(sizing.get("risk_pct"), "risk_pct")
-        multiplier = _decimal(sizing.get("risk_multiplier"), "risk_multiplier")
         stop_pct = _decimal(sizing.get("stop_loss_pct"), "stop_loss_pct")
         commission_bps = _decimal(sizing.get("commission_bps", 0), "commission_bps")
         slippage_bps = _decimal(sizing.get("slippage_bps", 0), "slippage_bps")
-        if risk_pct <= 0 or multiplier <= 0:
+        if risk_pct <= 0:
             raise ValueError("Parámetros de riesgo inválidos")
 
         wallet_equity = _decimal(snapshot["wallet_balance"], "equity")
@@ -636,8 +625,7 @@ class ExecutionWorker:
         if price <= 0:
             raise ValueError("mark_price debe ser positivo")
 
-        risk_pct = min(risk_pct * multiplier, _decimal(self.settings.max_risk_pct, "max risk"))
-        risk_cash = wallet_equity * risk_pct
+        risk_cash = available * risk_pct
         side = signal["side"]
         if stop_pct > 0:
             raw_stop = price * (
@@ -664,29 +652,19 @@ class ExecutionWorker:
         )
         config_row = symbol_config[0] if symbol_config else {}
         account_leverage = _float(_get(config_row, "leverage"))
-        if self.settings.set_leverage:
-            target = self.settings.max_leverage
-            if target < 1:
-                raise ValueError("Leverage objetivo debe ser al menos 1x")
-            if account_leverage is None or int(account_leverage) != target:
-                changed = self.gateway.change_leverage(
-                    self.settings.symbol, target
-                )
-                confirmed = _float(_get(changed, "leverage"), None)
-                if confirmed is not None and int(confirmed) != target:
-                    raise RuntimeError(
-                        f"Binance confirmó leverage {confirmed}, se solicitó {target}"
-                    )
-            effective_leverage = Decimal(target)
-        else:
-            if account_leverage is None or account_leverage < 1:
-                raise ValueError(
-                    "No se pudo verificar el leverage configurado en Binance"
-                )
-            effective_leverage = min(
-                Decimal(self.settings.max_leverage),
-                _decimal(account_leverage, "account leverage"),
+        target = self.settings.leverage
+        if target < 1:
+            raise ValueError("Leverage objetivo debe ser al menos 1x")
+        if account_leverage is None or int(account_leverage) != target:
+            changed = self.gateway.change_leverage(
+                self.settings.symbol, target
             )
+            confirmed = _float(_get(changed, "leverage"), None)
+            if confirmed is not None and int(confirmed) != target:
+                raise RuntimeError(
+                    f"Binance confirmó leverage {confirmed}, se solicitó {target}"
+                )
+        effective_leverage = Decimal(target)
 
         if self.settings.test_mode:
             return calculate_test_entry_quantity(
@@ -696,10 +674,7 @@ class ExecutionWorker:
                 effective_leverage,
             )
 
-        exposure_fraction = _decimal(
-            self.settings.max_equity_fraction, "max_equity_fraction"
-        )
-        max_notional = min(wallet_equity, available) * effective_leverage * exposure_fraction
+        max_notional = min(wallet_equity, available) * effective_leverage
         qty_by_leverage = max_notional / price
         quantity = min(qty_by_risk, qty_by_leverage)
         rules = self._rules_cache[self.settings.symbol]

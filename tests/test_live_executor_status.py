@@ -26,10 +26,7 @@ def _settings(tmp_path, **overrides):
         "lease_seconds": 30,
         "max_entry_age_seconds": 90,
         "initial_backfill_seconds": 90,
-        "max_leverage": 10,
-        "set_leverage": True,
-        "max_equity_fraction": 0.95,
-        "max_risk_pct": 0.03,
+        "leverage": 50,
         "heartbeat_path": tmp_path / "executor.heartbeat",
         "signal_db": tmp_path / "signal.db",
     }

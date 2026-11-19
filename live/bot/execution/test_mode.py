@@ -57,7 +57,6 @@ class ExecutionTestMode:
         now_ms = self.worker.clock_ms()
         sizing = {
             "risk_pct": 0.01,
-            "risk_multiplier": 1.0,
             "stop_loss_pct": TEST_MODE_STOP_LOSS_PCT,
             "commission_bps": 0.0,
             "slippage_bps": 0.0,
