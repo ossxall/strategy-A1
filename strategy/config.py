@@ -56,7 +56,7 @@ class Config:
     #
     # Initial account equity.
     #
-    initial_capital: float = 60.0
+    initial_capital: float = 10_000.0
     #
     # Commission cost in basis points per trade.
     #
@@ -68,7 +68,7 @@ class Config:
     #
     # Fraction of equity risked per trade.
     #
-    risk_pct: float = 0.01
+    risk_pct: float = 0.10
     #
     # Stop-loss distance as a fraction of entry price.
     #
@@ -131,23 +131,6 @@ class Config:
     entry_rsi_divergence_enabled: bool = True
     entry_rsi_divergence_lookback: int = 20
     #
-    # MFI additionally scales position size according to money flow in favor.
-    #
-    entry_mfi_risk_scaling_enabled: bool = True
-    entry_mfi_len: int = 14
-    entry_mfi_risk_base: float = 1.0
-    entry_mfi_risk_spread_scale: float = 100.0
-    entry_mfi_risk_min: float = 0.5
-    entry_mfi_risk_max: float = 1.25
-    #
-    # Efficiency Ratio smooths position size between ranging and trending regimes.
-    #
-    entry_er_risk_scaling_enabled: bool = True
-    entry_er_len: int = 20
-    entry_er_risk_base: float = 0.75
-    entry_er_risk_slope: float = 1.0
-    entry_er_risk_min: float = 0.5
-    entry_er_risk_max: float = 1.25
     #
     # ADX-based exit (reversal) configuration.
     #
@@ -273,9 +256,8 @@ class Config:
     # monthly_loss_limit_close, the open one is closed) until the next month or,
     # if `monthly_loss_limit_days` > 0, for that many days. Safety net for the
     # worst month. With defaults it barely triggers (1 time in 82 months), so it
-    # starts loose at 5.0. Adaptive sizing also trims red months; lowering the
-    # limit (e.g. 2) improves the worst month but trims cumulative negative
-    # months. 0 = disabled.
+    # starts loose at 5.0. Lowering the limit (e.g. 2) improves the worst month
+    # but trims cumulative negative months. 0 = disabled.
     #
     monthly_loss_limit_pct: float = 5.0
     monthly_loss_limit_close: bool = True
@@ -293,20 +275,6 @@ class Config:
     #
     streak_trend_only: bool = True
     #
-    # --- Adaptive position sizing ------------------------------------------
-    # `risk_pct` is multiplied by `clamp(1 + k * (win rate of last n positions
-    # - 0.5), min, max)`: less risk in loss streaks and more in winning streaks
-    # (trending market). Red months are usually cold streaks, so risk is trimmed
-    # exactly when losses occur: with `adaptive_risk_window=20` and `k=2` the
-    # worst month goes from -3.15% to -2.49%, cumulative negative months from
-    # -28.6% to -26.1% and PF from 2.43 to 2.50, at the cost of ~38 points of
-    # total return. 0 = disabled (fixed size).
-    #
-    adaptive_risk_window: int = 20
-    adaptive_risk_k: float = 2.0
-    adaptive_risk_min: float = 0.5
-    adaptive_risk_max: float = 1.5
-
     force_close_at_end: bool = True
 
     @property
@@ -415,18 +383,6 @@ class Config:
             raise ValueError("Invalid Gaussian Filter Trend entry configuration.")
         if self.entry_rsi_divergence_enabled and self.entry_rsi_divergence_lookback < 1:
             raise ValueError("entry_rsi_divergence_lookback must be >= 1.")
-        if self.entry_mfi_risk_scaling_enabled and (
-            self.entry_mfi_len <= 0 or self.entry_mfi_risk_spread_scale <= 0
-            or self.entry_mfi_risk_min <= 0
-            or self.entry_mfi_risk_max < self.entry_mfi_risk_min
-        ):
-            raise ValueError("Invalid MFI risk scaling configuration.")
-        if self.entry_er_risk_scaling_enabled and (
-            self.entry_er_len <= 0 or self.entry_er_risk_slope < 0
-            or self.entry_er_risk_min <= 0
-            or self.entry_er_risk_max < self.entry_er_risk_min
-        ):
-            raise ValueError("Invalid Efficiency Ratio scaling configuration.")
         if self.adx_exit_enabled:
             if min(self.adx_dilen, self.adx_adxlen) <= 0 or self.adx_key_level < 0:
                 raise ValueError("Invalid exit ADX configuration.")
@@ -507,7 +463,3 @@ class Config:
             raise ValueError("monthly_loss_limit_pct cannot be negative.")
         if self.monthly_loss_limit_days < 0:
             raise ValueError("monthly_loss_limit_days cannot be negative.")
-        if self.adaptive_risk_window < 0:
-            raise ValueError("adaptive_risk_window cannot be negative.")
-        if self.adaptive_risk_window and not (0 < self.adaptive_risk_min <= self.adaptive_risk_max):
-            raise ValueError("Requires 0 < adaptive_risk_min <= adaptive_risk_max.")
