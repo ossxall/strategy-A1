@@ -896,9 +896,379 @@ def _self_test_inflight_recovery(root: Path, now_ms: int) -> int:
         blocked = uncertain_worker._reconcile_inflight()
         _check(blocked, "missing SUBMITTING order blocks retries")
         _check(not uncertain_gateway.orders, "uncertain order is not resent")
+        uncertain_store.close()
+        resumed_store, resumed_worker, _clock = _open_worker(
+            uncertain_path,
+            "selftest-uncertain",
+            uncertain_gateway,
+            now_ms + 1_000,
+        )
+        try:
+            resumed_worker.run_once()
+            recovered_state = resumed_store.get_execution_state(
+                "selftest-uncertain", normalized["signal_id"]
+            )
+            _check(
+                recovered_state is not None
+                and recovered_state["status"] == "CLAIMED"
+                and recovered_state["order_status"] == "SUBMITTING",
+                "uncertain SUBMITTING intent remains blocked after restart",
+            )
+            _check(
+                not uncertain_gateway.orders,
+                "restart does not resend an unresolved SUBMITTING order",
+            )
+        finally:
+            resumed_store.close()
     finally:
         uncertain_store.close()
     return 2
+
+
+def _self_test_process_restart_recovery(root: Path, now_ms: int) -> int:
+    """Reopens the same ledger/worker around simulated process-death windows."""
+    passed = 0
+
+    def claim_and_prepare(
+        worker: ExecutionWorker,
+        store: SignalStore,
+        event: dict,
+        *,
+        order_status: str,
+        side: str,
+        quantity: str,
+        reduce_only: bool,
+    ) -> tuple[str, str]:
+        normalized = store._normalize_event(event)
+        _check(store.insert([event]) == 1, "restart signal persisted once")
+        claimed = store.claim_next_signal(
+            worker.settings.account_id,
+            worker.worker_id,
+            worker.clock_ms(),
+            worker.settings.lease_seconds * 1000,
+            activation_cutoff_ms=worker._activation_cutoff_ms,
+        )
+        _check(claimed is not None, "restart signal claimed before simulated crash")
+        client_order_id = worker._client_order_id(normalized["signal_id"])
+        store.record_order_intent(
+            worker.settings.account_id,
+            normalized["signal_id"],
+            client_order_id,
+            order_status,
+            {
+                "symbol": "BTCUSDT",
+                "side": side,
+                "quantity": quantity,
+                "reduce_only": reduce_only,
+            },
+        )
+        return normalized["signal_id"], client_order_id
+
+    # Crash after PREPARED, before the POST: after the lease expires the worker
+    # verifies NOT_FOUND and safely submits the order once.
+    path = root / "restart-prepared-before-submit.db"
+    account_id = "selftest-restart-prepared"
+    gateway = _ScenarioFuturesGateway()
+    store, worker, _clock = _open_worker(path, account_id, gateway, now_ms)
+    prepared_signal = _signal(
+        now_ms,
+        event="ENTRY",
+        action="OPEN",
+        side="LONG",
+        position_id=70,
+        reason="SELFTEST_RESTART_PREPARED",
+    )
+    try:
+        signal_id, client_order_id = claim_and_prepare(
+            worker,
+            store,
+            prepared_signal,
+            order_status="PREPARED",
+            side="BUY",
+            quantity="0.1",
+            reduce_only=False,
+        )
+    finally:
+        store.close()
+
+    store, restarted, _clock = _open_worker(
+        path,
+        account_id,
+        gateway,
+        now_ms + worker.settings.lease_seconds * 1000 + 1,
+    )
+    try:
+        restarted.run_once()
+        state = store.get_execution_state(account_id, signal_id)
+        _check(
+            state is not None and state["status"] == "FILLED",
+            "prepared ENTRY completes after restart",
+        )
+        _check(
+            len(gateway.orders) == 1
+            and gateway.orders[0]["client_order_id"] == client_order_id,
+            "prepared ENTRY sends exactly once after confirmed NOT_FOUND",
+        )
+        _check(len(gateway.open_algo_orders("BTCUSDT")) == 1,
+               "restarted ENTRY is protected")
+        passed += 1
+    finally:
+        store.close()
+
+    # Crash after Binance accepted/fill, before the worker persisted the fill.
+    path = root / "restart-entry-filled-before-ledger.db"
+    account_id = "selftest-restart-entry-filled"
+    gateway = _ScenarioFuturesGateway()
+    store, worker, _clock = _open_worker(path, account_id, gateway, now_ms)
+    try:
+        signal_id, client_order_id = claim_and_prepare(
+            worker,
+            store,
+            _signal(
+                now_ms,
+                event="ENTRY",
+                action="OPEN",
+                side="LONG",
+                position_id=71,
+                reason="SELFTEST_RESTART_ENTRY_FILL",
+            ),
+            order_status="SUBMITTING",
+            side="BUY",
+            quantity="0.1",
+            reduce_only=False,
+        )
+        gateway.place_market_order(
+            symbol="BTCUSDT",
+            side="BUY",
+            quantity="0.1",
+            client_order_id=client_order_id,
+            reduce_only=False,
+        )
+    finally:
+        store.close()
+
+    store, restarted, _clock = _open_worker(
+        path, account_id, gateway, now_ms + 1_000
+    )
+    try:
+        restarted.run_once()
+        state = store.get_execution_state(account_id, signal_id)
+        _check(
+            state is not None and state["status"] == "FILLED",
+            "accepted ENTRY fill is recovered after restart",
+        )
+        _check(
+            len(gateway.orders) == 1,
+            "accepted ENTRY is reconciled without resubmission",
+        )
+        _check(
+            len(gateway.open_algo_orders("BTCUSDT")) == 1,
+            "recovered ENTRY receives a confirmed protective stop",
+        )
+        passed += 1
+    finally:
+        store.close()
+
+    # Crash after a TP1 partial fill, before the breakeven stop/ledger update.
+    path = root / "restart-partial-before-breakeven.db"
+    account_id = "selftest-restart-partial"
+    gateway = _ScenarioFuturesGateway()
+    store, worker, _clock = _open_worker(path, account_id, gateway, now_ms)
+    try:
+        _run_signal(
+            worker,
+            store,
+            _signal(
+                now_ms,
+                event="ENTRY",
+                action="OPEN",
+                side="LONG",
+                position_id=72,
+                reason="EMA_CROSS",
+            ),
+        )
+        gateway.mark = 101.0
+        position = store.get_active_execution_positions(
+            account_id, "BTCUSDT"
+        )[0]
+        close_qty = str(position["open_qty"] / 2)
+        partial = _signal(
+            now_ms,
+            event="EXIT",
+            action="PARTIAL_CLOSE",
+            side="LONG",
+            position_id=72,
+            reason="PARTIAL_TP_1R",
+            close_pct=50.0,
+        )
+        signal_id, client_order_id = claim_and_prepare(
+            worker,
+            store,
+            partial,
+            order_status="SUBMITTING",
+            side="SELL",
+            quantity=close_qty,
+            reduce_only=True,
+        )
+        gateway.place_market_order(
+            symbol="BTCUSDT",
+            side="SELL",
+            quantity=close_qty,
+            client_order_id=client_order_id,
+            reduce_only=True,
+        )
+        expected_remaining = gateway.position_amt
+    finally:
+        store.close()
+
+    store, restarted, _clock = _open_worker(
+        path, account_id, gateway, now_ms + 1_000
+    )
+    try:
+        restarted.run_once()
+        state = store.get_execution_state(account_id, signal_id)
+        be_id = restarted._algo_order_id(72, "be")
+        active_stops = gateway.open_algo_orders("BTCUSDT")
+        _check(
+            state is not None and state["status"] == "FILLED",
+            "TP1 partial is reconciled after restart",
+        )
+        _check(
+            len(gateway.orders) == 2,
+            "TP1 partial is not resubmitted after restart",
+        )
+        _check(
+            abs(gateway.position_amt - expected_remaining) < 1e-9
+            and len(active_stops) == 1
+            and active_stops[0]["clientAlgoId"] == be_id,
+            "restarted TP1 leaves the remainder protected at breakeven",
+        )
+        passed += 1
+    finally:
+        store.close()
+
+    # Crash after a full-close fill, before the old protective stop is canceled.
+    path = root / "restart-close-before-stop-cancel.db"
+    account_id = "selftest-restart-close"
+    gateway = _ScenarioFuturesGateway()
+    store, worker, _clock = _open_worker(path, account_id, gateway, now_ms)
+    try:
+        _run_signal(
+            worker,
+            store,
+            _signal(
+                now_ms,
+                event="ENTRY",
+                action="OPEN",
+                side="LONG",
+                position_id=73,
+                reason="EMA_CROSS",
+            ),
+        )
+        position = store.get_active_execution_positions(
+            account_id, "BTCUSDT"
+        )[0]
+        close_qty = str(position["open_qty"])
+        close_event = _signal(
+            now_ms,
+            event="EXIT",
+            action="CLOSE",
+            side="LONG",
+            position_id=73,
+            reason="EMA_CROSS_EXIT",
+            close_pct=100.0,
+        )
+        signal_id, client_order_id = claim_and_prepare(
+            worker,
+            store,
+            close_event,
+            order_status="SUBMITTING",
+            side="SELL",
+            quantity=close_qty,
+            reduce_only=True,
+        )
+        gateway.place_market_order(
+            symbol="BTCUSDT",
+            side="SELL",
+            quantity=close_qty,
+            client_order_id=client_order_id,
+            reduce_only=True,
+        )
+        _check(
+            bool(gateway.open_algo_orders("BTCUSDT")),
+            "simulated crash leaves the old stop for restart cleanup",
+        )
+    finally:
+        store.close()
+
+    store, restarted, _clock = _open_worker(
+        path, account_id, gateway, now_ms + 1_000
+    )
+    try:
+        restarted.run_once()
+        state = store.get_execution_state(account_id, signal_id)
+        _check(
+            state is not None and state["status"] == "FILLED",
+            "full close is reconciled after restart",
+        )
+        _check(
+            len(gateway.orders) == 2
+            and gateway.position_amt == 0
+            and not gateway.open_algo_orders("BTCUSDT"),
+            "restarted full close cancels stops without another order",
+        )
+        passed += 1
+    finally:
+        store.close()
+
+    # A server-side protective stop can fill while the worker is down.
+    path = root / "restart-stop-filled-while-down.db"
+    account_id = "selftest-restart-stop"
+    gateway = _ScenarioFuturesGateway()
+    store, worker, _clock = _open_worker(path, account_id, gateway, now_ms)
+    try:
+        _run_signal(
+            worker,
+            store,
+            _signal(
+                now_ms,
+                event="ENTRY",
+                action="OPEN",
+                side="LONG",
+                position_id=74,
+                reason="EMA_CROSS",
+            ),
+        )
+        stop_id = worker._algo_order_id(74, "sl")
+    finally:
+        store.close()
+
+    gateway.mark = 98.0
+    gateway.trigger_stop(stop_id)
+    store, restarted, _clock = _open_worker(
+        path, account_id, gateway, now_ms + 1_000
+    )
+    try:
+        restarted.run_once()
+        _check(
+            store.get_active_execution_positions(account_id, "BTCUSDT") == [],
+            "stop fill during downtime reconciles ledger to flat",
+        )
+        adjustment_count = store.conn.execute(
+            "SELECT COUNT(*) FROM execution_adjustments"
+        ).fetchone()[0]
+        restarted.run_once()
+        _check(
+            store.conn.execute(
+                "SELECT COUNT(*) FROM execution_adjustments"
+            ).fetchone()[0] == adjustment_count,
+            "downtime stop reconciliation is idempotent after restart",
+        )
+        passed += 1
+    finally:
+        store.close()
+
+    return passed
 
 
 def _self_test_guards(root: Path, now_ms: int) -> int:
@@ -1307,6 +1677,7 @@ def run_executor_self_tests(data_dir: Path | None = None) -> int:
                 + _self_test_pending_reversal(root, now_ms)
                 + _self_test_stop_reconciliation(root, now_ms)
                 + _self_test_inflight_recovery(root, now_ms)
+                + _self_test_process_restart_recovery(root, now_ms)
                 + _self_test_guards(root, now_ms)
                 + _self_test_open_orders_and_stop_repair(root, now_ms)
                 + _self_test_transient_and_terminal_partial_recovery(

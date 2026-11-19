@@ -150,9 +150,13 @@ esperan su `signal_time`, parcial programado y reversión `EXIT`→`ENTRY` en or
 fill/reconciliación de stop, recuperación idempotente, señales vencidas,
 protección de posiciones no rastreadas, bloqueo por órdenes externas abiertas,
 restauración de stops ausentes, reintento seguro antes del envío, conservación
-de fills parciales con orden terminal y rechazo de Hedge Mode. Esa matriz no
-llama a Binance. El ciclo real comprueba además la comunicación con Binance; no
-fuerza allí fallos de red ni el disparo de cada posible error API.
+de fills parciales con orden terminal, rechazo de Hedge Mode y cinco reinicios
+simulados: PREPARED antes del envío, ENTRY llenada antes de guardar el fill,
+parcial antes de breakeven, cierre antes de cancelar stops y stop disparado
+mientras el worker está abajo. Se reabre la misma DB y se conserva el gateway
+simulado para comprobar que no se dupliquen órdenes. Esa matriz no llama a
+Binance ni mata un proceso real. El ciclo real comprueba además la comunicación
+con Binance; no fuerza allí fallos de red ni cada posible error API.
 
 Opcionalmente, `BOT_EXECUTOR_PRODUCTION_AUDIT=true` añade una auditoría de
 producción **solo lectura** antes de los ciclos testnet. Requiere credenciales
