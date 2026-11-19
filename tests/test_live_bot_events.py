@@ -218,7 +218,7 @@ def test_live_process_passes_closed_one_minute_feed_to_intrabar_replay(monkeypat
     monkeypatch.setattr(
         bot_app,
         "build_events_and_result",
-        lambda *args: (
+        lambda *args, **kwargs: (
             calls.append(args)
             or ([], pd.DataFrame(), pd.DataFrame())
         ),
@@ -297,7 +297,7 @@ def test_live_tail_uses_only_closed_feed_db_minutes(tmp_path, monkeypatch):
     monkeypatch.setattr(
         bot_app,
         "build_events_and_result",
-        lambda *args: (
+        lambda *args, **kwargs: (
             calls.append(args)
             or ([], pd.DataFrame(), pd.DataFrame())
         ),
@@ -1278,7 +1278,7 @@ def test_live_only_includes_event_actionable_at_start_even_if_signal_bar_started
     monkeypatch.setattr(
         bot_app,
         "build_events_and_result",
-        lambda *args: ([event], pd.DataFrame(), pd.DataFrame()),
+        lambda *args, **kwargs: ([event], pd.DataFrame(), pd.DataFrame()),
     )
 
     assert signal_bot.process_once() == 1

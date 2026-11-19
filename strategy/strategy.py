@@ -860,6 +860,88 @@ class Backtester:
         for trade in self.trades[first_trade:]:
             self.intrabar_exit_times.add(trade.exit_time)
 
+    def _replay_intrabar_gap(self, i: int) -> None:
+        """Gestiona minutos disponibles entre dos velas de estrategia.
+
+        Los buckets incompletos no aparecen en ``bars`` (el remuestreo los
+        descarta), pero sus minutos cerrados siguen siendo válidos para
+        gestionar una posición y ejecutar una intención pendiente.
+        """
+        if (
+            i <= 0
+            or self._intrabar_bars is None
+            or self._intrabar_times_ns is None
+        ):
+            return
+
+        strategy_delta = pd.Timedelta(self.cfg.timeframe)
+        gap_start = self.times[i - 1] + strategy_delta
+        gap_end = self.times[i]
+        if gap_end <= gap_start:
+            return
+
+        left = int(
+            np.searchsorted(
+                self._intrabar_times_ns,
+                pd.Timestamp(gap_start).as_unit("ns").value,
+                side="left",
+            )
+        )
+        right = int(
+            np.searchsorted(
+                self._intrabar_times_ns,
+                pd.Timestamp(gap_end).as_unit("ns").value,
+                side="left",
+            )
+        )
+        if left >= right:
+            return
+
+        self._bar_index = i
+        first_time = self._intrabar_bars.index[left]
+        if self.pending_target is not None:
+            signal_bias = int(self.signals["trend_bias"].iloc[i - 1])
+            self._execute_target(
+                i,
+                self.pending_target,
+                signal_bias,
+                open_price=self._intrabar_o[left],
+                timestamp=first_time,
+            )
+            self.pending_target = None
+            self.pending_exit = None
+        elif self.pending_exit is not None:
+            reason, percent = self.pending_exit
+            self.close_position(
+                percent,
+                self._intrabar_o[left],
+                first_time,
+                reason,
+            )
+            self.pending_exit = None
+
+        for minute in range(left, right):
+            minute_time = self._intrabar_bars.index[minute]
+            first_trade = len(self.trades)
+            stop_hit = self._stop(
+                i,
+                open_price=self._intrabar_o[minute],
+                high=self._intrabar_h[minute],
+                low=self._intrabar_l[minute],
+                timestamp=minute_time,
+            )
+            if stop_hit:
+                self._remember_intrabar_exits(first_trade)
+                break
+            self._manage(
+                i,
+                open_price=self._intrabar_o[minute],
+                high=self._intrabar_h[minute],
+                low=self._intrabar_l[minute],
+                timestamp=minute_time,
+            )
+            self._remember_intrabar_exits(first_trade)
+
     def _rsi_divergence_reason(self, i: int) -> Optional[str]:
         """Motivo de salida total si hay divergencia RSI en contra de la posición.
 
@@ -1239,6 +1321,10 @@ class Backtester:
                 month_key = key
                 self.halt_until = None
                 month_start_equity = self._equity_value(self.c[i - 1]) if i else cfg.initial_capital
+            # Una vela de estrategia puede faltar si su bucket quedó
+            # incompleto. Aun así, los minutos cerrados de ese hueco deben
+            # ejecutar las intenciones pendientes y gestionar stops/TPs.
+            self._replay_intrabar_gap(i)
             # 1) Ejecutar target/exit pendientes (decididos al cierre anterior)
             if self.pending_target is not None:
                 pending_target = self.pending_target

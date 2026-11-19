@@ -293,6 +293,7 @@ class SignalBot:
             self.interval,
             intrabar_bars,
             self._live_simulation_cache,
+            history_revision=getattr(self.feed, "history_revision", None),
         )
         self._publish_snapshot(
             raw,
