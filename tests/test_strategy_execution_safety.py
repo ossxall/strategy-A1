@@ -18,8 +18,6 @@ def quiet_config(**overrides):
         "entry_atr_enabled": False,
         "entry_rsi_divergence_enabled": False,
         "entry_gaussian_trend_enabled": False,
-        "entry_mfi_risk_scaling_enabled": False,
-        "entry_er_risk_scaling_enabled": False,
         "adx_exit_enabled": False,
         "ema_weakening_exit_enabled": False,
         "rsi_divergence_exit_enabled": False,
@@ -269,25 +267,3 @@ def test_equity_records_effective_stop_and_breakeven_activation():
     assert engine.eq_breakeven_activated == [True]
     assert engine.eq_breakeven_price == [100.0]
     assert engine.eq_stop_price == [100.0]
-
-
-def test_adaptive_risk_multiplier_uses_only_the_configured_recent_window():
-    bars = make_bars(
-        [
-            {"open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0, "volume": 1.0},
-        ]
-    )
-    config = quiet_config(
-        adaptive_risk_window=2,
-        adaptive_risk_k=2.0,
-        adaptive_risk_min=0.5,
-        adaptive_risk_max=1.5,
-    )
-    engine = Backtester(bars, config, signals=manual_signals(bars, [0]))
-
-    engine._recent_wins = [False, False]
-    assert engine._risk_multiplier() == pytest.approx(0.5)
-    engine._recent_wins = [False, True]
-    assert engine._risk_multiplier() == pytest.approx(1.0)
-    engine._recent_wins = [True, True]
-    assert engine._risk_multiplier() == pytest.approx(1.5)

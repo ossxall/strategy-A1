@@ -57,8 +57,6 @@ def make_config(**overrides):
         "entry_atr_enabled": False,
         "entry_rsi_divergence_enabled": False,
         "entry_gaussian_trend_enabled": False,
-        "entry_mfi_risk_scaling_enabled": False,
-        "entry_er_risk_scaling_enabled": False,
         "adx_exit_enabled": False,
         "ema_weakening_exit_enabled": False,
         "rsi_divergence_exit_enabled": False,
@@ -438,7 +436,6 @@ def test_signal_store_migrates_existing_rows_to_signal_id(tmp_path):
                     "pending": True,
                     "sizing": {
                         "risk_pct": 0.01,
-                        "risk_multiplier": 1.0,
                         "stop_loss_pct": 0.01,
                     },
                 }

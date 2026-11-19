@@ -626,12 +626,6 @@ def build_backtest_figure(
     )
     if atr_filter_enabled:
         panels.append("atr")
-    if (signals is not None and "entry_mfi" in signals
-            and np.isfinite(signals["entry_mfi"].to_numpy(float)).any()):
-        panels.append("mfi")
-    if (signals is not None and "entry_er" in signals
-            and np.isfinite(signals["entry_er"].to_numpy(float)).any()):
-        panels.append("er")
     if ((signals is not None and "target" in signals)
             or (equity is not None and not equity.empty and "position_side" in equity)):
         panels.append("target")
@@ -644,8 +638,8 @@ def build_backtest_figure(
     if summary_rows:
         panels.append("summary")
 
-    weights = {"price": 1.0, "macd": 0.25, "atr": 0.25, "mfi": 0.2, "er": 0.2,
-               "target": 0.2, "equity": 0.4, "drawdown": 0.25, "summary": 0.45}
+    weights = {"price": 1.0, "macd": 0.25, "atr": 0.25, "target": 0.2,
+               "equity": 0.4, "drawdown": 0.25, "summary": 0.45}
     for name in adx_entry_panels:
         weights[name] = 0.25
     for name in adx_panels:
@@ -830,21 +824,9 @@ def build_backtest_figure(
             initial_qty = float(getattr(
                 trade, "position_initial_quantity", getattr(trade, "quantity", 0.0)
             ) or 0.0)
-            base_qty = float(getattr(
-                trade, "quantity_without_entry_scaling", initial_qty
-            ) or 0.0)
-            mfi_mult = float(getattr(trade, "entry_mfi_multiplier", 1.0) or 1.0)
-            er_mult = float(getattr(trade, "entry_er_multiplier", 1.0) or 1.0)
-            adaptive_mult = float(getattr(trade, "entry_adaptive_multiplier", 1.0) or 1.0)
-            size_mult = float(getattr(
-                trade, "entry_size_multiplier", mfi_mult * er_mult * adaptive_mult
-            ) or 1.0)
             sizing = (
                 f"<br>Riesgo inicial: {risk:,.2f}"
                 f"<br>Cantidad inicial: {initial_qty:,.6g}"
-                f"<br>Cantidad sin MFI/ER: {base_qty:,.6g}"
-                f"<br>Multiplicadores MFI×{mfi_mult:.3f} · ER×{er_mult:.3f}"
-                f" · adaptativo×{adaptive_mult:.3f} · total×{size_mult:.3f}"
             )
             if entry:
                 return sizing
@@ -1131,21 +1113,6 @@ def build_backtest_figure(
         fig.update_yaxes(title_text="ATR", row=rr, col=1, secondary_y=False)
         fig.update_yaxes(title_text="ATR / media previa", range=[0, ratio_top],
                          row=rr, col=1, secondary_y=True)
-
-    # -- Panel MFI ---------------------------------------------------------
-    if "mfi" in row:
-        rr = row["mfi"]
-        fig.add_trace(_line_trace(sig_x, signals["entry_mfi"].to_numpy(float), "MFI", "#26a69a", width=1.3),
-                      row=rr, col=1)
-        fig.add_hline(y=50, line=dict(color="#90a4ae", width=0.9, dash="dash"), row=rr, col=1)
-        fig.update_yaxes(title_text="MFI", range=[0, 100], row=rr, col=1)
-
-    # -- Panel Efficiency Ratio -------------------------------------------
-    if "er" in row:
-        rr = row["er"]
-        fig.add_trace(_line_trace(sig_x, signals["entry_er"].to_numpy(float), "Efficiency Ratio", "#ab47bc",
-                                  width=1.3), row=rr, col=1)
-        fig.update_yaxes(title_text="ER", range=[0, 1], row=rr, col=1)
 
     # -- Panel target ------------------------------------------------------
     if "target" in row:

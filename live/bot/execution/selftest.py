@@ -236,10 +236,7 @@ def _settings(signal_db: Path, account_id: str) -> ExecutorSettings:
         lease_seconds=30,
         max_entry_age_seconds=90,
         initial_backfill_seconds=300,
-        max_leverage=10,
-        set_leverage=True,
-        max_equity_fraction=0.95,
-        max_risk_pct=0.03,
+        leverage=10,
         heartbeat_path=None,
         signal_db=signal_db,
     )
@@ -261,7 +258,6 @@ def _signal(
 ) -> dict:
     sizing = {
         "risk_pct": 0.001,
-        "risk_multiplier": 1.0,
         "stop_loss_pct": 0.01,
         "commission_bps": 0.0,
         "slippage_bps": 0.0,

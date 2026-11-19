@@ -185,17 +185,12 @@ def test_backtest_figure_shows_rejections_position_risk_and_drawdown():
                 "exit_price": 110.0,
                 "quantity": 1.0,
                 "position_initial_quantity": 2.0,
-                "quantity_without_entry_scaling": 1.5,
                 "pnl_gross": 102.0,
                 "fees": 2.0,
                 "pnl_net": 100.0,
                 "return_pct": 10.0,
                 "reason": "TAKE_PROFIT",
                 "position_risk": 100.0,
-                "entry_mfi_multiplier": 1.2,
-                "entry_er_multiplier": 1.1,
-                "entry_adaptive_multiplier": 0.9,
-                "entry_size_multiplier": 1.188,
             }
         ]
     )
@@ -254,7 +249,7 @@ def test_backtest_figure_shows_rejections_position_risk_and_drawdown():
     summary_axis_name = f"xaxis{summary.xaxis[1:]}" if summary.xaxis != "x" else "xaxis"
     assert getattr(figure.layout, summary_axis_name).type == "linear"
     entry = next(trace for trace in figure.data if trace.name == "entrada LONG")
-    assert "Multiplicadores MFI" in entry.text[0]
+    assert "Riesgo inicial" in entry.text[0]
     exit_trace = next(trace for trace in figure.data if trace.name == "salida +")
     assert "Cantidad del tramo" in exit_trace.text[0]
     assert "R tramo" in exit_trace.text[0]

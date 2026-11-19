@@ -167,10 +167,6 @@ def build_events_and_result(
         entry_quantities[opened["position_id"]] = float(opened["quantity"])
         entry_sizing[opened["position_id"]] = {
             "risk_pct": opened["risk_pct"],
-            "risk_multiplier": opened["risk_multiplier"],
-            "adaptive_multiplier": opened["adaptive_multiplier"],
-            "mfi_multiplier": opened["mfi_multiplier"],
-            "er_multiplier": opened["er_multiplier"],
             "stop_loss_pct": opened["stop_loss_pct"],
             "commission_bps": opened["commission_bps"],
             "slippage_bps": opened["slippage_bps"],
@@ -293,7 +289,6 @@ def build_events_and_result(
                 new_side = "LONG" if target == 1 else "SHORT"
                 sizing = engine.entry_sizing_context(
                     target,
-                    signal_index=len(bars) - 1,
                     sizing_equity=engine.cash,
                 )
                 sizing["move_stop_to_breakeven"] = cfg.move_stop_to_breakeven

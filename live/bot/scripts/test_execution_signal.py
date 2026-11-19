@@ -162,7 +162,7 @@ def _require_fresh_flat_snapshot(store, settings) -> dict:
         )
     if not _snapshot_is_flat(snapshot, settings.symbol):
         raise RuntimeError(
-            f"La cuenta testnet no está plana o tiene órdenes abiertas "
+            f"La cuenta Binance no está plana o tiene órdenes abiertas "
             f"para {settings.symbol}; no se insertó ninguna señal."
         )
     return snapshot
@@ -235,6 +235,7 @@ def _verify_executor(settings) -> None:
         or config.get("enabled") is not True
         or config.get("account_id") != settings.account_id
         or config.get("signal_db_path") != str(settings.signal_db)
+        or config.get("leverage") != settings.leverage
     ):
         raise RuntimeError(
             "La configuración del executor no coincide con este perfil "
@@ -404,7 +405,7 @@ def main() -> int:
 
     from bot.env import load_direct_profile
 
-    load_direct_profile(live_dir)
+    load_direct_profile(live_dir, service="executor")
 
     from bot.config import build_strategy_config
     from bot.execution.worker import ExecutorSettings
@@ -440,7 +441,6 @@ def main() -> int:
         )
     sizing = {
         "risk_pct": strategy.risk_pct,
-        "risk_multiplier": 1.0,
         "stop_loss_pct": strategy.stop_loss_pct,
         "commission_bps": strategy.commission_bps,
         "slippage_bps": strategy.slippage_bps,
@@ -466,7 +466,6 @@ def main() -> int:
             "completo en testnet."
         )
         return 2
-
     _verify_executor(settings)
     store = SignalStore(settings.signal_db)
     store.connect()

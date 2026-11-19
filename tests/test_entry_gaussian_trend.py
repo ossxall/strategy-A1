@@ -32,8 +32,6 @@ def make_config(**overrides):
         "confirm_bars": 0,
         "entry_adx_enabled": False,
         "entry_atr_enabled": False,
-        "entry_mfi_risk_scaling_enabled": False,
-        "entry_er_risk_scaling_enabled": False,
         "entry_rsi_divergence_enabled": False,
         "entry_price_ema_filter_enabled": False,
         "streak_trend_only": False,

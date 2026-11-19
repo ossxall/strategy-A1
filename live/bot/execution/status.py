@@ -366,10 +366,7 @@ class ExecutionHealth:
                 "initial_backfill_seconds": (
                     self.settings.initial_backfill_seconds
                 ),
-                "max_leverage": self.settings.max_leverage,
-                "set_leverage": self.settings.set_leverage,
-                "max_equity_fraction": self.settings.max_equity_fraction,
-                "max_risk_pct": self.settings.max_risk_pct,
+                "leverage": self.settings.leverage,
                 "signal_db_path": str(self.settings.signal_db),
                 "heartbeat_path": (
                     str(self.settings.heartbeat_path)

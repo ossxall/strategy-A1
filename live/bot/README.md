@@ -57,8 +57,9 @@ señales debe validar su vigencia e idempotencia antes de operar.
 `signals` es un outbox inmutable de intenciones de estrategia, no un registro de
 órdenes ni de posiciones reales. Cada fila incluye `schema_version`, `signal_id`,
 `event`, `action`, `side`, `position_id`, `scheduled`, `signal_time` y el
-`payload` detallado. Los `ENTRY` incluyen en `payload.sizing` los multiplicadores
-efectivos de `strategy` y el stop; la estrategia no calcula ni transmite leverage.
+`payload` detallado. Los `ENTRY` incluyen en `payload.sizing` el riesgo base,
+el stop y los costes usados por `strategy`; la estrategia no calcula ni transmite
+leverage.
 `signal_id` es un SHA-256 determinista v2; `position_id` solo correlaciona eventos
 del backtest y no identifica una posición de Binance.
 `signal` y `side` se conservan iguales por compatibilidad; en un `EXIT`, `side`
@@ -94,16 +95,17 @@ habilita explícitamente `BOT_BINANCE_TRADING_ENABLED=true` y
 `BOT_BINANCE_ALLOW_LIVE_TRADING=true`, por lo que puede enviar órdenes reales
 con credenciales mainnet válidas. Usa el SDK oficial
 `binance-sdk-derivatives-trading-usds-futures`.
-El executor es el único componente que configura y aplica leverage en Binance:
-`BOT_BINANCE_SET_LEVERAGE=true` fija el tope definido por
-`BOT_BINANCE_MAX_LEVERAGE` (10x por defecto). Si se desactiva, usa el leverage
-actual de Binance, limitado por ese tope. Estos ajustes no tienen efecto mientras
-el trading siga deshabilitado. El tamaño también puede ser menor por `risk_pct`,
-los multiplicadores adaptativos y el límite de exposición.
+El executor es el único componente que configura el leverage en Binance:
+`BOT_BINANCE_LEVERAGE` fija el valor objetivo (50x por defecto) y se aplica
+antes de dimensionar cada entrada. En el modo de prueba interno se fuerza 10x.
+Estos ajustes no tienen efecto mientras el trading siga deshabilitado. El
+presupuesto de riesgo se calcula con el
+`risk_pct` de la señal; la cantidad disponible también depende del saldo y el
+leverage de Binance y debe respetar sus filtros.
 La estrategia live usa exclusivamente los valores definidos en
 `strategy/config.py`; las variables `BOT_STRATEGY_*` del proceso no los modifican.
-El `initial_capital` hardcodeado sirve para simulaciones; el worker lee el
-equity/margen real de Binance para calcular la cantidad live.
+El `initial_capital` hardcodeado sirve para simulaciones; el worker lee el saldo
+disponible real de Binance para calcular la cantidad live.
 El executor fija un corte inicial por cuenta con un margen corto de recuperación
 (`BOT_EXECUTOR_INITIAL_BACKFILL_SECONDS`) para no ejecutar el histórico al activarlo.
 
@@ -155,11 +157,11 @@ breakeven. Incertidumbres de orden o discrepancias de posición dejan la señal 
 `RECONCILIATION_REQUIRED` y bloquean nuevas ejecuciones. Las entradas vencidas
 se marcan `EXPIRED`; las salidas atrasadas se contrastan con la posición real.
 
-La lógica y los multiplicadores siguen saliendo del mismo `Backtester` que el
-backtest; el worker no los recalcula. El capital y el equity del sizing live
-provienen de Binance. Las diferencias reales de fill/PnL no se retroalimentan al
-historial adaptativo simulado, por lo que no se prometen resultados idénticos al
-backtest. Una divergencia de posición real detiene la ejecución automática.
+Las señales y los parámetros fijos de riesgo salen del mismo `Backtester` que el
+backtest; el worker aplica el `risk_pct` y el stop al equity real de Binance. Las
+diferencias reales de fill/PnL no se retroalimentan a la simulación, por lo que no
+se prometen resultados idénticos al backtest. Una divergencia de posición real
+detiene la ejecución automática.
 
 Para habilitar, comienza con claves de testnet y
 `BOT_BINANCE_TRADING_ENABLED=true`. No habilites producción hasta validar fills,

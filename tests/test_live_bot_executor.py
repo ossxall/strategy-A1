@@ -27,10 +27,7 @@ def _settings(tmp_path, **overrides):
         "lease_seconds": 30,
         "max_entry_age_seconds": 90,
         "initial_backfill_seconds": 90,
-        "max_leverage": 1,
-        "set_leverage": False,
-        "max_equity_fraction": 0.95,
-        "max_risk_pct": 0.03,
+        "leverage": 1,
         "heartbeat_path": tmp_path / "executor.heartbeat",
         "signal_db": tmp_path / "signal.db",
     }
@@ -66,7 +63,6 @@ def _entry_event():
                 "position_id": 1,
                 "sizing": {
                     "risk_pct": 0.01,
-                    "risk_multiplier": 1.0,
                     "stop_loss_pct": 0.01,
                     "commission_bps": 0.0,
                     "slippage_bps": 0.0,
@@ -453,13 +449,18 @@ def test_test_mode_never_connects_to_production_for_order_execution(tmp_path):
 def test_strategy_has_no_leverage_setting_and_executor_owns_binance_leverage(
     monkeypatch,
 ):
-    monkeypatch.setenv("BOT_BINANCE_MAX_LEVERAGE", "10")
-    monkeypatch.setenv("BOT_BINANCE_SET_LEVERAGE", "true")
+    monkeypatch.setenv("BOT_BINANCE_LEVERAGE", "37")
     monkeypatch.setenv("BOT_EXECUTOR_TEST_MODE", "false")
     settings = ExecutorSettings.from_env()
     assert not hasattr(Config(), "max_leverage")
-    assert settings.max_leverage == 10
-    assert settings.set_leverage is True
+    assert settings.leverage == 37
+
+
+def test_executor_leverage_defaults_to_50(monkeypatch):
+    monkeypatch.delenv("BOT_BINANCE_LEVERAGE", raising=False)
+    monkeypatch.setenv("BOT_EXECUTOR_TEST_MODE", "false")
+
+    assert ExecutorSettings.from_env().leverage == 50
 
 
 def test_executor_database_and_heartbeat_default_to_live_data(monkeypatch):
@@ -482,8 +483,7 @@ def test_test_mode_forces_test_instrument_limits_and_isolated_state(
     monkeypatch.setenv("BOT_EXECUTOR_TEST_MODE", "true")
     monkeypatch.setenv("BOT_BINANCE_ENVIRONMENT", "testnet")
     monkeypatch.setenv("BOT_BINANCE_ACCOUNT_ID", "test-account")
-    monkeypatch.setenv("BOT_BINANCE_MAX_LEVERAGE", "25")
-    monkeypatch.setenv("BOT_BINANCE_SET_LEVERAGE", "false")
+    monkeypatch.setenv("BOT_BINANCE_LEVERAGE", "25")
     monkeypatch.setenv("BOT_SYMBOL", "ETHUSDT")
     monkeypatch.setenv("BOT_SIGNAL_DB", str(tmp_path / "signal.db"))
     monkeypatch.setenv("BOT_EXECUTOR_PRODUCTION_AUDIT", "true")
@@ -496,8 +496,7 @@ def test_test_mode_forces_test_instrument_limits_and_isolated_state(
 
     assert settings.test_mode is True
     assert settings.symbol == "BTCUSDT"
-    assert settings.max_leverage == 10
-    assert settings.set_leverage is True
+    assert settings.leverage == 10
     assert settings.account_id == "test-account-executor-test"
     assert settings.signal_db == tmp_path / "signal.executor-test.db"
     assert settings.production_audit_enabled is True
@@ -605,7 +604,7 @@ def test_mainnet_environment_alias_uses_production_endpoint(monkeypatch):
     assert settings.account_id == "binance-production"
 
 
-def test_entry_size_uses_strategy_risk_and_execution_leverage_caps(tmp_path):
+def test_entry_size_uses_strategy_risk_and_available_leverage(tmp_path):
     class FakeGateway:
         def symbol_configuration(self, symbol):
             assert symbol == "BTCUSDT"
@@ -632,14 +631,99 @@ def test_entry_size_uses_strategy_risk_and_execution_leverage_caps(tmp_path):
             {"wallet_balance": 100.0, "available_balance": 100.0},
             mark_price=100.0,
         )
-        # 1% risk / 1% stop = 1 BTC-contract unit, but execution's 95%
-        # exposure reserve caps notional to 95 USD at Binance's 1x leverage.
-        assert quantity == Decimal("0.95")
+        # 1% risk / 1% stop = 1 contract; the available balance at 1x allows it.
+        assert quantity == Decimal("1")
     finally:
         store.close()
 
 
-def test_worker_executes_entry_with_capped_size_and_protective_stop(tmp_path):
+def test_entry_size_uses_full_strategy_risk_pct_without_executor_risk_cap(tmp_path):
+    class FakeGateway:
+        def symbol_configuration(self, symbol):
+            assert symbol == "BTCUSDT"
+            return {"symbol": symbol, "leverage": 10}
+
+    store = SignalStore(tmp_path / "signal.db")
+    store.connect()
+    try:
+        worker = ExecutionWorker(
+            _settings(
+                tmp_path,
+                leverage=10,
+            ),
+            store,
+            gateway=FakeGateway(),
+        )
+        worker._rules_cache["BTCUSDT"] = {
+            "step_size": Decimal("0.01"),
+            "min_qty": Decimal("0.01"),
+            "max_qty": Decimal(100),
+            "min_notional": Decimal(5),
+        }
+        signal = _entry_event()
+        signal["payload"] = json.loads(signal["payload"])
+        signal["payload"]["sizing"]["risk_pct"] = 0.10
+
+        quantity = worker._entry_quantity(
+            signal,
+            {"wallet_balance": 100.0, "available_balance": 100.0},
+            mark_price=100.0,
+        )
+
+        # 10% del equity son 10 USD; con stop del 1%, la entrada usa 10
+        # unidades. No existe un tope de riesgo adicional en el executor.
+        assert quantity == Decimal("10")
+    finally:
+        store.close()
+
+
+def test_entry_risk_budget_uses_available_futures_balance(tmp_path):
+    class FakeGateway:
+        def __init__(self):
+            self.leverage = 10
+
+        def symbol_configuration(self, symbol):
+            assert symbol == "BTCUSDT"
+            return {"symbol": symbol, "leverage": self.leverage}
+
+        def change_leverage(self, symbol, leverage):
+            assert symbol == "BTCUSDT"
+            self.leverage = leverage
+            return {"symbol": symbol, "leverage": leverage}
+
+    store = SignalStore(tmp_path / "signal.db")
+    store.connect()
+    try:
+        gateway = FakeGateway()
+        worker = ExecutionWorker(
+            _settings(tmp_path, leverage=50),
+            store,
+            gateway=gateway,
+        )
+        worker._rules_cache["BTCUSDT"] = {
+            "step_size": Decimal("0.01"),
+            "min_qty": Decimal("0.01"),
+            "max_qty": Decimal(100),
+            "min_notional": Decimal(5),
+        }
+        signal = _entry_event()
+        signal["payload"] = json.loads(signal["payload"])
+        signal["payload"]["sizing"]["risk_pct"] = 0.10
+
+        quantity = worker._entry_quantity(
+            signal,
+            {"wallet_balance": 100.0, "available_balance": 40.0},
+            mark_price=100.0,
+        )
+
+        # El 10% se calcula sobre los 40 USDT disponibles, no los 100 de wallet.
+        assert quantity == Decimal("4")
+        assert gateway.leverage == 50
+    finally:
+        store.close()
+
+
+def test_worker_executes_entry_with_risk_sized_quantity_and_protective_stop(tmp_path):
     store = SignalStore(tmp_path / "signal.db")
     store.connect()
     gateway = FakeFuturesGateway()
@@ -660,7 +744,7 @@ def test_worker_executes_entry_with_capped_size_and_protective_stop(tmp_path):
 
         assert len(gateway.orders) == 1
         assert gateway.orders[0]["side"] == "BUY"
-        assert gateway.orders[0]["quantity"] == pytest.approx(0.95)
+        assert gateway.orders[0]["quantity"] == pytest.approx(1.0)
         assert gateway.orders[0]["reduce_only"] is False
         assert len(gateway.stops) == 1
         stop = next(iter(gateway.stops.values()))
@@ -669,7 +753,7 @@ def test_worker_executes_entry_with_capped_size_and_protective_stop(tmp_path):
         execution = store.conn.execute(
             "SELECT status, filled_qty FROM signal_execution"
         ).fetchone()
-        assert execution == ("FILLED", 0.95)
+        assert execution == ("FILLED", 1.0)
     finally:
         store.close()
 
@@ -891,8 +975,7 @@ def test_test_mode_runs_bounded_long_lifecycle_and_alternates_side(tmp_path):
                 test_mode=True,
                 api_key="test-key",
                 api_secret="test-secret",
-                max_leverage=10,
-                set_leverage=True,
+                leverage=10,
             ),
             store,
             gateway=gateway,
@@ -1077,8 +1160,7 @@ def test_test_mode_keeps_original_stop_if_breakeven_would_trigger(tmp_path):
                 test_mode=True,
                 api_key="test-key",
                 api_secret="test-secret",
-                max_leverage=10,
-                set_leverage=True,
+                leverage=10,
             ),
             store,
             gateway=gateway,
@@ -1119,8 +1201,7 @@ def test_test_mode_restores_original_stop_if_breakeven_order_is_rejected(tmp_pat
                 test_mode=True,
                 api_key="test-key",
                 api_secret="test-secret",
-                max_leverage=10,
-                set_leverage=True,
+                leverage=10,
             ),
             store,
             gateway=gateway,
@@ -1159,8 +1240,7 @@ def test_test_mode_refuses_minimum_quantity_over_margin_cap(tmp_path):
                 test_mode=True,
                 api_key="test-key",
                 api_secret="test-secret",
-                max_leverage=10,
-                set_leverage=True,
+                leverage=10,
             ),
             store,
             gateway=gateway,
@@ -1189,8 +1269,7 @@ def test_test_mode_accepts_minimum_partial_order_within_eleven_usdt_cap(tmp_path
                 test_mode=True,
                 api_key="test-key",
                 api_secret="test-secret",
-                max_leverage=10,
-                set_leverage=True,
+                leverage=10,
             ),
             store,
             gateway=FakeFuturesGateway(),
@@ -1317,8 +1396,7 @@ def test_test_mode_restores_stop_for_confirmed_fill_without_resubmitting(tmp_pat
                 test_mode=True,
                 api_key="test-key",
                 api_secret="test-secret",
-                max_leverage=10,
-                set_leverage=True,
+                leverage=10,
             ),
             store,
             gateway=gateway,
