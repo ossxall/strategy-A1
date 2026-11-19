@@ -1,8 +1,10 @@
 import json
 from decimal import Decimal
 
+import pandas as pd
 import pytest
 
+from live.bot.events import build_events
 from live.bot.execution.binance_usdm import BinanceOrderNotFound, BinanceUsdmClient
 from live.bot.execution.selftest import run_executor_self_tests
 from live.bot.execution.test_mode import ExecutionTestMode
@@ -632,7 +634,7 @@ def test_entry_size_uses_strategy_risk_and_available_leverage(tmp_path):
             mark_price=100.0,
         )
         # 1% risk / 1% stop = 1 contract; the available balance at 1x allows it.
-        assert quantity == Decimal("1")
+        assert quantity == Decimal(1)
     finally:
         store.close()
 
@@ -672,7 +674,7 @@ def test_entry_size_uses_full_strategy_risk_pct_without_executor_risk_cap(tmp_pa
 
         # 10% del equity son 10 USD; con stop del 1%, la entrada usa 10
         # unidades. No existe un tope de riesgo adicional en el executor.
-        assert quantity == Decimal("10")
+        assert quantity == Decimal(10)
     finally:
         store.close()
 
@@ -717,7 +719,7 @@ def test_entry_risk_budget_uses_available_futures_balance(tmp_path):
         )
 
         # El 10% se calcula sobre los 40 USDT disponibles, no los 100 de wallet.
-        assert quantity == Decimal("4")
+        assert quantity == Decimal(4)
         assert gateway.leverage == 50
     finally:
         store.close()
@@ -1208,6 +1210,125 @@ def test_worker_exit_reduces_only_its_correlated_real_position(tmp_path):
             "test-account", "BTCUSDT", 1
         )
         assert state["open_qty"] == pytest.approx(0.5)
+    finally:
+        store.close()
+
+
+def test_generated_tp1_full_close_flows_through_worker_without_be_error(
+    tmp_path,
+):
+    bars = pd.DataFrame(
+        {
+            "open": [100.0, 100.0, 100.0],
+            "high": [100.1, 100.1, 101.2],
+            "low": [99.9, 99.9, 101.05],
+            "close": [100.0, 100.0, 101.1],
+            "volume": [1.0, 1.0, 1.0],
+        },
+        index=pd.date_range("2026-01-01", periods=3, freq="1min", tz="UTC"),
+    )
+    strategy_signals = pd.DataFrame(
+        {
+            "valid": [True, True, True],
+            "target": [1, 0, 0],
+            "trend_bias": [0, 0, 0],
+            "ema_fast": [100.0, 100.0, 100.0],
+            "ema_slow": [99.0, 99.0, 99.0],
+            "adx_entry": [30.0, 30.0, 30.0],
+        },
+        index=bars.index,
+    )
+    strategy = Config(
+        timeframe="1min",
+        entry_adx_enabled=False,
+        entry_atr_enabled=False,
+        entry_rsi_divergence_enabled=False,
+        entry_gaussian_trend_enabled=False,
+        gaussian_trend_reversal_exit_enabled=False,
+        adx_exit_enabled=False,
+        ema_weakening_exit_enabled=False,
+        rsi_divergence_exit_enabled=False,
+        partial_tp_enabled=True,
+        partial_tp_r=1.0,
+        partial_tp_pct=100.0,
+        partial_tp2_r=0.0,
+        partial_tp2_pct=0.0,
+        partial_tp3_r=0.0,
+        partial_tp3_pct=0.0,
+        partial_tp4_r=0.0,
+        partial_tp4_pct=0.0,
+        partial_tp5_r=0.0,
+        partial_tp5_pct=0.0,
+        partial_tp6_r=0.0,
+        partial_tp6_pct=0.0,
+        partial_tp7_r=0.0,
+        partial_tp7_pct=0.0,
+        stop_loss_pct=0.01,
+        commission_bps=0.0,
+        slippage_bps=0.0,
+        monthly_loss_limit_pct=0.0,
+        streak_trend_only=False,
+        move_stop_to_breakeven=True,
+    )
+    events = build_events(
+        bars,
+        strategy_signals,
+        None,
+        None,
+        None,
+        strategy,
+        "BTCUSDT",
+        "1m",
+    )
+    entry_event = next(event for event in events if event["event"] == "ENTRY")
+    exit_event = next(event for event in events if event["event"] == "EXIT")
+    exit_payload = json.loads(exit_event["payload"])
+    assert exit_event["action"] == "CLOSE"
+    assert exit_payload["reason_code"] == "TAKE_PROFIT_1"
+    assert exit_payload["stop_action"] == "CANCEL"
+
+    store = SignalStore(tmp_path / "producer-to-worker.db")
+    store.connect()
+    gateway = FakeFuturesGateway()
+    clock = [entry_event["signal_time"]]
+    try:
+        worker = ExecutionWorker(
+            _settings(
+                tmp_path,
+                enabled=True,
+                api_key="test-key",
+                api_secret="test-secret",
+                max_entry_age_seconds=300,
+            ),
+            store,
+            gateway=gateway,
+            clock_ms=lambda: clock[0],
+        )
+        assert store.insert(events) == 2
+
+        worker.run_once()
+        entry = store.get_execution_state(
+            worker.settings.account_id, entry_event["signal_id"]
+        )
+        assert entry["status"] == "FILLED"
+        assert len(gateway.stops) == 1
+
+        gateway.mark_price_value = 101.1
+        clock[0] = exit_event["signal_time"]
+        worker.run_once()
+
+        exit_state = store.get_execution_state(
+            worker.settings.account_id, exit_event["signal_id"]
+        )
+        assert exit_state["status"] == "FILLED"
+        assert gateway.position_amt == pytest.approx(0.0)
+        assert gateway.stops == {}
+        assert (
+            store.get_active_execution_positions(
+                worker.settings.account_id, "BTCUSDT"
+            )
+            == []
+        )
     finally:
         store.close()
 

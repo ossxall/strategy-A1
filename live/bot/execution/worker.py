@@ -28,6 +28,12 @@ from ..config import (
     utc_iso,
 )
 from ..env import validate_prod_environment
+from ..signal_contract import (
+    STOP_ACTION_CANCEL,
+    STOP_ACTION_MOVE_TO_BREAKEVEN,
+    signal_reason_code,
+    signal_stop_action,
+)
 from ..storage import SignalStore
 from .binance_usdm import BinanceOrderNotFound, BinanceUsdmClient
 from .status import ExecutionHealth, start_execution_status_server
@@ -526,7 +532,7 @@ class ExecutionWorker:
     def _preferred_stop_variant_for_position(self, position_id: int) -> str:
         rows = self.store.conn.execute(
             """
-            SELECT s.reason, x.result_json
+            SELECT s.reason, s.payload, x.result_json
             FROM signals AS s
             JOIN signal_execution AS x ON x.signal_id = s.signal_id
             WHERE x.account_id = ?
@@ -545,8 +551,19 @@ class ExecutionWorker:
         ).fetchall()
         be_id = self._algo_order_id(position_id, "be")
         sl_id = self._algo_order_id(position_id, "sl")
-        for reason, result_json in rows:
-            if not str(reason).startswith("PARTIAL_TP_"):
+        for reason, payload_json, result_json in rows:
+            try:
+                payload = json.loads(payload_json) if payload_json else {}
+            except (TypeError, json.JSONDecodeError):
+                payload = {}
+            reason_code = signal_reason_code(
+                {
+                    "event": "EXIT",
+                    "reason": reason,
+                    "payload": payload,
+                }
+            )
+            if reason_code != "TAKE_PROFIT_1":
                 continue
             try:
                 result = json.loads(result_json) if result_json else {}
@@ -1247,7 +1264,7 @@ class ExecutionWorker:
             result_record["protective_stop_client_algo_id"] = stop_id
 
         if final_status == "FILLED" and not is_entry \
-                and signal["action"] == "CLOSE":
+                and signal_stop_action(signal) == STOP_ACTION_CANCEL:
             try:
                 self._cancel_position_stops(int(signal["position_id"]))
             except Exception as exc:
@@ -1266,116 +1283,113 @@ class ExecutionWorker:
                 return False
 
         if final_status == "FILLED" and not is_entry \
-                and signal["reason"].startswith("PARTIAL_TP_"):
-            sizing = signal["payload"].get("sizing") or {}
-            if sizing.get("move_stop_to_breakeven"):
-                try:
-                    snapshot = self._account_snapshot(force=True)
-                    position = self._position_for_symbol(snapshot)
-                    if position is None:
-                        raise RuntimeError(
-                            "No queda posición para proteger tras el parcial"
-                        )
-                    sl_id = self._ensure_protective_stop(signal, snapshot)
-                    self._verify_protective_stop(sl_id)
-                    entry_price = _decimal(
-                        position["entry_price"], "entry_price"
+                and signal["action"] == "PARTIAL_CLOSE" \
+                and signal_stop_action(signal) == STOP_ACTION_MOVE_TO_BREAKEVEN:
+            try:
+                snapshot = self._account_snapshot(force=True)
+                position = self._position_for_symbol(snapshot)
+                if position is None:
+                    raise RuntimeError(
+                        "No queda posición para proteger tras el parcial"
                     )
-                    mark_data = _items(
-                        self.gateway.mark_price(self.settings.symbol), "data"
+                sl_id = self._ensure_protective_stop(signal, snapshot)
+                self._verify_protective_stop(sl_id)
+                entry_price = _decimal(position["entry_price"], "entry_price")
+                mark_data = _items(
+                    self.gateway.mark_price(self.settings.symbol), "data"
+                )
+                mark_value = _float(
+                    _get(
+                        mark_data[0] if mark_data else {},
+                        "markPrice",
+                        "mark_price",
                     )
-                    mark_value = _float(
-                        _get(
-                            mark_data[0] if mark_data else {},
-                            "markPrice",
-                            "mark_price",
-                        )
+                )
+                if mark_value is None or mark_value <= 0:
+                    raise ValueError(
+                        "markPrice inválido al evaluar breakeven"
                     )
-                    if mark_value is None or mark_value <= 0:
-                        raise ValueError(
-                            "markPrice inválido al evaluar breakeven"
-                        )
-                    mark_price = _decimal(mark_value, "mark_price")
-                    breakeven_reached = (
-                        mark_price > entry_price
-                        if signal["side"] == "LONG"
-                        else mark_price < entry_price
+                mark_price = _decimal(mark_value, "mark_price")
+                breakeven_reached = (
+                    mark_price > entry_price
+                    if signal["side"] == "LONG"
+                    else mark_price < entry_price
+                )
+                if not breakeven_reached:
+                    result_record["breakeven_stop_skipped"] = (
+                        "Mark price ya cruzó el nivel de entrada; "
+                        "se conserva el stop-loss original."
                     )
-                    if not breakeven_reached:
-                        result_record["breakeven_stop_skipped"] = (
-                            "Mark price ya cruzó el nivel de entrada; "
-                            "se conserva el stop-loss original."
+                    result_record["protective_stop_client_algo_id"] = sl_id
+                    LOG.warning(
+                        "Parcial ejecutado; se conserva SL porque breakeven "
+                        "dispararía inmediatamente para %s",
+                        signal["side"],
+                    )
+                else:
+                    try:
+                        self._cancel_position_stop(
+                            int(signal["position_id"]), "sl"
                         )
-                        result_record["protective_stop_client_algo_id"] = sl_id
+                    except Exception as exc:  # noqa: BLE001 - conserva SL ante fallo de cancelación
+                        self._verify_protective_stop(sl_id)
+                        result_record["breakeven_stop_skipped"] = str(exc)
+                        result_record[
+                            "protective_stop_client_algo_id"
+                        ] = sl_id
                         LOG.warning(
-                            "Parcial ejecutado; se conserva SL porque breakeven "
-                            "dispararía inmediatamente para %s",
-                            signal["side"],
+                            "No se pudo cancelar el SL para moverlo a "
+                            "breakeven; se conserva el SL: %s",
+                            exc,
                         )
                     else:
                         try:
-                            self._cancel_position_stop(
-                                int(signal["position_id"]), "sl"
+                            be_id = self._protective_stop(
+                                signal, snapshot, breakeven=True
                             )
-                        except Exception as exc:  # noqa: BLE001 - conserva SL ante fallo de cancelación
-                            self._verify_protective_stop(sl_id)
-                            result_record["breakeven_stop_skipped"] = str(exc)
+                            self._verify_protective_stop(be_id)
+                        except Exception as exc:  # noqa: BLE001 - repone protección primaria
+                            try:
+                                restore_snapshot = self._account_snapshot(
+                                    force=True
+                                )
+                                self._ensure_protective_stop(
+                                    signal, restore_snapshot
+                                )
+                            except Exception as restore_exc:  # noqa: BLE001
+                                raise RuntimeError(
+                                    "Falló el stop a breakeven y no se "
+                                    f"pudo restaurar el SL: {restore_exc}"
+                                ) from exc
+                            result_record["breakeven_stop_skipped"] = str(
+                                exc
+                            )
                             result_record[
                                 "protective_stop_client_algo_id"
                             ] = sl_id
                             LOG.warning(
-                                "No se pudo cancelar el SL para moverlo a "
-                                "breakeven; se conserva el SL: %s",
+                                "No se pudo mover el stop a breakeven; "
+                                "se restauró el SL original: %s",
                                 exc,
                             )
                         else:
-                            try:
-                                be_id = self._protective_stop(
-                                    signal, snapshot, breakeven=True
-                                )
-                                self._verify_protective_stop(be_id)
-                            except Exception as exc:  # noqa: BLE001 - repone protección primaria
-                                try:
-                                    restore_snapshot = self._account_snapshot(
-                                        force=True
-                                    )
-                                    self._ensure_protective_stop(
-                                        signal, restore_snapshot
-                                    )
-                                except Exception as restore_exc:  # noqa: BLE001
-                                    raise RuntimeError(
-                                        "Falló el stop a breakeven y no se "
-                                        f"pudo restaurar el SL: {restore_exc}"
-                                    ) from exc
-                                result_record["breakeven_stop_skipped"] = str(
-                                    exc
-                                )
-                                result_record[
-                                    "protective_stop_client_algo_id"
-                                ] = sl_id
-                                LOG.warning(
-                                    "No se pudo mover el stop a breakeven; "
-                                    "se restauró el SL original: %s",
-                                    exc,
-                                )
-                            else:
-                                result_record[
-                                    "protective_stop_client_algo_id"
-                                ] = be_id
-                except Exception as exc:
-                    LOG.exception("No se pudo mover el stop a breakeven")
-                    self._update_state(
-                        signal,
-                        "RECONCILIATION_REQUIRED",
-                        client_order_id=client_order_id,
-                        order_status=status or final_status,
-                        exchange_order_id=str(exchange_order_id or ""),
-                        filled_qty=float(executed),
-                        avg_price=avg_price,
-                        result={**result_record, "breakeven_stop_error": str(exc)},
-                        error=f"Parcial ejecutado; stop a breakeven no confirmado: {exc}",
-                    )
-                    return False
+                            result_record[
+                                "protective_stop_client_algo_id"
+                            ] = be_id
+            except Exception as exc:
+                LOG.exception("No se pudo mover el stop a breakeven")
+                self._update_state(
+                    signal,
+                    "RECONCILIATION_REQUIRED",
+                    client_order_id=client_order_id,
+                    order_status=status or final_status,
+                    exchange_order_id=str(exchange_order_id or ""),
+                    filled_qty=float(executed),
+                    avg_price=avg_price,
+                    result={**result_record, "breakeven_stop_error": str(exc)},
+                    error=f"Parcial ejecutado; stop a breakeven no confirmado: {exc}",
+                )
+                return False
 
         if final_status in {"FILLED", "PARTIALLY_FILLED"}:
             # A following signal may be processed immediately (as in test mode).
@@ -1770,12 +1784,11 @@ class ExecutionWorker:
                         stop_id = self._ensure_protective_stop(
                             signal_row, snapshot
                         )
-                    elif signal_row["action"] == "CLOSE":
+                    elif signal_stop_action(signal_row) == STOP_ACTION_CANCEL:
                         self._cancel_position_stops(int(signal_row["position_id"]))
-                    elif signal_row["reason"].startswith("PARTIAL_TP_") \
-                            and (signal_row["payload"].get("sizing") or {}).get(
-                                "move_stop_to_breakeven"
-                            ):
+                    elif signal_row["action"] == "PARTIAL_CLOSE" \
+                            and signal_stop_action(signal_row) \
+                            == STOP_ACTION_MOVE_TO_BREAKEVEN:
                         self._cancel_position_stops(
                             int(signal_row["position_id"])
                         )
@@ -1998,9 +2011,11 @@ class ExecutionWorker:
         if signal is None:
             return
         self.health.record_signal(signal)
-        if int(signal["schema_version"]) < 3:
+        if int(signal["schema_version"]) not in {3, 4}:
             self._update_state(
-                signal, "REJECTED", error="schema_version de señal no compatible"
+                signal,
+                "REJECTED",
+                error="schema_version de señal no compatible (se requiere v3/v4)",
             )
             return
         if signal["position_id"] is None:

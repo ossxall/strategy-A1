@@ -7,6 +7,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from live.bot import (
     SignalBot,
@@ -194,13 +195,14 @@ def test_last_closed_bar_entry_is_published_for_next_open_without_waiting_next_c
     assert entry["bar_time"] == ts_ms(bars.index[-1])
     assert entry["signal_time"] == ts_ms(bars.index[-1] + pd.Timedelta("30min"))
     assert entry["price"] is None
-    assert entry["schema_version"] == 3
+    assert entry["schema_version"] == 4
     assert entry["action"] == "OPEN"
     assert entry["position_id"] == payload["position_id"]
     assert entry["scheduled"] is True
     assert entry["signal_id"].startswith("sig_v2_")
     assert payload["pending"] is True
     assert payload["action"] == "OPEN"
+    assert payload["reason_code"] == "ENTRY_CROSS"
     assert "max_leverage" not in payload["sizing"]
 
 
@@ -223,7 +225,10 @@ def test_pending_reversal_publishes_exit_before_entry_at_next_open():
         ts_ms(bars.index[-1] + pd.Timedelta("30min"))
     }
     assert json.loads(pending[0]["payload"])["close_pct"] == 100.0
+    assert json.loads(pending[0]["payload"])["reason_code"] == "EMA_CROSS_EXIT"
+    assert json.loads(pending[0]["payload"])["stop_action"] == "CANCEL"
     assert json.loads(pending[1]["payload"])["action"] == "OPEN"
+    assert json.loads(pending[1]["payload"])["reason_code"] == "ENTRY_CROSS"
 
 
 def test_pending_partial_exit_is_published_for_next_open():
@@ -248,8 +253,67 @@ def test_pending_partial_exit_is_published_for_next_open():
     assert pending_exit["signal_time"] == ts_ms(
         bars.index[-1] + pd.Timedelta("30min")
     )
-    assert json.loads(pending_exit["payload"])["close_pct"] == 50.0
+    payload = json.loads(pending_exit["payload"])
+    assert payload["close_pct"] == 50.0
+    assert payload["reason_code"] == "EMA_WEAKENING"
+    assert payload["stop_action"] == "KEEP"
     assert pending_exit["price"] is None
+
+
+@pytest.mark.parametrize(
+    ("take_profit_pct", "expected_action", "expected_stop_action"),
+    [
+        (50.0, "PARTIAL_CLOSE", "MOVE_TO_BREAKEVEN"),
+        (100.0, "CLOSE", "CANCEL"),
+    ],
+)
+def test_generated_tp1_signal_has_explicit_stop_policy(
+    take_profit_pct, expected_action, expected_stop_action
+):
+    bars = make_bars(3)
+    bars.iloc[2, bars.columns.get_loc("high")] = 101.2
+    bars.iloc[2, bars.columns.get_loc("low")] = 101.05
+    bars.iloc[2, bars.columns.get_loc("close")] = 101.1
+    config = make_config(
+        stop_loss_pct=0.01,
+        partial_tp_enabled=True,
+        partial_tp_r=1.0,
+        partial_tp_pct=take_profit_pct,
+        partial_tp2_r=0.0,
+        partial_tp2_pct=0.0,
+        partial_tp3_r=0.0,
+        partial_tp3_pct=0.0,
+        partial_tp4_r=0.0,
+        partial_tp4_pct=0.0,
+        partial_tp5_r=0.0,
+        partial_tp5_pct=0.0,
+        partial_tp6_r=0.0,
+        partial_tp6_pct=0.0,
+        partial_tp7_r=0.0,
+        partial_tp7_pct=0.0,
+        move_stop_to_breakeven=True,
+    )
+
+    events = build_events(
+        bars,
+        make_signals(bars, [1, 0, 0]),
+        None,
+        None,
+        None,
+        config,
+        "BTCUSDT",
+        "1m",
+    )
+    entry = next(event for event in events if event["event"] == "ENTRY")
+    exit_event = next(event for event in events if event["event"] == "EXIT")
+    payload = json.loads(exit_event["payload"])
+
+    assert entry["schema_version"] == 4
+    assert json.loads(entry["payload"])["reason_code"] == "ENTRY_CROSS"
+    assert exit_event["reason"] == "PARTIAL_TP_1R"
+    assert exit_event["action"] == expected_action
+    assert payload["reason_code"] == "TAKE_PROFIT_1"
+    assert payload["stop_action"] == expected_stop_action
 
 
 def test_monthly_limit_event_uses_the_bar_that_triggered_it():
@@ -277,6 +341,10 @@ def test_monthly_limit_event_uses_the_bar_that_triggered_it():
     assert monthly_exit["signal_time"] == ts_ms(
         bars.index[1] + pd.Timedelta("30min")
     )
+    assert monthly_exit["action"] == "CLOSE"
+    monthly_payload = json.loads(monthly_exit["payload"])
+    assert monthly_payload["reason_code"] == "MONTHLY_LOSS_LIMIT"
+    assert monthly_payload["stop_action"] == "CANCEL"
 
 
 def test_signal_store_deduplicates_pending_events_across_restarts(tmp_path):
@@ -308,7 +376,7 @@ def test_signal_store_deduplicates_pending_events_across_restarts(tmp_path):
     assert store.conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
     assert store.conn.execute("PRAGMA wal_autocheckpoint").fetchone()[0] == 1_000
     assert store.conn.execute("PRAGMA journal_size_limit").fetchone()[0] == 67_108_864
-    assert store.conn.execute("PRAGMA user_version").fetchone()[0] == 3
+    assert store.conn.execute("PRAGMA user_version").fetchone()[0] == 4
     assert store.insert([event]) == 1
     signal_id, action, position_id, scheduled = store.conn.execute(
         "SELECT signal_id, action, position_id, scheduled FROM signals"
@@ -445,7 +513,7 @@ def test_signal_store_migrates_existing_rows_to_signal_id(tmp_path):
         upgraded_row = store.conn.execute(
             "SELECT schema_version, payload FROM signals"
         ).fetchone()
-        assert upgraded_row[0] == 3
+        assert upgraded_row[0] == 4
         assert "sizing" in json.loads(upgraded_row[1])
         another_position = {
             **event,
@@ -883,6 +951,7 @@ def test_signal_store_opens_existing_database_without_losing_live_state(tmp_path
         assert store.conn.execute(
             "SELECT COUNT(*) FROM execution_adjustments"
         ).fetchone()[0] == 1
+        assert store.conn.execute("PRAGMA user_version").fetchone()[0] == 4
     finally:
         store.close()
 

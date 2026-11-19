@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from ..config import resolve_path
-from ..storage import SignalStore
+from ..signal_contract import (
+    STOP_ACTION_CANCEL,
+    STOP_ACTION_KEEP,
+    STOP_ACTION_MOVE_TO_BREAKEVEN,
+)
+from ..storage import SIGNAL_SCHEMA_VERSION, SignalStore
 from .binance_usdm import BinanceOrderNotFound
 from .worker import ExecutionWorker, ExecutorSettings
 
@@ -284,7 +290,7 @@ def _signal(
         payload["pending"] = True
     timestamp = now_ms if signal_time is None else signal_time
     return {
-        "schema_version": 3,
+        "schema_version": SIGNAL_SCHEMA_VERSION,
         "symbol": "BTCUSDT",
         "interval": "selftest",
         "timeframe": "selftest",
@@ -460,6 +466,122 @@ def _self_test_lifecycles(root: Path, now_ms: int) -> int:
     finally:
         store.close()
     return passed
+
+
+def _self_test_signal_reason_matrix(root: Path, now_ms: int) -> int:
+    """Exercises each producer exit family through the shared worker."""
+    cases = (
+        ("PARTIAL_TP_1R", "LONG", "PARTIAL_CLOSE", "TAKE_PROFIT_1",
+         STOP_ACTION_MOVE_TO_BREAKEVEN),
+        ("PARTIAL_TP2_1.5R", "LONG", "PARTIAL_CLOSE", "TAKE_PROFIT_2",
+         STOP_ACTION_KEEP),
+        ("PARTIAL_TP3_2R", "LONG", "PARTIAL_CLOSE", "TAKE_PROFIT_3",
+         STOP_ACTION_KEEP),
+        ("PARTIAL_TP4_2.5R", "LONG", "PARTIAL_CLOSE", "TAKE_PROFIT_4",
+         STOP_ACTION_KEEP),
+        ("PARTIAL_TP5_3R", "LONG", "PARTIAL_CLOSE", "TAKE_PROFIT_5",
+         STOP_ACTION_KEEP),
+        ("PARTIAL_TP6_3.5R", "LONG", "PARTIAL_CLOSE", "TAKE_PROFIT_6",
+         STOP_ACTION_KEEP),
+        ("PARTIAL_TP7_4R", "LONG", "PARTIAL_CLOSE", "TAKE_PROFIT_7",
+         STOP_ACTION_KEEP),
+        ("EMA_WEAKENING_4H_1D_50%", "LONG", "PARTIAL_CLOSE",
+         "EMA_WEAKENING", STOP_ACTION_KEEP),
+        ("ADX_1D_REVERSAL_50%", "LONG", "PARTIAL_CLOSE",
+         "ADX_REVERSAL", STOP_ACTION_KEEP),
+        ("RSI_DIVERGENCE_BEAR_50%", "LONG", "PARTIAL_CLOSE",
+         "RSI_DIVERGENCE_BEAR", STOP_ACTION_KEEP),
+        ("RSI_DIVERGENCE_BULL", "SHORT", "CLOSE",
+         "RSI_DIVERGENCE_BULL", STOP_ACTION_CANCEL),
+        ("GAUSSIAN_TREND_BEAR_25%", "LONG", "PARTIAL_CLOSE",
+         "GAUSSIAN_TREND_BEAR", STOP_ACTION_KEEP),
+        ("GAUSSIAN_TREND_BULL", "SHORT", "CLOSE",
+         "GAUSSIAN_TREND_BULL", STOP_ACTION_CANCEL),
+        ("STOP_LOSS_1.00%", "LONG", "CLOSE", "STOP_LOSS",
+         STOP_ACTION_CANCEL),
+        ("BREAKEVEN", "LONG", "CLOSE", "BREAKEVEN", STOP_ACTION_CANCEL),
+        ("EMA_CROSS_EXIT", "LONG", "CLOSE", "EMA_CROSS_EXIT",
+         STOP_ACTION_CANCEL),
+        ("EMA_SLOW_TOUCH_SHORT_AFTER_TP3", "SHORT", "CLOSE",
+         "EMA_SLOW_TOUCH", STOP_ACTION_CANCEL),
+        ("MONTHLY_LOSS_LIMIT_5%", "LONG", "CLOSE", "MONTHLY_LOSS_LIMIT",
+         STOP_ACTION_CANCEL),
+    )
+    for index, (reason, side, action, reason_code, stop_action) in enumerate(
+        cases,
+        start=50,
+    ):
+        gateway = _ScenarioFuturesGateway()
+        path = root / f"reason-matrix-{index}.db"
+        store, worker, _clock = _open_worker(
+            path, f"selftest-reason-{index}", gateway, now_ms
+        )
+        try:
+            position_id = index
+            _run_signal(
+                worker,
+                store,
+                _signal(
+                    now_ms,
+                    event="ENTRY",
+                    action="OPEN",
+                    side=side,
+                    position_id=position_id,
+                    reason="EMA_CROSS",
+                ),
+            )
+            gateway.mark = 101.0 if side == "LONG" else 99.0
+            close_pct = 50.0 if action == "PARTIAL_CLOSE" else 100.0
+            exit_event = _signal(
+                now_ms,
+                event="EXIT",
+                action=action,
+                side=side,
+                position_id=position_id,
+                reason=reason,
+                close_pct=close_pct,
+            )
+            normalized = store._normalize_event(exit_event)
+            payload = normalized["payload"]
+            if isinstance(payload, str):
+                payload = json.loads(payload)
+            _check(
+                payload["reason_code"] == reason_code,
+                f"{reason} stable reason code",
+            )
+            _check(
+                payload["stop_action"] == stop_action,
+                f"{reason} declared stop action",
+            )
+            state = _run_signal(worker, store, exit_event)
+            _check(
+                state["status"] == "FILLED",
+                f"{reason} executes through worker",
+            )
+            if action == "PARTIAL_CLOSE":
+                expected_variant = (
+                    "be"
+                    if stop_action == STOP_ACTION_MOVE_TO_BREAKEVEN
+                    else "sl"
+                )
+                expected_stop = worker._algo_order_id(
+                    position_id, expected_variant
+                )
+                active_stops = gateway.open_algo_orders("BTCUSDT")
+                _check(
+                    len(active_stops) == 1
+                    and active_stops[0]["clientAlgoId"] == expected_stop,
+                    f"{reason} leaves the declared protective stop",
+                )
+            else:
+                _check(
+                    gateway.position_amt == 0
+                    and not gateway.open_algo_orders("BTCUSDT"),
+                    f"{reason} closes and removes protection",
+                )
+        finally:
+            store.close()
+    return len(cases)
 
 
 def _self_test_pending_reversal(root: Path, now_ms: int) -> int:
@@ -1181,6 +1303,7 @@ def run_executor_self_tests(data_dir: Path | None = None) -> int:
             now_ms = int(time.time() * 1000)
             passed = (
                 _self_test_lifecycles(root, now_ms)
+                + _self_test_signal_reason_matrix(root, now_ms)
                 + _self_test_pending_reversal(root, now_ms)
                 + _self_test_stop_reconciliation(root, now_ms)
                 + _self_test_inflight_recovery(root, now_ms)

@@ -10,6 +10,7 @@ from pathlib import Path
 import pandas as pd
 
 from .config import logger, opt_float
+from .signal_contract import apply_signal_policy
 
 try:
     from ..db.sqlite_config import (
@@ -34,7 +35,7 @@ except ImportError:  # ejecución como paquete top-level desde live/
         validate_table,
     )
 
-SIGNAL_SCHEMA_VERSION = 3
+SIGNAL_SCHEMA_VERSION = 4
 SIGNAL_ID_FIELDS = (
     "symbol",
     "interval",
@@ -51,7 +52,7 @@ SIGNALS_DDL = """
 CREATE TABLE IF NOT EXISTS signals (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     signal_id   TEXT    NOT NULL,
-    schema_version INTEGER NOT NULL DEFAULT 3,
+    schema_version INTEGER NOT NULL DEFAULT 4,
     symbol      TEXT    NOT NULL,
     interval    TEXT    NOT NULL,
     timeframe   TEXT    NOT NULL,
@@ -694,9 +695,14 @@ class SignalStore:
         logger.info("signal.db listo en %s", self.path)
 
     def _migrate_signal_contract(self) -> None:
-        """Migra señales previas al contrato v3 sin descartar filas."""
+        """Migra señales previas al contrato v4 sin descartar filas."""
         version = int(self.conn.execute("PRAGMA user_version").fetchone()[0])
         if version >= SIGNAL_SCHEMA_VERSION:
+            return
+        if version >= 3:
+            # v4 only adds payload-level execution metadata. Keep deployed v3
+            # signal IDs and execution foreign keys intact.
+            self.conn.execute(f"PRAGMA user_version = {SIGNAL_SCHEMA_VERSION}")
             return
 
         columns = {
@@ -819,9 +825,11 @@ class SignalStore:
         scheduled_value = event.get("scheduled", payload.get("pending", False))
         if scheduled_value not in (False, True, 0, 1):
             raise ValueError("scheduled debe ser booleano")
+        reason = str(event.get("reason", "")).strip()
         created_at = str(event.get("created_at", "")).strip()
         if not created_at:
             raise ValueError("created_at es obligatorio")
+        payload = apply_signal_policy(event_type, action, reason, payload)
 
         normalized = dict(event)
         normalized.update(
@@ -836,7 +844,7 @@ class SignalStore:
                 "symbol": str(event.get("symbol", "")).strip().upper(),
                 "interval": str(event.get("interval", "")).strip(),
                 "timeframe": str(event.get("timeframe", "")).strip(),
-                "reason": str(event.get("reason", "")).strip(),
+                "reason": reason,
                 "bar_time": int(event["bar_time"]),
                 "signal_time": int(event["signal_time"]),
                 "created_at": created_at,

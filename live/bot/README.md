@@ -84,8 +84,21 @@ completo) y reconcilia órdenes/posiciones antes de reintentar.
 La columna `executed` se conserva por compatibilidad, pero no es el acuse
 autoritativo. Las migraciones conservan filas antiguas y recalculan IDs cuando
 es necesario.
-El executor solo acepta señales v3 con `payload.sizing`; eventos legacy sin ese
-contrato quedan rechazados y no generan órdenes.
+El productor emite señales v4. En cada `EXIT`, `payload.reason_code` identifica
+la familia de salida y `payload.stop_action` declara `MOVE_TO_BREAKEVEN`,
+`KEEP` o `CANCEL`; `reason` queda como descripción legible. El executor acepta
+señales v3 heredadas mediante una traducción de compatibilidad, además de v4.
+Señales anteriores a v3 quedan rechazadas.
+
+Los códigos de entrada son `ENTRY_CROSS`/`ENTRY_OTHER`; los de salida:
+`TAKE_PROFIT_1`…`TAKE_PROFIT_7`, `STOP_LOSS`,
+`BREAKEVEN`, `EMA_CROSS_EXIT`, `EMA_WEAKENING`, `ADX_REVERSAL`,
+`RSI_DIVERGENCE_BEAR/BULL`, `GAUSSIAN_TREND_BEAR/BULL`, `EMA_SLOW_TOUCH`,
+`MONTHLY_LOSS_LIMIT`, `TEST_PARTIAL`, `TEST_CLOSE` y `EXIT_OTHER`. `CLOSE`
+siempre declara `CANCEL`; `PARTIAL_CLOSE` declara `MOVE_TO_BREAKEVEN` solo para
+TP1 cuando `payload.sizing.move_stop_to_breakeven=true`; el resto declara
+`KEEP`. La cantidad se determina por `action` y `payload.close_pct`, no por
+`reason`, `price` ni el PnL simulado.
 
 ## Executor USDⓈ-M Futures
 
