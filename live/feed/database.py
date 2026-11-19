@@ -65,6 +65,13 @@ FEED_STATE_COLUMNS = {
     "updated_at": "TEXT",
 }
 
+HISTORY_REVISION_STATE_KEY = "feed_history_revision"
+
+
+def history_revision_key(symbol: str, interval: str) -> str:
+    """Clave del contador de cambios en el historial cerrado de un feed."""
+    return f"{HISTORY_REVISION_STATE_KEY}:{symbol}:{interval}"
+
 
 def validate_feed_schema(connection):
     """Verifica el contrato SQL usado por el colector y por sus lectores."""
@@ -380,6 +387,44 @@ def save_candle(candle):
     with STATE.db_lock:
         conn = db_connect()
         try:
+            conn.execute("BEGIN IMMEDIATE")
+            open_time = int(candle["open_time"])
+            incoming_closed = bool(candle["is_closed"])
+            existing = conn.execute(
+                """
+                SELECT open, high, low, close, volume, is_closed
+                FROM candles
+                WHERE symbol=? AND interval=? AND open_time=?
+                """,
+                (SYMBOL, INTERVAL, open_time),
+            ).fetchone()
+            latest_closed = conn.execute(
+                """
+                SELECT MAX(open_time)
+                FROM candles
+                WHERE symbol=? AND interval=? AND is_closed=1
+                """,
+                (SYMBOL, INTERVAL),
+            ).fetchone()[0]
+
+            historical_change = False
+            if incoming_closed:
+                incoming_ohlcv = tuple(
+                    float(candle[column])
+                    for column in ("open", "high", "low", "close", "volume")
+                )
+                if existing is not None and bool(existing[5]):
+                    historical_change = incoming_ohlcv != tuple(
+                        float(value) for value in existing[:5]
+                    )
+                elif (
+                    latest_closed is not None
+                    and open_time < int(latest_closed)
+                ):
+                    # Inserción tardía o cierre tardío detrás del watermark
+                    # que ya puede haber usado el baseline live.
+                    historical_change = True
+
             conn.execute(
                 """
                 INSERT INTO candles (
@@ -429,6 +474,26 @@ def save_candle(candle):
                     utc_iso(),
                 ),
             )
+            if historical_change:
+                key = history_revision_key(SYMBOL, INTERVAL)
+                row = conn.execute(
+                    "SELECT value FROM collector_state WHERE key=?",
+                    (key,),
+                ).fetchone()
+                try:
+                    revision = int(row[0]) if row is not None else 0
+                except (TypeError, ValueError):
+                    revision = 0
+                conn.execute(
+                    """
+                    INSERT INTO collector_state(key, value, updated_at)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(key) DO UPDATE SET
+                        value=excluded.value,
+                        updated_at=excluded.updated_at
+                    """,
+                    (key, str(revision + 1), utc_iso()),
+                )
             conn.commit()
         finally:
             conn.close()

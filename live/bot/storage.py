@@ -13,6 +13,11 @@ from .config import logger, opt_float
 from .signal_contract import apply_signal_policy
 
 try:
+    from ..feed.database import history_revision_key
+except ImportError:  # ejecución como paquete top-level desde live/
+    from feed.database import history_revision_key
+
+try:
     from ..db.sqlite_config import (
         SQLiteSchemaError,
         connect_sqlite,
@@ -1444,7 +1449,12 @@ class FeedReader:
     """Lector de solo lectura de velas cerradas de feed.db."""
 
     QUERY = """
-        SELECT open_time, open, high, low, close, volume
+        SELECT open_time, open, high, low, close, volume,
+               COALESCE(
+                   (SELECT CAST(value AS INTEGER)
+                    FROM collector_state WHERE key=?),
+                   0
+               ) AS history_revision
         FROM candles
         WHERE symbol = ? AND interval = ? AND is_closed = 1
         ORDER BY open_time
@@ -1455,6 +1465,7 @@ class FeedReader:
         self.symbol = symbol
         self.interval = interval
         self.conn: sqlite3.Connection | None = None
+        self.history_revision = 0
 
     def connect(self) -> None:
         if not self.path.exists():
@@ -1483,10 +1494,18 @@ class FeedReader:
         if self.conn is None:
             self.connect()
         frame = pd.read_sql_query(
-            self.QUERY, self.conn, params=(self.symbol, self.interval)
+            self.QUERY,
+            self.conn,
+            params=(
+                history_revision_key(self.symbol, self.interval),
+                self.symbol,
+                self.interval,
+            ),
         )
         if frame.empty:
-            return frame
+            return frame.drop(columns=["history_revision"])
+        self.history_revision = int(frame["history_revision"].iloc[0])
+        frame = frame.drop(columns=["history_revision"])
         frame["timestamp"] = pd.to_datetime(frame.pop("open_time"), unit="ms", utc=True)
         return (
             frame.dropna(subset=["open", "high", "low", "close"])

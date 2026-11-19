@@ -465,3 +465,12 @@ def test_live_simulation_cache_replays_only_the_growing_tail():
             if event["event"] == "EXIT" and event["reason"] == "PARTIAL_TP_1R"
         ]
     ) == 1
+
+    # Una corrección al historial completo obliga a reconstruir el checkpoint.
+    _, _, _ = build_events_and_result(
+        *args,
+        pd.concat([closed_minutes, tail]),
+        cache,
+        history_revision=1,
+    )
+    assert cache["baseline"] is not baseline

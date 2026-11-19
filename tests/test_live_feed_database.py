@@ -1,6 +1,7 @@
 import sqlite3
 
 from live.feed import database
+from live.bot.storage import FeedReader
 
 
 def test_feed_init_upgrades_existing_database_without_losing_candles_or_state(
@@ -104,6 +105,62 @@ def test_feed_init_upgrades_existing_database_without_losing_candles_or_state(
         ).fetchone()[0] == 1
     finally:
         connection.close()
+
+
+def test_history_revision_tracks_corrections_and_late_closed_candles(
+    tmp_path, monkeypatch
+):
+    db_path = tmp_path / "feed.db"
+    monkeypatch.setattr(database, "DB_PATH", str(db_path))
+    monkeypatch.setattr(database, "SYMBOL", "BTCUSDT")
+    monkeypatch.setattr(database, "INTERVAL", "1m")
+    database.init_db()
+
+    start = 1_700_000_000_000
+
+    def save(open_time, close, *, high=None):
+        database.save_candle(
+            {
+                "open_time": open_time,
+                "close_time": open_time + 59_999,
+                "open": 100.0,
+                "high": 101.0 if high is None else high,
+                "low": 99.0,
+                "close": close,
+                "volume": 1.0,
+                "quote_volume": close,
+                "trades": 1,
+                "taker_buy_base": 0.5,
+                "taker_buy_quote": close / 2,
+                "is_closed": 1,
+                "source": "rest",
+            }
+        )
+
+    save(start, 100.0)
+    save(start + 2 * 60_000, 100.0)
+    reader = FeedReader(db_path, "BTCUSDT", "1m")
+    try:
+        reader.load_closed()
+        assert reader.history_revision == 0
+
+        # La corrección de una vela ya cerrada sí cambia el historial.
+        save(start, 100.5, high=102.0)
+        reader.load_closed()
+        assert reader.history_revision == 1
+
+        # Repetir los mismos OHLCV no debe provocar reconstrucciones espurias.
+        save(start, 100.5, high=102.0)
+        reader.load_closed()
+        assert reader.history_revision == 1
+
+        # Una vela cerrada que llega tarde detrás del último timestamp también
+        # cambia el historial ya procesado.
+        save(start + 60_000, 100.0)
+        reader.load_closed()
+        assert reader.history_revision == 2
+    finally:
+        reader.close()
 
 
 def _seed_candles(database_path, monkeypatch, open_times):

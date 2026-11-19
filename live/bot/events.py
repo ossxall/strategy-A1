@@ -56,11 +56,13 @@ def _simulation_cache_key(
     weak_exit: np.ndarray | None,
     rsi_div_exit: np.ndarray | None,
     cfg: Config,
+    history_revision: int | None,
 ) -> tuple:
     """Identifica el baseline cerrado que puede reutilizarse entre polls 1m."""
     last = bars.iloc[-1]
     return (
         repr(cfg),
+        history_revision,
         len(bars),
         bars.index[0].value,
         bars.index[-1].value,
@@ -85,6 +87,7 @@ def build_events_and_result(
     interval: str,
     intrabar_bars: pd.DataFrame | None = None,
     simulation_cache: dict | None = None,
+    history_revision: int | None = None,
 ) -> tuple[list[dict], pd.DataFrame, pd.DataFrame]:
     """Ejecuta una vez el backtester y devuelve eventos, trades y equity.
 
@@ -110,7 +113,13 @@ def build_events_and_result(
     live_cache_enabled = simulation_cache is not None and intrabar_bars is not None
     if live_cache_enabled:
         cache_key = _simulation_cache_key(
-            bars, signals, adx_exit, weak_exit, rsi_div_exit, cfg
+            bars,
+            signals,
+            adx_exit,
+            weak_exit,
+            rsi_div_exit,
+            cfg,
+            history_revision,
         )
         baseline = simulation_cache.get("baseline")
         if baseline is None or simulation_cache.get("key") != cache_key:
@@ -457,6 +466,7 @@ def build_events(
     interval: str,
     intrabar_bars: pd.DataFrame | None = None,
     simulation_cache: dict | None = None,
+    history_revision: int | None = None,
 ) -> list[dict]:
     """Compatibilidad: devuelve solo los eventos live generados."""
     events, _, _ = build_events_and_result(
@@ -470,5 +480,6 @@ def build_events(
         interval,
         intrabar_bars,
         simulation_cache,
+        history_revision,
     )
     return events
