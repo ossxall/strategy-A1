@@ -84,8 +84,21 @@ completo) y reconcilia órdenes/posiciones antes de reintentar.
 La columna `executed` se conserva por compatibilidad, pero no es el acuse
 autoritativo. Las migraciones conservan filas antiguas y recalculan IDs cuando
 es necesario.
-El executor solo acepta señales v3 con `payload.sizing`; eventos legacy sin ese
-contrato quedan rechazados y no generan órdenes.
+El productor emite señales v4. En cada `EXIT`, `payload.reason_code` identifica
+la familia de salida y `payload.stop_action` declara `MOVE_TO_BREAKEVEN`,
+`KEEP` o `CANCEL`; `reason` queda como descripción legible. El executor acepta
+señales v3 heredadas mediante una traducción de compatibilidad, además de v4.
+Señales anteriores a v3 quedan rechazadas.
+
+Los códigos de entrada son `ENTRY_CROSS`/`ENTRY_OTHER`; los de salida:
+`TAKE_PROFIT_1`…`TAKE_PROFIT_7`, `STOP_LOSS`,
+`BREAKEVEN`, `EMA_CROSS_EXIT`, `EMA_WEAKENING`, `ADX_REVERSAL`,
+`RSI_DIVERGENCE_BEAR/BULL`, `GAUSSIAN_TREND_BEAR/BULL`, `EMA_SLOW_TOUCH`,
+`MONTHLY_LOSS_LIMIT`, `TEST_PARTIAL`, `TEST_CLOSE` y `EXIT_OTHER`. `CLOSE`
+siempre declara `CANCEL`; `PARTIAL_CLOSE` declara `MOVE_TO_BREAKEVEN` solo para
+TP1 cuando `payload.sizing.move_stop_to_breakeven=true`; el resto declara
+`KEEP`. La cantidad se determina por `action` y `payload.close_pct`, no por
+`reason`, `price` ni el PnL simulado.
 
 ## Executor USDⓈ-M Futures
 
@@ -137,9 +150,13 @@ esperan su `signal_time`, parcial programado y reversión `EXIT`→`ENTRY` en or
 fill/reconciliación de stop, recuperación idempotente, señales vencidas,
 protección de posiciones no rastreadas, bloqueo por órdenes externas abiertas,
 restauración de stops ausentes, reintento seguro antes del envío, conservación
-de fills parciales con orden terminal y rechazo de Hedge Mode. Esa matriz no
-llama a Binance. El ciclo real comprueba además la comunicación con Binance; no
-fuerza allí fallos de red ni el disparo de cada posible error API.
+de fills parciales con orden terminal, rechazo de Hedge Mode y cinco reinicios
+simulados: PREPARED antes del envío, ENTRY llenada antes de guardar el fill,
+parcial antes de breakeven, cierre antes de cancelar stops y stop disparado
+mientras el worker está abajo. Se reabre la misma DB y se conserva el gateway
+simulado para comprobar que no se dupliquen órdenes. Esa matriz no llama a
+Binance ni mata un proceso real. El ciclo real comprueba además la comunicación
+con Binance; no fuerza allí fallos de red ni cada posible error API.
 
 Opcionalmente, `BOT_EXECUTOR_PRODUCTION_AUDIT=true` añade una auditoría de
 producción **solo lectura** antes de los ciclos testnet. Requiere credenciales

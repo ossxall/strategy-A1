@@ -8,6 +8,8 @@ import time
 from decimal import Decimal
 
 from ..config import STOP_EVENT, utc_iso
+from ..signal_contract import signal_reason_code
+from ..storage import SIGNAL_SCHEMA_VERSION
 from .binance_usdm import BinanceOrderNotFound
 from .test_mode_policy import (
     TEST_MODE_MAX_LEVERAGE,
@@ -72,7 +74,7 @@ class ExecutionTestMode:
         else:
             payload["close_pct"] = close_pct
         raw = {
-            "schema_version": 3,
+            "schema_version": SIGNAL_SCHEMA_VERSION,
             "symbol": "BTCUSDT",
             "interval": "test",
             "timeframe": "test",
@@ -286,7 +288,7 @@ class ExecutionTestMode:
         position_id = int(active["position_id"])
         exits = self.worker.store.conn.execute(
             """
-            SELECT s.signal_id, s.action, s.reason, x.status,
+            SELECT s.signal_id, s.action, s.reason, s.payload, x.status,
                    x.order_status, x.filled_qty
             FROM signals AS s
             JOIN signal_execution AS x ON x.signal_id = s.signal_id
@@ -300,22 +302,30 @@ class ExecutionTestMode:
         ).fetchall()
         partial_execution = None
         if exits:
+            try:
+                exit_payload = json.loads(exits[0][3]) if exits[0][3] else {}
+            except (TypeError, json.JSONDecodeError):
+                exit_payload = {}
+            exit_reason_code = signal_reason_code(
+                {
+                    "event": "EXIT",
+                    "reason": exits[0][2],
+                    "payload": exit_payload,
+                }
+            )
             if (
                 len(exits) == 1
                 and exits[0][1] == "PARTIAL_CLOSE"
-                and exits[0][2] in {
-                    "PARTIAL_TP_1R",
-                    "EXECUTOR_TEST_PARTIAL",
-                }
-                and exits[0][3] in {"FILLED", "RECONCILIATION_REQUIRED"}
-                and exits[0][4] == "FILLED"
-                and float(exits[0][5] or 0) > 0
+                and exit_reason_code in {"TAKE_PROFIT_1", "TEST_PARTIAL"}
+                and exits[0][4] in {"FILLED", "RECONCILIATION_REQUIRED"}
+                and exits[0][5] == "FILLED"
+                and float(exits[0][6] or 0) > 0
             ):
                 partial_execution = {
                     "signal_id": exits[0][0],
-                    "reason": exits[0][2],
-                    "filled_qty": float(exits[0][5]),
-                    "status": exits[0][3],
+                    "reason_code": exit_reason_code,
+                    "filled_qty": float(exits[0][6]),
+                    "status": exits[0][4],
                 }
             else:
                 raise RuntimeError(
@@ -375,7 +385,7 @@ class ExecutionTestMode:
         stop_variant = "sl"
         if (
             partial_execution is not None
-            and partial_execution["reason"].startswith("PARTIAL_TP_")
+            and partial_execution["reason_code"] == "TAKE_PROFIT_1"
             and (signal["payload"].get("sizing") or {}).get(
                 "move_stop_to_breakeven"
             )
@@ -447,12 +457,10 @@ class ExecutionTestMode:
         }
 
     def _recover_test_partial_inflight(self, execution: dict) -> dict:
+        reason_code = signal_reason_code(execution)
         if (
             execution["action"] != "PARTIAL_CLOSE"
-            or execution["reason"] not in {
-                "PARTIAL_TP_1R",
-                "EXECUTOR_TEST_PARTIAL",
-            }
+            or reason_code not in {"TAKE_PROFIT_1", "TEST_PARTIAL"}
             or execution["order_status"] != "FILLED"
             or not execution["client_order_id"]
             or float(execution["filled_qty"] or 0) <= 0

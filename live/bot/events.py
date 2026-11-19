@@ -14,6 +14,7 @@ from strategy.models import CROSS_REASON, empty_trades
 from strategy.strategy import Backtester, Config
 
 from .config import opt_float, ts_ms, utc_iso
+from .signal_contract import apply_signal_policy
 from .storage import SIGNAL_SCHEMA_VERSION, build_signal_id
 
 
@@ -112,6 +113,7 @@ def build_events_and_result(
         price: float | None,
         payload: dict,
     ) -> dict:
+        payload = apply_signal_policy(event, payload["action"], reason, payload)
         fast, slow, adx_entry = indicators.get(bar_time, (np.nan,) * 3)
         normalized = {
             "schema_version": SIGNAL_SCHEMA_VERSION,
