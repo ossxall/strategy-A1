@@ -150,7 +150,13 @@ def _fetch_mark_price(gateway) -> float:
     return mark_price
 
 
-def _signal_row(store, event: str, *, position_id: int | None = None) -> dict | None:
+def _signal_row(
+    store,
+    event: str,
+    *,
+    position_id: int | None = None,
+    reason_prefix: str | None = None,
+) -> dict | None:
     query = """
         SELECT signal_id, event, action, side, position_id, reason, signal_time
         FROM signals WHERE event = ?
@@ -159,6 +165,9 @@ def _signal_row(store, event: str, *, position_id: int | None = None) -> dict | 
     if position_id is not None:
         query += " AND position_id = ?"
         params += (position_id,)
+    if reason_prefix is not None:
+        query += " AND reason LIKE ?"
+        params += (f"{reason_prefix}%",)
     query += " ORDER BY signal_time DESC, id DESC LIMIT 1"
     row = store.conn.execute(query, params).fetchone()
     if row is None:
@@ -176,6 +185,154 @@ def _signal_row(store, event: str, *, position_id: int | None = None) -> dict | 
             ),
             row,
         )
+    )
+
+
+def _operational_signal(
+    *,
+    event: str,
+    action: str,
+    side: str,
+    position_id: int,
+    reason: str,
+    close_pct: float | None = None,
+    sizing: dict | None = None,
+) -> dict:
+    now_ms = int(time.time() * 1000)
+    payload = {"action": action, "position_id": position_id}
+    if event == "ENTRY":
+        payload.update(
+            {
+                "entry_pct": 100.0,
+                "sizing": {
+                    "risk_pct": RISK_PCT,
+                    "stop_loss_pct": STOP_LOSS_PCT,
+                    "commission_bps": 0.0,
+                    "slippage_bps": 0.0,
+                    "move_stop_to_breakeven": True,
+                },
+            }
+        )
+    else:
+        payload["close_pct"] = close_pct
+        if sizing is not None:
+            payload["sizing"] = dict(sizing)
+    return {
+        "schema_version": 4,
+        "symbol": SYMBOL,
+        "interval": INTERVAL,
+        "timeframe": "1min",
+        "bar_time": now_ms,
+        "signal_time": now_ms,
+        "event": event,
+        "action": action,
+        "signal": side,
+        "side": side,
+        "position_id": position_id,
+        "scheduled": False,
+        "reason": reason,
+        "price": None,
+        "ema_fast": None,
+        "ema_slow": None,
+        "adx_entry": None,
+        "executed": 0,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "payload": payload,
+    }
+
+
+def _insert_operational_signal(store, **kwargs) -> str:
+    event = _operational_signal(**kwargs)
+    normalized = store._normalize_event(event)
+    if store.insert([event]) != 1:
+        raise RuntimeError(
+            f"No se pudo insertar {event['event']}/{event['action']}."
+        )
+    return normalized["signal_id"]
+
+
+def _require_open_position(
+    store,
+    settings,
+    position_id: int,
+    side: str,
+    *,
+    protective_stop_id: str | None = None,
+) -> None:
+    active = store.get_active_execution_positions(settings.account_id, SYMBOL)
+    matching = [item for item in active if item["position_id"] == position_id]
+    if len(active) != 1 or len(matching) != 1:
+        raise RuntimeError(
+            f"Se esperaba una posición {side} activa tras un parcial; "
+            f"ledger={active}."
+        )
+    if matching[0]["side"] != side or matching[0]["open_qty"] <= 0:
+        raise RuntimeError(
+            f"El parcial dejó un estado inesperado en el ledger: {matching[0]}."
+        )
+
+    row = store.conn.execute(
+        """
+        SELECT positions_json, open_orders_json, last_error
+        FROM binance_account_snapshot WHERE account_id = ?
+        """,
+        (settings.account_id,),
+    ).fetchone()
+    if row is None or row[2]:
+        raise RuntimeError(
+            f"No se pudo validar el snapshot tras el parcial: {row[2] if row else 'sin snapshot'}."
+        )
+    positions = json.loads(row[0])
+    orders = json.loads(row[1])
+    actual = next(
+        (
+            position
+            for position in positions
+            if str(position.get("symbol", "")).upper() == SYMBOL
+            and abs(float(position.get("position_amt") or 0)) > 0
+        ),
+        None,
+    )
+    if actual is None:
+        raise RuntimeError("Binance quedó flat después de un cierre parcial.")
+    actual_side = "LONG" if float(actual["position_amt"]) > 0 else "SHORT"
+    if actual_side != side:
+        raise RuntimeError(
+            f"Binance informa {actual_side} tras un parcial {side}."
+        )
+    stop_orders = [
+        order
+        for order in orders
+        if str(order.get("symbol", "")).upper() == SYMBOL
+        and order.get("kind") == "conditional"
+    ]
+    if len(stop_orders) != 1:
+        raise RuntimeError(
+            "La posición parcial no tiene exactamente un stop protector."
+        )
+    if protective_stop_id is not None:
+        observed_stop_id = stop_orders[0].get(
+            "clientAlgoId", stop_orders[0].get("client_algo_id")
+        )
+        if observed_stop_id != protective_stop_id:
+            raise RuntimeError(
+                "El stop activo no coincide con la política de breakeven: "
+                f"esperado={protective_stop_id}, observado={observed_stop_id}."
+            )
+
+
+def _was_protective_stop_reconciled(store, settings, position_id: int) -> bool:
+    return (
+        store.conn.execute(
+            """
+            SELECT 1 FROM execution_adjustments
+            WHERE account_id = ? AND symbol = ? AND position_id = ?
+              AND reason = 'BINANCE_PROTECTIVE_STOP'
+            LIMIT 1
+            """,
+            (settings.account_id, SYMBOL, position_id),
+        ).fetchone()
+        is not None
     )
 
 
@@ -236,7 +393,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
             "Genera ENTRY/EXIT desde velas guardadas por el feed, procesa "
-            "ambas con el bot y el executor real de Binance testnet."
+            "ambas con el bot y el executor real de Binance testnet; incluye "
+            "LONG/SHORT, parciales, cierres totales y política de breakeven."
         )
     )
     parser.add_argument(
@@ -397,6 +555,82 @@ def main() -> int:
             f"filled_qty={entry_state['filled_qty']:.8g}"
         )
 
+        long_partial_id = _insert_operational_signal(
+            store,
+            event="EXIT",
+            action="PARTIAL_CLOSE",
+            side="LONG",
+            position_id=int(entry["position_id"]),
+            reason="PARTIAL_TP_1R",
+            close_pct=50.0,
+            sizing={"move_stop_to_breakeven": True},
+        )
+        long_partial_row = store.conn.execute(
+            "SELECT payload FROM signals WHERE signal_id = ?",
+            (long_partial_id,),
+        ).fetchone()
+        long_partial_payload = json.loads(long_partial_row[0])
+        if (
+            long_partial_payload.get("reason_code") != "TAKE_PROFIT_1"
+            or long_partial_payload.get("stop_action") != "MOVE_TO_BREAKEVEN"
+        ):
+            raise AssertionError(
+                "TP1 no declaró la política de stop MOVE_TO_BREAKEVEN."
+            )
+        long_partial_state = _wait_for_execution(
+            worker,
+            store,
+            settings,
+            long_partial_id,
+            args.timeout_seconds,
+        )
+        if (
+            long_partial_state["status"] != "FILLED"
+            or long_partial_state["filled_qty"] <= 0
+        ):
+            raise RuntimeError(
+                "EXIT/PARTIAL_CLOSE LONG/TP1 no ejecutado: "
+                f"{long_partial_state['status']} "
+                f"{long_partial_state.get('error') or ''}"
+            )
+        long_stop_id = long_partial_state["result"].get(
+            "protective_stop_client_algo_id"
+        )
+        expected_stop_ids = {
+            worker._algo_order_id(int(entry["position_id"]), variant)
+            for variant in ("sl", "be")
+        }
+        if long_stop_id not in expected_stop_ids:
+            raise AssertionError(
+                "TP1 no dejó un stop SL/BE identificable: "
+                f"{long_stop_id!r}."
+            )
+        long_be_stop_id = worker._algo_order_id(
+            int(entry["position_id"]), "be"
+        )
+        if (
+            long_stop_id != long_be_stop_id
+            and "breakeven_stop_skipped" not in long_partial_state["result"]
+        ):
+            raise AssertionError(
+                "Se conservó el stop original sin registrar por qué se omitió "
+                "el breakeven."
+            )
+        worker.run_once()
+        _require_open_position(
+            store,
+            settings,
+            int(entry["position_id"]),
+            "LONG",
+            protective_stop_id=long_stop_id,
+        )
+        print(
+            "Executor confirmó EXIT/PARTIAL_CLOSE LONG/TP1: "
+            f"{long_partial_state['status']}, "
+            f"filled_qty={long_partial_state['filled_qty']:.8g}, "
+            f"stop={'BE' if long_stop_id == long_be_stop_id else 'SL'}"
+        )
+
         # La vela cerrada atraviesa el stop simulado; el bot calcula el EXIT.
         _seed_candles(
             feed_database,
@@ -406,7 +640,10 @@ def main() -> int:
         )
         exit_inserted = bot.process_once()
         exit_event = _signal_row(
-            store, "EXIT", position_id=int(entry["position_id"])
+            store,
+            "EXIT",
+            position_id=int(entry["position_id"]),
+            reason_prefix="STOP_LOSS",
         )
         if exit_inserted != 1 or exit_event is None \
                 or not exit_event["reason"].startswith("STOP_LOSS"):
@@ -422,7 +659,7 @@ def main() -> int:
         exit_state = _wait_for_execution(
             worker, store, settings, exit_event["signal_id"], args.timeout_seconds
         )
-        if exit_state["status"] != "FILLED":
+        if exit_state["status"] not in {"FILLED", "EXPIRED"}:
             raise RuntimeError(
                 f"EXIT terminó en {exit_state['status']}: "
                 f"{exit_state.get('error') or 'sin detalle'}."
@@ -430,15 +667,121 @@ def main() -> int:
 
         # Refresca posiciones y órdenes en Binance después del fill de cierre.
         worker.run_once()
+        if (
+            exit_state["status"] == "EXPIRED"
+            and not _was_protective_stop_reconciled(
+                store, settings, int(entry["position_id"])
+            )
+        ):
+            raise RuntimeError(
+                "El EXIT LONG expiró sin un fill reconciliado del stop protector."
+            )
         _require_flat_snapshot(store, settings)
+
+        short_position_id = time.time_ns() // 1000
+        short_entry_id = _insert_operational_signal(
+            store,
+            event="ENTRY",
+            action="OPEN",
+            side="SHORT",
+            position_id=short_position_id,
+            reason="E2E_EXECUTOR_SHORT_ENTRY",
+        )
+        short_entry_state = _wait_for_execution(
+            worker,
+            store,
+            settings,
+            short_entry_id,
+            args.timeout_seconds,
+        )
+        if short_entry_state["status"] not in {"FILLED", "PARTIALLY_FILLED"}:
+            raise RuntimeError(
+                "ENTRY/OPEN SHORT no ejecutada: "
+                f"{short_entry_state['status']} "
+                f"{short_entry_state.get('error') or ''}"
+            )
+        print(
+            "Executor confirmó ENTRY/OPEN SHORT: "
+            f"{short_entry_state['status']}, "
+            f"filled_qty={short_entry_state['filled_qty']:.8g}"
+        )
+
+        short_partial_id = _insert_operational_signal(
+            store,
+            event="EXIT",
+            action="PARTIAL_CLOSE",
+            side="SHORT",
+            position_id=short_position_id,
+            reason="E2E_PARTIAL_CLOSE_SHORT",
+            close_pct=50.0,
+        )
+        short_partial_state = _wait_for_execution(
+            worker,
+            store,
+            settings,
+            short_partial_id,
+            args.timeout_seconds,
+        )
+        if (
+            short_partial_state["status"] not in {"FILLED", "PARTIALLY_FILLED"}
+            or short_partial_state["filled_qty"] <= 0
+        ):
+            raise RuntimeError(
+                "EXIT/PARTIAL_CLOSE SHORT no ejecutado: "
+                f"{short_partial_state['status']} "
+                f"{short_partial_state.get('error') or ''}"
+            )
+        worker.run_once()
+        _require_open_position(store, settings, short_position_id, "SHORT")
+        print(
+            "Executor confirmó EXIT/PARTIAL_CLOSE SHORT: "
+            f"{short_partial_state['status']}, "
+            f"filled_qty={short_partial_state['filled_qty']:.8g}"
+        )
+
+        short_close_id = _insert_operational_signal(
+            store,
+            event="EXIT",
+            action="CLOSE",
+            side="SHORT",
+            position_id=short_position_id,
+            reason="E2E_EXECUTOR_SHORT_CLOSE",
+            close_pct=100.0,
+        )
+        short_close_state = _wait_for_execution(
+            worker,
+            store,
+            settings,
+            short_close_id,
+            args.timeout_seconds,
+        )
+        if short_close_state["status"] not in {"FILLED", "EXPIRED"}:
+            raise RuntimeError(
+                "EXIT/CLOSE SHORT no ejecutado: "
+                f"{short_close_state['status']} "
+                f"{short_close_state.get('error') or ''}"
+            )
+        worker.run_once()
+        if (
+            short_close_state["status"] == "EXPIRED"
+            and not _was_protective_stop_reconciled(
+                store, settings, short_position_id
+            )
+        ):
+            raise RuntimeError(
+                "EXIT SHORT expiró sin un fill reconciliado del stop protector."
+            )
+        _require_flat_snapshot(store, settings)
+
         active = store.get_active_execution_positions(settings.account_id, SYMBOL)
         if active:
             raise RuntimeError(
                 f"Binance aparece flat pero el ledger conserva posiciones: {active}"
             )
         print(
-            "PASS: feed → SignalBot → señales SQLite → ExecutionWorker → "
-            "Binance testnet; ENTRY y EXIT confirmadas, cuenta flat."
+            "PASS: feed → SignalBot → ExecutionWorker → Binance testnet; "
+            "ENTRY LONG/SHORT, EXIT parcial/total, BE/SL verificado, "
+            "cuenta flat."
         )
         return 0
     except Exception:

@@ -226,8 +226,13 @@ Usa exclusivamente `APP_ENV=dev`, credenciales de Binance testnet,
 cerradas de fixture mediante la persistencia del feed, las lee con `FeedReader`,
 y ejecuta `SignalBot.process_once()` y el `ExecutionWorker` normal contra la API
 real de testnet. La fixture provoca un cruce LONG y luego un EXIT por stop; se
-verifican los fills y que la cuenta y el ledger queden flat. No se inicia el
-WebSocket ni se prueban la conexión de mercado ni el proceso de despliegue.
+verifican los fills y que la cuenta y el ledger queden flat. Además, inserta en
+el ledger aislado señales contractuales de prueba para comprobar ENTRY SHORT y
+EXIT parciales en LONG/SHORT, junto con cierres completos. El parcial LONG es
+TP1 con solicitud de breakeven: se comprueba que el executor mueva el stop a
+entrada si el mark price es favorable, o que conserve el stop original si el
+breakeven lo dispararía inmediatamente. No se inicia el WebSocket ni se prueban
+la conexión de mercado ni el proceso de despliegue.
 La estrategia usa parámetros cortos de fixture para forzar señales sin esperar
 un cruce de producción; se valida la implementación del `SignalBot`, no el
 rendimiento ni los filtros de la estrategia operativa.
