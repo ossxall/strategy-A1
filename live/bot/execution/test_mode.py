@@ -205,6 +205,81 @@ class ExecutionTestMode:
         )
         return signal
 
+    def _assert_no_pending_test_signals(self) -> None:
+        row = self.worker.store.conn.execute(
+            """
+            SELECT s.signal_id, s.event, s.action, x.status
+            FROM signals AS s
+            LEFT JOIN signal_execution AS x
+              ON x.account_id = ? AND x.signal_id = s.signal_id
+            WHERE s.symbol = ?
+              AND (
+                x.signal_id IS NULL
+                OR x.status IN ('READY', 'CLAIMED')
+              )
+            ORDER BY s.signal_time, s.bar_time, s.id
+            LIMIT 1
+            """,
+            (self.worker.settings.account_id, self.worker.settings.symbol),
+        ).fetchone()
+        if row is not None:
+            raise RuntimeError(
+                "EXECUTOR_TEST_MODE: hay una señal anterior sin resolver "
+                f"({row[1]}/{row[2]}, estado={row[3] or 'sin reclamar'}); "
+                "no se creará otro ciclo."
+            )
+
+    def _assert_test_account_flat(self, snapshot: dict) -> None:
+        if self.worker._position_for_symbol(snapshot) is not None:
+            raise RuntimeError(
+                "EXECUTOR_TEST_MODE: BTCUSDT no está flat; no se enviarán órdenes."
+            )
+        if self.worker.store.get_active_execution_positions(
+            self.worker.settings.account_id, self.worker.settings.symbol
+        ):
+            raise RuntimeError(
+                "EXECUTOR_TEST_MODE: el ledger mantiene una posición activa."
+            )
+        if self.worker._orders_for_symbol(snapshot, "open_orders"):
+            raise RuntimeError(
+                "EXECUTOR_TEST_MODE: hay órdenes MARKET abiertas para BTCUSDT."
+            )
+        if self.worker._orders_for_symbol(snapshot, "open_algo_orders"):
+            raise RuntimeError(
+                "EXECUTOR_TEST_MODE: hay órdenes condicionales abiertas para "
+                "BTCUSDT."
+            )
+
+    def _assert_test_position_protected(
+        self, position_id: int, side: str
+    ) -> dict:
+        snapshot = self.worker._account_snapshot(force=True)
+        position = self.worker._position_for_symbol(snapshot)
+        if position is None:
+            raise RuntimeError(
+                "EXECUTOR_TEST_MODE: falta la posición que debía estar protegida."
+            )
+        actual_side = "LONG" if position["position_amt"] > 0 else "SHORT"
+        active = self.worker.store.get_active_execution_positions(
+            self.worker.settings.account_id, self.worker.settings.symbol
+        )
+        if (
+            actual_side != side
+            or len(active) != 1
+            or active[0]["position_id"] != int(position_id)
+        ):
+            raise RuntimeError(
+                "EXECUTOR_TEST_MODE: dirección/posición real no coincide "
+                "con el ciclo de prueba."
+            )
+        consistency_error = self.worker._account_consistency_error(snapshot)
+        if consistency_error:
+            raise RuntimeError(
+                "EXECUTOR_TEST_MODE: posición/stops no superan el preflight: "
+                f"{consistency_error}"
+            )
+        return snapshot
+
     def recover_active_position(
         self, active: dict, snapshot: dict
     ) -> dict:
@@ -338,6 +413,20 @@ class ExecutionTestMode:
                 "EXECUTOR_TEST_MODE: hay stops ajenos a la posición test; "
                 "requiere revisión manual."
             )
+        if len(open_stop_ids) > 1:
+            raise RuntimeError(
+                "EXECUTOR_TEST_MODE: hay más de un stop para la posición test; "
+                "requiere revisión manual."
+            )
+        if open_stop_ids:
+            active_stop_id = next(iter(open_stop_ids))
+            stop_variant = (
+                "be"
+                if active_stop_id == self.worker._algo_order_id(
+                    position_id, "be"
+                )
+                else "sl"
+            )
         stop_id = self.worker._ensure_protective_stop(
             signal, snapshot, breakeven=stop_variant == "be"
         )
@@ -345,6 +434,7 @@ class ExecutionTestMode:
         self.worker._cancel_position_stop(
             position_id, "sl" if stop_variant == "be" else "be"
         )
+        self._assert_test_position_protected(position_id, active["side"])
         LOG.warning(
             "EXECUTOR_TEST_MODE: posición test %s recuperada y stop confirmado.",
             position_id,
@@ -757,6 +847,7 @@ class ExecutionTestMode:
                 recovered = self.recover_active_position(
                     active_positions[0], snapshot
                 )
+        self._assert_no_pending_test_signals()
         if recovered and recovered.get("already_flat"):
             self._test_next_side = (
                 "SHORT" if recovered["side"] == "LONG" else "LONG"
@@ -768,6 +859,13 @@ class ExecutionTestMode:
             )
             return
         if recovered is None:
+            consistency_error = self.worker._account_consistency_error(snapshot)
+            if consistency_error:
+                raise RuntimeError(
+                    "EXECUTOR_TEST_MODE: preflight de cuenta no superado: "
+                    f"{consistency_error}"
+                )
+            self._assert_test_account_flat(snapshot)
             if (
                 self.worker._position_for_symbol(snapshot) is not None
                 or self.worker.store.get_active_execution_positions(
@@ -841,6 +939,7 @@ class ExecutionTestMode:
                 return
             stop_id = self.worker._algo_order_id(position_id, "sl")
             self.worker._verify_protective_stop(stop_id)
+        self._assert_test_position_protected(position_id, side)
 
         partial_completed = bool(
             recovered and recovered.get("partial_completed")
@@ -890,6 +989,7 @@ class ExecutionTestMode:
                 return
             stop_id = self.worker._algo_order_id(position_id, "sl")
             self.worker._verify_protective_stop(stop_id)
+        self._assert_test_position_protected(position_id, side)
 
         try:
             self._run_test_signal(
@@ -905,12 +1005,16 @@ class ExecutionTestMode:
                 return
             raise
         final_snapshot = self.worker._account_snapshot(force=True)
-        if (
-            self.worker._position_for_symbol(final_snapshot) is not None
-            or final_snapshot.get("open_algo_orders")
-        ):
+        if self.worker._orders_for_symbol(final_snapshot, "open_orders") \
+                or self.worker._orders_for_symbol(
+                    final_snapshot, "open_algo_orders"
+                ) or self.worker._position_for_symbol(final_snapshot) is not None \
+                or self.worker.store.get_active_execution_positions(
+                    self.worker.settings.account_id, self.worker.settings.symbol
+                ):
             raise RuntimeError(
-                "EXECUTOR_TEST_MODE: cierre final o cancelación de stops no confirmados"
+                "EXECUTOR_TEST_MODE: cierre final, ledger plano o cancelación "
+                "de órdenes no confirmados"
             )
         self._test_next_side = "SHORT" if side == "LONG" else "LONG"
         LOG.warning(

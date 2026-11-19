@@ -460,20 +460,119 @@ class ExecutionWorker:
         ).fetchone()
         if row is None:
             return self._refresh_account_snapshot()
+        stored_orders = json.loads(row[3])
+        regular_orders = [
+            order
+            for order in stored_orders
+            if str(order.get("kind", "regular")).lower() != "conditional"
+        ]
+        conditional_orders = [
+            order
+            for order in stored_orders
+            if str(order.get("kind", "")).lower() == "conditional"
+        ]
         return {
             "wallet_balance": row[0],
             "available_balance": row[1],
             "positions": json.loads(row[2]),
-            "open_orders": json.loads(row[3]),
-            "open_algo_orders": [],
+            "open_orders": regular_orders,
+            "open_algo_orders": conditional_orders,
             "last_error": row[4],
         }
+
+    def _orders_for_symbol(self, snapshot: dict, key: str) -> list[dict]:
+        return [
+            order
+            for order in snapshot.get(key, [])
+            if str(_get(order, "symbol", default=self.settings.symbol)).upper()
+            == self.settings.symbol
+        ]
+
+    def _entry_signal_for_position(self, position_id: int) -> dict | None:
+        cursor = self.store.conn.execute(
+            """
+            SELECT s.*
+            FROM signals AS s
+            JOIN signal_execution AS x ON x.signal_id = s.signal_id
+            WHERE x.account_id = ?
+              AND s.symbol = ?
+              AND s.position_id = ?
+              AND s.event = 'ENTRY'
+              AND x.status IN (
+                  'FILLED', 'PARTIALLY_FILLED', 'SUBMITTED',
+                  'RECONCILIATION_REQUIRED'
+              )
+            ORDER BY s.id DESC
+            LIMIT 1
+            """,
+            (
+                self.settings.account_id,
+                self.settings.symbol,
+                int(position_id),
+            ),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        names = [column[0] for column in cursor.description]
+        signal = dict(zip(names, row))
+        signal["payload"] = (
+            json.loads(signal["payload"])
+            if isinstance(signal["payload"], str)
+            else signal["payload"]
+        )
+        return signal
+
+    def _preferred_stop_variant_for_position(self, position_id: int) -> str:
+        rows = self.store.conn.execute(
+            """
+            SELECT s.reason, x.result_json
+            FROM signals AS s
+            JOIN signal_execution AS x ON x.signal_id = s.signal_id
+            WHERE x.account_id = ?
+              AND s.symbol = ?
+              AND s.position_id = ?
+              AND s.event = 'EXIT'
+              AND s.action = 'PARTIAL_CLOSE'
+              AND x.status IN ('FILLED', 'RECONCILIATION_REQUIRED')
+            ORDER BY s.id DESC
+            """,
+            (
+                self.settings.account_id,
+                self.settings.symbol,
+                int(position_id),
+            ),
+        ).fetchall()
+        be_id = self._algo_order_id(position_id, "be")
+        sl_id = self._algo_order_id(position_id, "sl")
+        for reason, result_json in rows:
+            if not str(reason).startswith("PARTIAL_TP_"):
+                continue
+            try:
+                result = json.loads(result_json) if result_json else {}
+            except (TypeError, json.JSONDecodeError):
+                result = {}
+            stop_id = result.get("protective_stop_client_algo_id")
+            if stop_id == be_id:
+                return "be"
+            if stop_id == sl_id:
+                return "sl"
+        return "sl"
 
     def _account_consistency_error(self, snapshot: dict) -> str | None:
         if snapshot.get("last_error"):
             return f"Última consulta de Binance falló: {snapshot['last_error']}"
         if snapshot.get("reconciliation_error"):
             return str(snapshot["reconciliation_error"])
+        regular_orders = self._orders_for_symbol(snapshot, "open_orders")
+        if regular_orders:
+            return (
+                "Hay órdenes abiertas no reconciliadas para "
+                f"{self.settings.symbol}"
+            )
+        conditional_orders = self._orders_for_symbol(
+            snapshot, "open_algo_orders"
+        )
         logical = self.store.get_active_execution_positions(
             self.settings.account_id, self.settings.symbol
         )
@@ -481,6 +580,11 @@ class ExecutionWorker:
         if len(logical) > 1:
             return "Ledger registra más de una posición activa para el símbolo"
         if not logical and actual is None:
+            if conditional_orders:
+                return (
+                    "Hay stops condicionales abiertos sin una posición "
+                    "reconciliada"
+                )
             return None
         if not logical:
             return "Posición Binance sin ENTRY ejecutada en el ledger"
@@ -493,6 +597,104 @@ class ExecutionWorker:
         expected_qty = _decimal(expected["open_qty"], "ledger open_qty")
         if actual_side != expected["side"] or abs(actual_qty - expected_qty) > tolerance:
             return "Dirección/cantidad Binance difiere de las ejecuciones confirmadas"
+        allowed_stop_ids = {
+            self._algo_order_id(expected["position_id"], variant)
+            for variant in ("sl", "be")
+        }
+        active_stop_ids = [
+            str(_get(order, "clientAlgoId", "client_algo_id", default=""))
+            for order in conditional_orders
+        ]
+        if any(stop_id not in allowed_stop_ids for stop_id in active_stop_ids):
+            return "Hay stops condicionales ajenos a la posición del ledger"
+        sizing_signal = self._entry_signal_for_position(expected["position_id"])
+        if sizing_signal is None:
+            return "No se encontró la ENTRY para validar el stop protector"
+        sizing = sizing_signal.get("payload", {}).get("sizing")
+        if not isinstance(sizing, dict) or "stop_loss_pct" not in sizing:
+            return "ENTRY sin stop_loss_pct válido para verificar protección"
+        stop_pct = _float(sizing.get("stop_loss_pct"), None)
+        if stop_pct is None or stop_pct < 0:
+            return "ENTRY tiene stop_loss_pct inválido"
+        if stop_pct > 0 and len(active_stop_ids) != 1:
+            return (
+                "La posición activa no tiene exactamente un stop protector "
+                "confirmado"
+            )
+        if len(active_stop_ids) > 1:
+            return "La posición activa tiene más de un stop protector abierto"
+        if active_stop_ids:
+            stop_order = next(
+                order
+                for order in conditional_orders
+                if str(
+                    _get(order, "clientAlgoId", "client_algo_id", default="")
+                ) == active_stop_ids[0]
+            )
+            stop_side = str(_get(stop_order, "side", default="")).upper()
+            expected_stop_side = "SELL" if expected["side"] == "LONG" else "BUY"
+            if stop_side != expected_stop_side:
+                return "El stop protector tiene dirección incompatible"
+            close_position = _get(
+                stop_order, "closePosition", "close_position", default=None
+            )
+            if isinstance(close_position, str):
+                close_position = close_position.strip().lower() == "true"
+            if not bool(close_position):
+                return "El stop protector no está configurado para cerrar la posición"
+            working_type = str(
+                _get(stop_order, "workingType", "working_type", default="MARK_PRICE")
+            ).upper()
+            if working_type != "MARK_PRICE":
+                return "El stop protector no usa MARK_PRICE"
+            stop_type = str(
+                _get(stop_order, "type", "orderType", "order_type", default="STOP_MARKET")
+            ).upper()
+            if stop_type != "STOP_MARKET":
+                return "La orden protectora no es STOP_MARKET"
+            raw_trigger = _get(
+                stop_order,
+                "triggerPrice",
+                "trigger_price",
+                "stopPrice",
+                "stop_price",
+            )
+            if raw_trigger is None:
+                return "No se pudo verificar el precio de activación del stop"
+            try:
+                trigger = _decimal(raw_trigger, "triggerPrice")
+                entry_price = _decimal(actual["entry_price"], "entryPrice")
+                tick_size = self._rules_cache[self.settings.symbol]["tick_size"]
+                if tick_size <= 0 or entry_price <= 0:
+                    return "Precio/tick del stop protector inválido"
+                is_breakeven = (
+                    active_stop_ids[0]
+                    == self._algo_order_id(expected["position_id"], "be")
+                )
+                expected_trigger = (
+                    entry_price
+                    if is_breakeven
+                    else entry_price
+                    * (
+                        Decimal(1) - _decimal(stop_pct, "stop_loss_pct")
+                        if expected["side"] == "LONG"
+                        else Decimal(1) + _decimal(stop_pct, "stop_loss_pct")
+                    )
+                )
+                rounded_steps = (
+                    expected_trigger / tick_size
+                ).to_integral_value(
+                    rounding=(
+                        ROUND_DOWN
+                        if expected["side"] == "LONG"
+                        else ROUND_UP
+                    )
+                )
+                expected_trigger = rounded_steps * tick_size
+                if abs(trigger - expected_trigger) > tick_size / Decimal(2):
+                    return "El precio de activación del stop no coincide con el riesgo"
+            except (InvalidOperation, TypeError, ValueError):
+                return "No se pudo validar el precio de activación del stop"
         return None
 
     def _reconcile_protective_stops(self, snapshot: dict) -> dict:
@@ -513,6 +715,80 @@ class ExecutionWorker:
                     actual_side == logical["side"]
                     and abs(actual_qty - expected_qty) <= tolerance
                 ):
+                    signal = self._entry_signal_for_position(
+                        logical["position_id"]
+                    )
+                    if signal is None:
+                        snapshot["reconciliation_error"] = (
+                            "No se encontró la ENTRY del ledger para verificar "
+                            "su stop protector"
+                        )
+                        return snapshot
+                    sizing = signal["payload"].get("sizing") or {}
+                    stop_pct = _float(sizing.get("stop_loss_pct"), 0.0) or 0.0
+                    if stop_pct <= 0:
+                        continue
+                    open_stops = self._orders_for_symbol(
+                        snapshot, "open_algo_orders"
+                    )
+                    allowed_ids = {
+                        self._algo_order_id(logical["position_id"], variant)
+                        for variant in ("sl", "be")
+                    }
+                    open_ids = [
+                        str(
+                            _get(
+                                order,
+                                "clientAlgoId",
+                                "client_algo_id",
+                                default="",
+                            )
+                        )
+                        for order in open_stops
+                    ]
+                    if any(order_id not in allowed_ids for order_id in open_ids):
+                        snapshot["reconciliation_error"] = (
+                            "Hay stops condicionales ajenos a la posición; "
+                            "no se modificará ninguna orden"
+                        )
+                        return snapshot
+                    if len(open_ids) > 1:
+                        snapshot["reconciliation_error"] = (
+                            "Hay varios stops protectores abiertos para una "
+                            "misma posición"
+                        )
+                        return snapshot
+                    if open_ids:
+                        try:
+                            self._verify_protective_stop(open_ids[0])
+                        except Exception as exc:  # noqa: BLE001
+                            snapshot["reconciliation_error"] = (
+                                "No se pudo confirmar el stop protector activo: "
+                                f"{exc}"
+                            )
+                            return snapshot
+                        continue
+                    try:
+                        variant = self._preferred_stop_variant_for_position(
+                            logical["position_id"]
+                        )
+                        stop_id = self._ensure_protective_stop(
+                            signal,
+                            snapshot,
+                            breakeven=variant == "be",
+                        )
+                        self._verify_protective_stop(stop_id)
+                    except Exception as exc:  # noqa: BLE001 - fail closed
+                        snapshot["reconciliation_error"] = (
+                            "Falta el stop protector y no se pudo restaurar: "
+                            f"{exc}"
+                        )
+                        return snapshot
+                    LOG.warning(
+                        "Stop protector restaurado para posición %s",
+                        logical["position_id"],
+                    )
+                    snapshot = self._account_snapshot(force=True)
                     continue
 
             for variant in ("sl", "be"):
@@ -736,7 +1012,13 @@ class ExecutionWorker:
         response_status = str(
             _get(result, "algoStatus", "status", default="")
         ).upper()
-        if response_status in {"CANCELED", "EXPIRED", "REJECTED", "FINISHED"}:
+        if response_status in {
+            "CANCELED",
+            "EXPIRED",
+            "REJECTED",
+            "FINISHED",
+            "TRIGGERED",
+        }:
             raise RuntimeError(
                 f"Binance rechazó el stop protector ({response_status})"
             )
@@ -771,6 +1053,7 @@ class ExecutionWorker:
                     "EXPIRED",
                     "REJECTED",
                     "FINISHED",
+                    "TRIGGERED",
                 }:
                     return _mapping(existing) or {"status": status}
                 last_error = RuntimeError(
@@ -795,6 +1078,7 @@ class ExecutionWorker:
                         "EXPIRED",
                         "REJECTED",
                         "FINISHED",
+                        "TRIGGERED",
                     }:
                         return listed
 
@@ -817,7 +1101,13 @@ class ExecutionWorker:
             algo_status = str(
                 _get(existing, "algoStatus", "status", default="")
             ).upper()
-            if algo_status not in {"CANCELED", "EXPIRED", "REJECTED", "FINISHED"}:
+            if algo_status not in {
+                "CANCELED",
+                "EXPIRED",
+                "REJECTED",
+                "FINISHED",
+                "TRIGGERED",
+            }:
                 return algo_id
         except BinanceOrderNotFound:
             existing = self._find_open_protective_stop(algo_id)
@@ -850,7 +1140,13 @@ class ExecutionWorker:
             if existing is None:
                 raise
         status = str(_get(existing, "algoStatus", "status", default="")).upper()
-        if status in {"CANCELED", "EXPIRED", "REJECTED", "FINISHED"}:
+        if status in {
+            "CANCELED",
+            "EXPIRED",
+            "REJECTED",
+            "FINISHED",
+            "TRIGGERED",
+        }:
             return
         try:
             self.gateway.cancel_protective_stop(algo_id)
@@ -1531,14 +1827,93 @@ class ExecutionWorker:
                 )
                 self._last_account_poll = 0.0
             elif order_status in {"CANCELED", "EXPIRED", "REJECTED"}:
-                self.store.update_execution(
-                    self.settings.account_id,
-                    signal_row["signal_id"],
-                    "REJECTED",
-                    order_status=order_status,
-                    result=order,
-                    reconciled_at_ms=self.clock_ms(),
+                previous = self.store.get_execution_state(
+                    self.settings.account_id, signal_row["signal_id"]
                 )
+                reported_qty = _float(
+                    _get(order, "executedQty", "executed_qty"), 0.0
+                ) or 0.0
+                executed_qty = max(
+                    reported_qty,
+                    float((previous or {}).get("filled_qty") or 0.0),
+                )
+                if executed_qty <= 0:
+                    self.store.update_execution(
+                        self.settings.account_id,
+                        signal_row["signal_id"],
+                        "REJECTED",
+                        order_status=order_status,
+                        result=order,
+                        reconciled_at_ms=self.clock_ms(),
+                    )
+                    continue
+
+                order_to_record = _mapping(order) or {}
+                order_to_record["executedQty"] = str(executed_qty)
+                requested_qty = _float(
+                    _get(order_to_record, "origQty", "orig_qty"), None
+                )
+                if requested_qty is None or requested_qty <= 0:
+                    previous_order = (previous or {}).get("result", {}).get(
+                        "order", {}
+                    )
+                    requested_qty = _float(
+                        _get(previous_order, "origQty", "orig_qty"), None
+                    )
+                if requested_qty is None or requested_qty <= 0:
+                    requested = _decimal(executed_qty, "executedQty") + (
+                        self._rules_cache[self.settings.symbol]["step_size"]
+                    )
+                else:
+                    requested = _decimal(requested_qty, "origQty")
+
+                self._record_order_result(
+                    signal_row,
+                    client_order_id,
+                    order_to_record,
+                    requested,
+                    is_entry=signal_row["event"] == "ENTRY",
+                )
+                state = self.store.get_execution_state(
+                    self.settings.account_id, signal_row["signal_id"]
+                )
+                if state and state["status"] == "FILLED":
+                    continue
+                if state and state["status"] == "RECONCILIATION_REQUIRED":
+                    blocked = True
+                    continue
+
+                snapshot = self._reconcile_protective_stops(
+                    self._account_snapshot(force=True)
+                )
+                protection_error = snapshot.get("reconciliation_error")
+                self._update_state(
+                    signal_row,
+                    "RECONCILIATION_REQUIRED",
+                    client_order_id=client_order_id,
+                    order_status=order_status,
+                    exchange_order_id=str(
+                        _get(order, "orderId", "order_id", default="") or ""
+                    ),
+                    filled_qty=executed_qty,
+                    avg_price=_float(
+                        _get(order, "avgPrice", "averagePrice", "avg_price")
+                    ),
+                    result={
+                        "order": order,
+                        "terminal_partial_fill": True,
+                    },
+                    error=(
+                        f"Orden {order_status} con fill parcial de "
+                        f"{executed_qty}; no se reenviará automáticamente"
+                        + (
+                            f"; protección: {protection_error}"
+                            if protection_error
+                            else ""
+                        )
+                    ),
+                )
+                blocked = True
             else:
                 stop_id = None
                 if order_status == "PARTIALLY_FILLED" \
@@ -1671,11 +2046,27 @@ class ExecutionWorker:
         except Exception as exc:
             LOG.exception("Error al consumir signal_id=%s", signal["signal_id"])
             try:
-                self._update_state(
-                    signal,
-                    "RECONCILIATION_REQUIRED",
-                    error=str(exc),
+                execution = self.store.get_execution_state(
+                    self.settings.account_id, signal["signal_id"]
                 )
+                if execution is not None \
+                        and execution["status"] in {"CLAIMED", "READY"} \
+                        and not execution["client_order_id"] \
+                        and not execution["order_status"]:
+                    self._update_state(
+                        signal,
+                        "READY",
+                        error=(
+                            "Error antes de preparar/enviar una orden; "
+                            f"se reintentará de forma segura: {exc}"
+                        ),
+                    )
+                else:
+                    self._update_state(
+                        signal,
+                        "RECONCILIATION_REQUIRED",
+                        error=str(exc),
+                    )
             except Exception:
                 LOG.exception("No se pudo guardar el estado de reconciliación")
 

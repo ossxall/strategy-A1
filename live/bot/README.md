@@ -135,7 +135,9 @@ gateway simulado que cubre LONG/SHORT, parciales TP y no-TP, breakeven
 favorable/no favorable/deshabilitado, cierre total, señales programadas que
 esperan su `signal_time`, parcial programado y reversión `EXIT`→`ENTRY` en orden,
 fill/reconciliación de stop, recuperación idempotente, señales vencidas,
-protección de posiciones no rastreadas y rechazo de Hedge Mode. Esa matriz no
+protección de posiciones no rastreadas, bloqueo por órdenes externas abiertas,
+restauración de stops ausentes, reintento seguro antes del envío, conservación
+de fills parciales con orden terminal y rechazo de Hedge Mode. Esa matriz no
 llama a Binance. El ciclo real comprueba además la comunicación con Binance; no
 fuerza allí fallos de red ni el disparo de cada posible error API.
 
@@ -156,6 +158,14 @@ Calcula cantidad con `payload.sizing`, equity/margen reales, precio mark,
 breakeven. Incertidumbres de orden o discrepancias de posición dejan la señal en
 `RECONCILIATION_REQUIRED` y bloquean nuevas ejecuciones. Las entradas vencidas
 se marcan `EXPIRED`; las salidas atrasadas se contrastan con la posición real.
+Las órdenes MARKET abiertas no reconciliadas bloquean nuevas señales. Si una
+posición del ledger no tiene stop activo, el worker intenta restaurar el stop
+original y se bloquea si no puede confirmarlo. Un error antes de persistir la
+intención de orden vuelve la señal a `READY`; una respuesta incierta después de
+preparar/enviar la orden no se reintenta a ciegas.
+Si una orden termina cancelada con fills parciales, el fill queda contabilizado
+y la ejecución pasa a reconciliación obligatoria; no se reenvía el remanente
+automáticamente.
 
 Las señales y los parámetros fijos de riesgo salen del mismo `Backtester` que el
 backtest; el worker aplica el `risk_pct` y el stop al equity real de Binance. Las
