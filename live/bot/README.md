@@ -211,6 +211,37 @@ confirmación de cierre y de cuenta plana; no cierres manualmente esta posición
 Si un paso requiere reconciliación, el script se detiene y muestra el estado
 en vez de abrir otro ciclo.
 
+### Prueba determinista feed → bot → execution
+
+Para validar también el generador real de señales, en vez de insertar la ENTRY
+manualmente, ejecuta:
+
+```sh
+python live/bot/scripts/test_feed_bot_execution.py --confirm
+```
+
+Usa exclusivamente `APP_ENV=dev`, credenciales de Binance testnet,
+`BOT_BINANCE_ENVIRONMENT=testnet`, `BOT_BINANCE_TRADING_ENABLED=true` y
+`BOT_EXECUTOR_TEST_MODE=false`. El runner crea bases aisladas, escribe velas
+cerradas de fixture mediante la persistencia del feed, las lee con `FeedReader`,
+y ejecuta `SignalBot.process_once()` y el `ExecutionWorker` normal contra la API
+real de testnet. La fixture provoca un cruce LONG y luego un EXIT por stop; se
+verifican los fills y que la cuenta y el ledger queden flat. No se inicia el
+WebSocket ni se prueban la conexión de mercado ni el proceso de despliegue.
+La estrategia usa parámetros cortos de fixture para forzar señales sin esperar
+un cruce de producción; se valida la implementación del `SignalBot`, no el
+rendimiento ni los filtros de la estrategia operativa.
+
+El runner exige `--confirm`, una cuenta testnet plana, utiliza BTCUSDT con
+leverage objetivo 1x y configura el sizing de la señal con un objetivo teórico
+de riesgo del 1% del balance disponible, antes de comisiones,
+deslizamiento o gaps (la exposición objetivo es aproximadamente 20%, sujeta a
+filtros y saldo de Binance; el saldo debe cubrir el notional mínimo del símbolo).
+Cada ejecución usa un `account_id` y un ledger únicos en
+`live/data/feed_bot_execution/`; no comparte ni modifica las bases del
+bot/executor normal. Los archivos se conservan para auditoría o reconciliación,
+especialmente si la prueba falla.
+
 ## Visor de backtest live
 
 El bot actualiza el visor mensual al cambiar una vela de estrategia. Escribe
