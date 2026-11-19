@@ -7,6 +7,7 @@ import pytest
 from strategy.config import Config
 from strategy.models import Position
 from strategy.strategy import Backtester
+from live.bot.series import resample
 from live.bot.events import build_events_and_result
 from live.bot.config import ts_ms
 
@@ -474,3 +475,115 @@ def test_live_simulation_cache_replays_only_the_growing_tail():
         history_revision=1,
     )
     assert cache["baseline"] is not baseline
+
+
+def test_live_cache_rebuild_replays_stop_from_incomplete_strategy_bucket():
+    minute_index = pd.date_range(
+        "2026-01-01T00:00:00Z", periods=10, freq="1min"
+    )
+    complete_minutes = pd.DataFrame(
+        {
+            "open": np.full(10, 100.0),
+            "high": np.full(10, 100.0),
+            "low": np.full(10, 100.0),
+            "close": np.full(10, 100.0),
+            "volume": np.ones(10),
+        },
+        index=minute_index,
+    )
+    gap_minute = pd.DataFrame(
+        [
+            {
+                "open": 100.0,
+                "high": 100.0,
+                "low": 89.0,
+                "close": 90.0,
+                "volume": 1.0,
+            }
+        ],
+        index=pd.DatetimeIndex(["2026-01-01T00:10:00Z"]),
+    )
+    next_bucket = pd.DataFrame(
+        {
+            "open": np.full(5, 100.0),
+            "high": np.full(5, 100.0),
+            "low": np.full(5, 100.0),
+            "close": np.full(5, 100.0),
+            "volume": np.ones(5),
+        },
+        index=pd.date_range("2026-01-01T00:15:00Z", periods=5, freq="1min"),
+    )
+    before_bucket_closes = pd.concat([complete_minutes, gap_minute])
+    after_bucket_closes = pd.concat(
+        [before_bucket_closes, next_bucket]
+    )
+    bars_before = resample(
+        before_bucket_closes, "5min", source_interval_minutes=1
+    )
+    bars_after = resample(
+        after_bucket_closes, "5min", source_interval_minutes=1
+    )
+    assert bars_before.index.tolist() == [
+        pd.Timestamp("2026-01-01T00:00:00Z"),
+        pd.Timestamp("2026-01-01T00:05:00Z"),
+    ]
+    assert bars_after.index.tolist() == [
+        pd.Timestamp("2026-01-01T00:00:00Z"),
+        pd.Timestamp("2026-01-01T00:05:00Z"),
+        pd.Timestamp("2026-01-01T00:15:00Z"),
+    ]
+
+    signals_before = make_signals(bars_before)
+    signals_before.iloc[0, signals_before.columns.get_loc("target")] = 1
+    signals_after = make_signals(bars_after)
+    signals_after.iloc[0, signals_after.columns.get_loc("target")] = 1
+    cache = {}
+    first_args = (
+        bars_before,
+        signals_before,
+        None,
+        None,
+        None,
+        make_config(),
+        "BTCUSDT",
+        "1m",
+        before_bucket_closes,
+        cache,
+    )
+
+    first_events, first_trades, _ = build_events_and_result(*first_args)
+    first_baseline = cache["baseline"]
+    assert first_trades.reason.tolist() == ["STOP_LOSS_10.00%"]
+    assert first_trades.exit_time.tolist() == [
+        pd.Timestamp("2026-01-01T00:10:00Z")
+    ]
+
+    second_events, second_trades, _ = build_events_and_result(
+        bars_after,
+        signals_after,
+        None,
+        None,
+        None,
+        make_config(),
+        "BTCUSDT",
+        "1m",
+        after_bucket_closes,
+        cache,
+    )
+
+    assert cache["baseline"] is not first_baseline
+    assert second_trades.reason.tolist() == ["STOP_LOSS_10.00%"]
+    assert second_trades.exit_time.tolist() == [
+        pd.Timestamp("2026-01-01T00:10:00Z")
+    ]
+    first_exit_ids = {
+        event["signal_id"]
+        for event in first_events
+        if event["event"] == "EXIT"
+    }
+    second_exit_ids = {
+        event["signal_id"]
+        for event in second_events
+        if event["event"] == "EXIT"
+    }
+    assert first_exit_ids == second_exit_ids
