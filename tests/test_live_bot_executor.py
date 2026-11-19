@@ -758,6 +758,299 @@ def test_worker_executes_entry_with_risk_sized_quantity_and_protective_stop(tmp_
         store.close()
 
 
+@pytest.mark.parametrize("order_kind", ["market", "conditional"])
+def test_worker_blocks_entry_when_symbol_has_unreconciled_open_orders(
+    tmp_path, order_kind
+):
+    store = SignalStore(tmp_path / "signal.db")
+    store.connect()
+    gateway = FakeFuturesGateway()
+    if order_kind == "market":
+        gateway.open_orders = lambda _symbol: [
+            {"symbol": "BTCUSDT", "orderId": 91, "status": "NEW"}
+        ]
+    else:
+        gateway.stops["external-stop"] = {
+            "symbol": "BTCUSDT",
+            "side": "SELL",
+            "trigger_price": "99",
+            "closePosition": "true",
+            "status": "NEW",
+        }
+    try:
+        store.insert([_entry_event()])
+        worker = ExecutionWorker(
+            _settings(
+                tmp_path,
+                enabled=True,
+                api_key="test-key",
+                api_secret="test-secret",
+            ),
+            store,
+            gateway=gateway,
+            clock_ms=lambda: 1_000_000,
+        )
+
+        worker.run_once()
+
+        assert gateway.orders == []
+        assert store.conn.execute(
+            "SELECT COUNT(*) FROM signal_execution"
+        ).fetchone()[0] == 0
+        health = worker.health.build_payload("127.0.0.1", 8081, 1.0)
+        assert health["executor"]["account_consistency_error"]
+    finally:
+        store.close()
+
+
+def test_worker_restores_missing_stop_for_reconciled_active_position(tmp_path):
+    store = SignalStore(tmp_path / "signal.db")
+    store.connect()
+    gateway = FakeFuturesGateway(position_amt=1.0)
+    try:
+        store.insert([_entry_event()])
+        entry = store.claim_next_signal(
+            "test-account", "seed", now_ms=1_000_000, lease_ms=100
+        )
+        store.update_execution(
+            "test-account",
+            entry["signal_id"],
+            "FILLED",
+            order_status="FILLED",
+            filled_qty=1.0,
+            average_fill_price=100.0,
+        )
+        worker = ExecutionWorker(
+            _settings(
+                tmp_path,
+                enabled=True,
+                api_key="test-key",
+                api_secret="test-secret",
+            ),
+            store,
+            gateway=gateway,
+            clock_ms=lambda: 1_000_000,
+        )
+
+        worker.run_once()
+
+        assert len(gateway.stops) == 1
+        stop = next(iter(gateway.stops.values()))
+        assert stop["side"] == "SELL"
+        assert float(stop["trigger_price"]) == pytest.approx(99.0)
+        health = worker.health.build_payload("127.0.0.1", 8081, 1.0)
+        assert health["executor"]["account_consistency_error"] is None
+    finally:
+        store.close()
+
+
+def test_worker_restores_last_confirmed_breakeven_stop_variant(tmp_path):
+    store = SignalStore(tmp_path / "signal.db")
+    store.connect()
+    gateway = FakeFuturesGateway(position_amt=0.5)
+    worker = ExecutionWorker(
+        _settings(
+            tmp_path,
+            enabled=True,
+            api_key="test-key",
+            api_secret="test-secret",
+        ),
+        store,
+        gateway=gateway,
+        clock_ms=lambda: 1_000_000,
+    )
+    expected_be_id = worker._algo_order_id(1, "be")
+    try:
+        entry_event = _entry_event()
+        store.insert([entry_event])
+        entry = store.claim_next_signal(
+            "test-account", "seed-entry", now_ms=1_000_000, lease_ms=100
+        )
+        store.update_execution(
+            "test-account",
+            entry["signal_id"],
+            "FILLED",
+            order_status="FILLED",
+            filled_qty=1.0,
+            average_fill_price=100.0,
+        )
+        exit_event = {
+            **entry_event,
+            "event": "EXIT",
+            "action": "PARTIAL_CLOSE",
+            "reason": "PARTIAL_TP_1R",
+            "payload": json.dumps(
+                {
+                    "action": "PARTIAL_CLOSE",
+                    "position_id": 1,
+                    "close_pct": 50.0,
+                    "sizing": json.loads(entry_event["payload"])["sizing"],
+                }
+            ),
+        }
+        store.insert([exit_event])
+        exit_signal = store.claim_next_signal(
+            "test-account", "seed-exit", now_ms=1_000_000, lease_ms=100
+        )
+        store.update_execution(
+            "test-account",
+            exit_signal["signal_id"],
+            "FILLED",
+            order_status="FILLED",
+            client_order_id="b1_tp1-filled",
+            filled_qty=0.5,
+            result={"protective_stop_client_algo_id": expected_be_id},
+        )
+
+        worker.run_once()
+
+        assert list(gateway.stops) == [expected_be_id]
+        assert float(gateway.stops[expected_be_id]["trigger_price"]) == pytest.approx(
+            100.0
+        )
+        health = worker.health.build_payload("127.0.0.1", 8081, 1.0)
+        assert health["executor"]["account_consistency_error"] is None
+    finally:
+        store.close()
+
+
+def test_worker_retries_transient_failure_before_order_intent(tmp_path):
+    store = SignalStore(tmp_path / "signal.db")
+    store.connect()
+    gateway = FakeFuturesGateway()
+    original_mark_price = gateway.mark_price
+    calls = 0
+
+    def fail_once(symbol):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("testnet mark endpoint temporarily unavailable")
+        return original_mark_price(symbol)
+
+    gateway.mark_price = fail_once
+    try:
+        store.insert([_entry_event()])
+        worker = ExecutionWorker(
+            _settings(
+                tmp_path,
+                enabled=True,
+                api_key="test-key",
+                api_secret="test-secret",
+            ),
+            store,
+            gateway=gateway,
+            clock_ms=lambda: 1_000_000,
+        )
+
+        worker.run_once()
+        state = store.conn.execute(
+            "SELECT status, client_order_id, order_status FROM signal_execution"
+        ).fetchone()
+        assert state == ("READY", None, None)
+        assert gateway.orders == []
+
+        worker.run_once()
+
+        assert len(gateway.orders) == 1
+        assert store.conn.execute(
+            "SELECT status FROM signal_execution"
+        ).fetchone()[0] == "FILLED"
+    finally:
+        store.close()
+
+
+@pytest.mark.parametrize(
+    ("reported_fill", "previous_fill", "actual_position", "expected_fill"),
+    [(0.4, 0.2, 0.6, 0.4), (0.0, 0.2, 0.8, 0.2)],
+)
+def test_worker_preserves_terminal_partial_fill_and_blocks_for_reconciliation(
+    tmp_path, reported_fill, previous_fill, actual_position, expected_fill
+):
+    store = SignalStore(tmp_path / "signal.db")
+    store.connect()
+    gateway = FakeFuturesGateway(position_amt=actual_position)
+    client_order_id = "b1_partial-canceled"
+    gateway.order_results[client_order_id] = {
+        "status": "CANCELED",
+        "orderId": 92,
+        "origQty": "0.5",
+        "executedQty": str(reported_fill),
+        "avgPrice": "100",
+    }
+    try:
+        entry_event = _entry_event()
+        store.insert([entry_event])
+        entry = store.claim_next_signal(
+            "test-account", "seed", now_ms=1_000_000, lease_ms=100
+        )
+        store.update_execution(
+            "test-account",
+            entry["signal_id"],
+            "FILLED",
+            order_status="FILLED",
+            filled_qty=1.0,
+            average_fill_price=100.0,
+        )
+
+        exit_event = {
+            **entry_event,
+            "event": "EXIT",
+            "action": "PARTIAL_CLOSE",
+            "reason": "PARTIAL_TP_1R",
+            "payload": json.dumps(
+                {
+                    "action": "PARTIAL_CLOSE",
+                    "position_id": 1,
+                    "close_pct": 50.0,
+                    "sizing": json.loads(entry_event["payload"])["sizing"],
+                }
+            ),
+        }
+        store.insert([exit_event])
+        exit_signal = store.claim_next_signal(
+            "test-account", "worker", now_ms=1_000_000, lease_ms=100
+        )
+        store.update_execution(
+            "test-account",
+            exit_signal["signal_id"],
+            "PARTIALLY_FILLED",
+            order_status="PARTIALLY_FILLED",
+            client_order_id=client_order_id,
+            filled_qty=previous_fill,
+            result={"order": {"origQty": "0.5"}},
+        )
+        worker = ExecutionWorker(
+            _settings(
+                tmp_path,
+                enabled=True,
+                api_key="test-key",
+                api_secret="test-secret",
+            ),
+            store,
+            gateway=gateway,
+            clock_ms=lambda: 1_000_000,
+        )
+        worker._initialize()
+
+        blocked = worker._reconcile_inflight()
+
+        assert blocked is True
+        execution = store.get_execution_state(
+            "test-account", exit_signal["signal_id"]
+        )
+        assert execution["status"] == "RECONCILIATION_REQUIRED"
+        assert execution["order_status"] == "CANCELED"
+        assert execution["filled_qty"] == pytest.approx(expected_fill)
+        position = store.get_position_execution_state(
+            "test-account", "BTCUSDT", 1
+        )
+        assert position["open_qty"] == pytest.approx(1.0 - expected_fill)
+        assert len(gateway.stops) == 1
+    finally:
+        store.close()
+
+
 @pytest.mark.parametrize(
     ("side", "expected_trigger"),
     [("LONG", "65019.4"), ("SHORT", "66333")],
@@ -998,6 +1291,112 @@ def test_test_mode_runs_bounded_long_lifecycle_and_alternates_side(tmp_path):
         assert [client_id[2:4] for client_id, _ in gateway.stop_placements] == [
             "sl", "be",
         ]
+    finally:
+        store.close()
+
+
+def test_test_mode_refuses_to_start_with_unresolved_signal(tmp_path):
+    store = SignalStore(tmp_path / "test-signal.db")
+    store.connect()
+    gateway = FakeFuturesGateway()
+    try:
+        store.insert([_entry_event()])
+        worker = ExecutionWorker(
+            _settings(
+                tmp_path,
+                enabled=True,
+                test_mode=True,
+                api_key="test-key",
+                api_secret="test-secret",
+                leverage=10,
+            ),
+            store,
+            gateway=gateway,
+            clock_ms=lambda: 1_000_000,
+        )
+
+        with pytest.raises(RuntimeError, match="señal anterior sin resolver"):
+            ExecutionTestMode(worker).run_sequence()
+
+        assert gateway.orders == []
+    finally:
+        store.close()
+
+
+@pytest.mark.parametrize("order_kind", ["market", "conditional"])
+def test_test_mode_refuses_open_orders_before_starting_cycle(
+    tmp_path, order_kind
+):
+    store = SignalStore(tmp_path / "test-signal.db")
+    store.connect()
+    gateway = FakeFuturesGateway()
+    if order_kind == "market":
+        gateway.open_orders = lambda _symbol: [
+            {"symbol": "BTCUSDT", "orderId": 901, "status": "NEW"}
+        ]
+    else:
+        gateway.stops["external-stop"] = {
+            "symbol": "BTCUSDT",
+            "side": "SELL",
+            "trigger_price": "99",
+            "closePosition": "true",
+            "status": "NEW",
+        }
+    try:
+        worker = ExecutionWorker(
+            _settings(
+                tmp_path,
+                enabled=True,
+                test_mode=True,
+                api_key="test-key",
+                api_secret="test-secret",
+                leverage=10,
+            ),
+            store,
+            gateway=gateway,
+            clock_ms=lambda: 1_000_000,
+        )
+
+        with pytest.raises(RuntimeError):
+            ExecutionTestMode(worker).run_sequence()
+
+        assert gateway.orders == []
+    finally:
+        store.close()
+
+
+def test_test_mode_stops_if_exchange_reports_wrong_protective_trigger(tmp_path):
+    store = SignalStore(tmp_path / "test-signal.db")
+    store.connect()
+    gateway = FakeFuturesGateway()
+    place_stop = gateway.place_protective_stop
+
+    def place_wrong_stop(**kwargs):
+        result = place_stop(**kwargs)
+        gateway.stops[kwargs["client_algo_id"]]["trigger_price"] = "90"
+        return result
+
+    gateway.place_protective_stop = place_wrong_stop
+    try:
+        worker = ExecutionWorker(
+            _settings(
+                tmp_path,
+                enabled=True,
+                test_mode=True,
+                api_key="test-key",
+                api_secret="test-secret",
+                leverage=10,
+            ),
+            store,
+            gateway=gateway,
+            clock_ms=lambda: 1_000_000,
+        )
+
+        with pytest.raises(RuntimeError, match="activación del stop"):
+            ExecutionTestMode(worker).run_sequence()
+
+        assert len(gateway.orders) == 1
+        assert gateway.orders[0]["reduce_only"] is False
     finally:
         store.close()
 

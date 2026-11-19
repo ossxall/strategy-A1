@@ -25,7 +25,9 @@ class _ScenarioFuturesGateway:
         self.position_amt = position_amt
         self.entry_price = 100.0
         self.mark = 100.0
+        self.fail_next_mark_price = False
         self.leverage = 1
+        self.regular_orders: list[dict] = []
         self.orders: list[dict] = []
         self.order_results: dict[str, dict] = {}
         self.orders_by_id: dict[int, dict] = {}
@@ -81,7 +83,7 @@ class _ScenarioFuturesGateway:
         ]
 
     def open_orders(self, symbol):
-        return []
+        return [dict(order) for order in self.regular_orders]
 
     def open_algo_orders(self, symbol):
         return [
@@ -91,6 +93,9 @@ class _ScenarioFuturesGateway:
         ]
 
     def mark_price(self, symbol):
+        if self.fail_next_mark_price:
+            self.fail_next_mark_price = False
+            raise _ScenarioAPIError("temporary mark-price failure")
         return {"symbol": symbol, "markPrice": str(self.mark)}
 
     def symbol_configuration(self, symbol):
@@ -168,6 +173,9 @@ class _ScenarioFuturesGateway:
             "symbol": symbol,
             "side": side,
             "triggerPrice": trigger_price,
+            "closePosition": "true",
+            "workingType": "MARK_PRICE",
+            "type": "STOP_MARKET",
             "clientAlgoId": client_algo_id,
             "algoStatus": "NEW",
         }
@@ -849,6 +857,316 @@ def _self_test_guards(root: Path, now_ms: int) -> int:
     return passed
 
 
+def _self_test_open_orders_and_stop_repair(root: Path, now_ms: int) -> int:
+    passed = 0
+    for kind in ("market", "conditional"):
+        path = root / f"unreconciled-{kind}.db"
+        gateway = _ScenarioFuturesGateway()
+        if kind == "market":
+            gateway.regular_orders.append(
+                {"symbol": "BTCUSDT", "orderId": 900, "status": "NEW"}
+            )
+        else:
+            gateway.stops["external-stop"] = {
+                "symbol": "BTCUSDT",
+                "side": "SELL",
+                "triggerPrice": "99",
+                "clientAlgoId": "external-stop",
+                "algoStatus": "NEW",
+            }
+        store, worker, _clock = _open_worker(
+            path, f"selftest-open-{kind}", gateway, now_ms
+        )
+        try:
+            event = _signal(
+                now_ms,
+                event="ENTRY",
+                action="OPEN",
+                side="LONG",
+                position_id=20 + passed,
+                reason="SELFTEST_OPEN_ORDER_GUARD",
+            )
+            store.insert([event])
+            worker.run_once()
+            _check(
+                not gateway.orders,
+                f"unreconciled {kind} order blocks ENTRY",
+            )
+            _check(
+                store.conn.execute(
+                    "SELECT COUNT(*) FROM signal_execution"
+                ).fetchone()[0] == 0,
+                f"unreconciled {kind} order leaves signal unclaimed",
+            )
+            passed += 1
+        finally:
+            store.close()
+
+    path = root / "restore-protection.db"
+    gateway = _ScenarioFuturesGateway(position_amt=1.0)
+    store, worker, _clock = _open_worker(
+        path, "selftest-restore-protection", gateway, now_ms
+    )
+    try:
+        event = _signal(
+            now_ms,
+            event="ENTRY",
+            action="OPEN",
+            side="LONG",
+            position_id=30,
+            reason="SELFTEST_ENTRY",
+        )
+        normalized = store._normalize_event(event)
+        store.insert([event])
+        claimed = store.claim_next_signal(
+            worker.settings.account_id,
+            worker.worker_id,
+            now_ms,
+            worker.settings.lease_seconds * 1000,
+            activation_cutoff_ms=worker._activation_cutoff_ms,
+        )
+        _check(claimed is not None, "entry with active position is claimed")
+        store.update_execution(
+            worker.settings.account_id,
+            normalized["signal_id"],
+            "FILLED",
+            order_status="FILLED",
+            filled_qty=1.0,
+            average_fill_price=100.0,
+        )
+        worker.run_once()
+        _check(
+            len(gateway.open_algo_orders("BTCUSDT")) == 1,
+            "missing protective stop is restored",
+        )
+        stop_id = next(iter(gateway.stops))
+        gateway.stops[stop_id]["triggerPrice"] = "90"
+        bad_snapshot = worker._account_snapshot(force=True)
+        _check(
+            "activación" in (worker._account_consistency_error(bad_snapshot) or ""),
+            "incorrect protective stop trigger is detected",
+        )
+        passed += 1
+    finally:
+        store.close()
+
+    path = root / "restore-breakeven.db"
+    gateway = _ScenarioFuturesGateway(position_amt=0.5)
+    gateway.mark = 101.0
+    store, worker, _clock = _open_worker(
+        path, "selftest-restore-breakeven", gateway, now_ms
+    )
+    try:
+        entry_event = _signal(
+            now_ms,
+            event="ENTRY",
+            action="OPEN",
+            side="LONG",
+            position_id=31,
+            reason="SELFTEST_ENTRY",
+        )
+        normalized_entry = store._normalize_event(entry_event)
+        store.insert([entry_event])
+        store.claim_next_signal(
+            worker.settings.account_id,
+            worker.worker_id,
+            now_ms,
+            worker.settings.lease_seconds * 1000,
+            activation_cutoff_ms=worker._activation_cutoff_ms,
+        )
+        store.update_execution(
+            worker.settings.account_id,
+            normalized_entry["signal_id"],
+            "FILLED",
+            order_status="FILLED",
+            filled_qty=1.0,
+            average_fill_price=100.0,
+        )
+        partial_event = _signal(
+            now_ms,
+            event="EXIT",
+            action="PARTIAL_CLOSE",
+            side="LONG",
+            position_id=31,
+            reason="PARTIAL_TP_1R",
+            close_pct=50.0,
+        )
+        normalized_partial = store._normalize_event(partial_event)
+        store.insert([partial_event])
+        store.claim_next_signal(
+            worker.settings.account_id,
+            worker.worker_id,
+            now_ms,
+            worker.settings.lease_seconds * 1000,
+            activation_cutoff_ms=worker._activation_cutoff_ms,
+        )
+        store.update_execution(
+            worker.settings.account_id,
+            normalized_partial["signal_id"],
+            "FILLED",
+            order_status="FILLED",
+            filled_qty=0.5,
+            average_fill_price=101.0,
+            result={
+                "protective_stop_client_algo_id":
+                    worker._algo_order_id(31, "be"),
+            },
+        )
+        worker.run_once()
+        active_stops = gateway.open_algo_orders("BTCUSDT")
+        _check(
+            len(active_stops) == 1
+            and active_stops[0]["clientAlgoId"]
+            == worker._algo_order_id(31, "be")
+            and float(active_stops[0]["triggerPrice"]) == 100.0,
+            "missing breakeven stop is restored from the confirmed TP1",
+        )
+        passed += 1
+    finally:
+        store.close()
+    return passed
+
+
+def _self_test_transient_and_terminal_partial_recovery(
+    root: Path, now_ms: int
+) -> int:
+    passed = 0
+    path = root / "transient-before-submit.db"
+    gateway = _ScenarioFuturesGateway()
+    gateway.fail_next_mark_price = True
+    store, worker, _clock = _open_worker(
+        path, "selftest-transient-before-submit", gateway, now_ms
+    )
+    try:
+        event = _signal(
+            now_ms,
+            event="ENTRY",
+            action="OPEN",
+            side="LONG",
+            position_id=40,
+            reason="SELFTEST_RETRYABLE_MARK_FAILURE",
+        )
+        normalized = store._normalize_event(event)
+        store.insert([event])
+        worker.run_once()
+        state = store.get_execution_state(
+            worker.settings.account_id, normalized["signal_id"]
+        )
+        _check(
+            state is not None and state["status"] == "READY",
+            "pre-submit transient error returns signal to READY",
+        )
+        _check(not gateway.orders, "pre-submit failure sends no order")
+        worker.run_once()
+        state = store.get_execution_state(
+            worker.settings.account_id, normalized["signal_id"]
+        )
+        _check(
+            state is not None and state["status"] == "FILLED",
+            "pre-submit transient error is safely retried",
+        )
+        passed += 1
+    finally:
+        store.close()
+
+    path = root / "terminal-partial-fill.db"
+    gateway = _ScenarioFuturesGateway(position_amt=0.6)
+    client_order_id = "b1_selftest_partial_cancel"
+    gateway.order_results[client_order_id] = {
+        "status": "CANCELED",
+        "orderId": 901,
+        "origQty": "0.5",
+        "executedQty": "0.4",
+        "avgPrice": "100",
+    }
+    store, worker, _clock = _open_worker(
+        path, "selftest-terminal-partial", gateway, now_ms
+    )
+    try:
+        entry_event = _signal(
+            now_ms,
+            event="ENTRY",
+            action="OPEN",
+            side="LONG",
+            position_id=41,
+            reason="SELFTEST_ENTRY",
+        )
+        normalized_entry = store._normalize_event(entry_event)
+        store.insert([entry_event])
+        claimed_entry = store.claim_next_signal(
+            worker.settings.account_id,
+            worker.worker_id,
+            now_ms,
+            worker.settings.lease_seconds * 1000,
+            activation_cutoff_ms=worker._activation_cutoff_ms,
+        )
+        _check(claimed_entry is not None, "seed entry is claimed")
+        store.update_execution(
+            worker.settings.account_id,
+            normalized_entry["signal_id"],
+            "FILLED",
+            order_status="FILLED",
+            filled_qty=1.0,
+            average_fill_price=100.0,
+        )
+        exit_event = _signal(
+            now_ms + 1,
+            event="EXIT",
+            action="PARTIAL_CLOSE",
+            side="LONG",
+            position_id=41,
+            reason="PARTIAL_TP_1R",
+            close_pct=50.0,
+            signal_time=now_ms + 1,
+            bar_time=now_ms,
+        )
+        normalized_exit = store._normalize_event(exit_event)
+        store.insert([exit_event])
+        claimed = store.claim_next_signal(
+            worker.settings.account_id,
+            worker.worker_id,
+            now_ms + 1,
+            worker.settings.lease_seconds * 1000,
+            activation_cutoff_ms=worker._activation_cutoff_ms,
+        )
+        _check(claimed is not None, "partial exit is claimed")
+        store.update_execution(
+            worker.settings.account_id,
+            normalized_exit["signal_id"],
+            "PARTIALLY_FILLED",
+            order_status="PARTIALLY_FILLED",
+            client_order_id=client_order_id,
+            filled_qty=0.2,
+            result={"order": {"origQty": "0.5"}},
+        )
+        blocked = worker._reconcile_inflight()
+        state = store.get_execution_state(
+            worker.settings.account_id, normalized_exit["signal_id"]
+        )
+        position = store.get_position_execution_state(
+            worker.settings.account_id, "BTCUSDT", 41
+        )
+        _check(blocked, "terminal partial fill blocks new signals")
+        _check(
+            state is not None
+            and state["status"] == "RECONCILIATION_REQUIRED"
+            and state["filled_qty"] == 0.4,
+            "terminal partial fill is preserved for reconciliation",
+        )
+        _check(
+            abs(position["open_qty"] - 0.6) < 1e-9,
+            "ledger quantity includes terminal partial fill",
+        )
+        _check(
+            len(gateway.open_algo_orders("BTCUSDT")) == 1,
+            "remaining position retains a protective stop",
+        )
+        passed += 1
+    finally:
+        store.close()
+    return passed
+
+
 def run_executor_self_tests(data_dir: Path | None = None) -> int:
     """Run offline happy-path and safety/recovery scenarios before live testing."""
     previous_disable = logging.root.manager.disable
@@ -867,6 +1185,10 @@ def run_executor_self_tests(data_dir: Path | None = None) -> int:
                 + _self_test_stop_reconciliation(root, now_ms)
                 + _self_test_inflight_recovery(root, now_ms)
                 + _self_test_guards(root, now_ms)
+                + _self_test_open_orders_and_stop_repair(root, now_ms)
+                + _self_test_transient_and_terminal_partial_recovery(
+                    root, now_ms
+                )
             )
     finally:
         logging.disable(previous_disable)
