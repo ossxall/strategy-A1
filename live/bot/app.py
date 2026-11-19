@@ -8,6 +8,8 @@ import threading
 import time
 from pathlib import Path
 
+import pandas as pd
+
 from strategy.strategy import Backtester, Config, EMACrossStrategy
 
 from .config import (
@@ -97,6 +99,9 @@ class SignalBot:
         self._last_report_signature = None
         self._live_resolved = False
         self._backtest_complete = False
+        # Baseline de ejecución hasta la última vela cerrada. Se reutiliza
+        # entre polls mientras el conjunto de barras de estrategia no cambie.
+        self._live_simulation_cache: dict = {}
 
     def _resolve_live_since(self) -> None:
         """Fija y persiste la marca desde la que se publican eventos live-only."""
@@ -214,7 +219,12 @@ class SignalBot:
                 self.health.record_strategy_ready(False)
             return 0
 
-        bars = resample(raw, self.cfg.timeframe)
+        feed_delta = pd.Timedelta(self.interval)
+        bars = resample(
+            raw,
+            self.cfg.timeframe,
+            source_interval_minutes=feed_delta.total_seconds() / 60,
+        )
         if len(bars) < self.min_bars:
             logger.info(
                 "Insuficientes velas %s (%d < %d); esperando más datos.",
@@ -228,6 +238,7 @@ class SignalBot:
         if self.health is not None:
             self.health.record_strategy_ready(True)
 
+        intrabar_bars = raw if feed_delta == pd.Timedelta("1min") else None
         signals = self.strategy.generate_signals(bars, raw)
         adx_exit, weak_exit, rsi_div_exit = self.strategy.prepare_exits(raw, bars)
         if self.mode == "backtest":
@@ -242,6 +253,10 @@ class SignalBot:
                 adx_exit,
                 weak_exit,
                 rsi_div_exit,
+                intrabar_bars=intrabar_bars,
+                intrabar_timeframe=(
+                    self.interval if intrabar_bars is not None else None
+                ),
             )
             trades, equity = engine.run()
             from strategy.report import generate_report
@@ -276,6 +291,8 @@ class SignalBot:
             self.cfg,
             self.symbol,
             self.interval,
+            intrabar_bars,
+            self._live_simulation_cache,
         )
         self._publish_snapshot(
             raw,

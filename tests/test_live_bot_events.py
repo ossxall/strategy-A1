@@ -18,7 +18,8 @@ from live.bot import (
     ts_ms,
 )
 from live.bot import app as bot_app
-from live.bot.storage import build_signal_id
+from live.bot.storage import FeedReader, build_signal_id
+from live.feed import database as feed_database
 from strategy.config import Config
 
 
@@ -105,7 +106,18 @@ def test_strategy_parameters_ignore_environment_overrides(monkeypatch):
 def test_backtest_mode_generates_report_without_publishing_signals(
     tmp_path, monkeypatch
 ):
-    bars = make_bars(3)
+    raw_index = pd.date_range("2026-01-01", periods=90, freq="1min", tz="UTC")
+    bars = pd.DataFrame(
+        {
+            "open": 100.0,
+            "high": 100.1,
+            "low": 99.9,
+            "close": 100.0,
+            "volume": 1.0,
+        },
+        index=raw_index,
+    )
+    strategy_bars = bot_app.resample(bars, "30min", 1.0)
 
     class Feed:
         def load_closed(self):
@@ -116,12 +128,15 @@ def test_backtest_mode_generates_report_without_publishing_signals(
             raise AssertionError("el backtest no debe publicar eventos live")
 
     class Engine:
-        def __init__(self, *args):
+        def __init__(self, *args, **kwargs):
             pass
 
         def run(self):
             return pd.DataFrame(), pd.DataFrame(
-                {"timestamp": bars.index, "equity": [100.0, 100.0, 100.0]}
+                {
+                    "timestamp": strategy_bars.index,
+                    "equity": [100.0] * len(strategy_bars),
+                }
             )
 
     calls = []
@@ -144,7 +159,7 @@ def test_backtest_mode_generates_report_without_publishing_signals(
     monkeypatch.setattr(
         bot.strategy,
         "generate_signals",
-        lambda frame, raw: make_signals(frame, [0, 0, 0]),
+        lambda frame, raw: make_signals(frame, [0] * len(frame)),
     )
     monkeypatch.setattr(
         bot.strategy,
@@ -158,6 +173,145 @@ def test_backtest_mode_generates_report_without_publishing_signals(
     assert calls[0][1]["output_dir"] == tmp_path / "backtest_out"
     assert calls[0][0][2] is bot.cfg
     assert calls[0][0][4] == "BTCUSDT 1m feed.db"
+
+
+def test_live_process_passes_closed_one_minute_feed_to_intrabar_replay(monkeypatch):
+    index = pd.date_range("2026-01-01", periods=90, freq="1min", tz="UTC")
+    raw = pd.DataFrame(
+        {
+            "open": np.full(len(index), 100.0),
+            "high": np.full(len(index), 100.1),
+            "low": np.full(len(index), 99.9),
+            "close": np.full(len(index), 100.0),
+            "volume": np.ones(len(index)),
+        },
+        index=index,
+    ).drop(index[-1])
+
+    class Feed:
+        def load_closed(self):
+            return raw
+
+    class Store:
+        def insert(self, events):
+            return len(events)
+
+    bot = SignalBot(
+        make_config(),
+        Feed(),
+        Store(),
+        "BTCUSDT",
+        "1m",
+        min_bars=2,
+    )
+    monkeypatch.setattr(
+        bot.strategy,
+        "generate_signals",
+        lambda frame, source: make_signals(frame, [0] * len(frame)),
+    )
+    monkeypatch.setattr(
+        bot.strategy,
+        "prepare_exits",
+        lambda source, frame: (None, None, None),
+    )
+    calls = []
+    monkeypatch.setattr(
+        bot_app,
+        "build_events_and_result",
+        lambda *args: (
+            calls.append(args)
+            or ([], pd.DataFrame(), pd.DataFrame())
+        ),
+    )
+
+    bot.process_once()
+
+    assert calls[0][-2] is raw
+
+
+def test_live_tail_uses_only_closed_feed_db_minutes(tmp_path, monkeypatch):
+    db_path = tmp_path / "feed.db"
+    monkeypatch.setattr(feed_database, "DB_PATH", str(db_path))
+    feed_database.init_db()
+
+    minute_index = pd.date_range(
+        "2026-01-01", periods=61, freq="1min", tz="UTC"
+    )
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.executemany(
+            """
+            INSERT INTO candles (
+                symbol, interval, open_time, close_time,
+                open, high, low, close, volume, is_closed, source, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    "BTCUSDT",
+                    "1m",
+                    timestamp.value // 1_000_000,
+                    timestamp.value // 1_000_000 + 59_999,
+                    100.0,
+                    100.1,
+                    99.9,
+                    100.0,
+                    1.0,
+                    int(index < 60),
+                    "test",
+                    "test",
+                )
+                for index, timestamp in enumerate(minute_index)
+            ],
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    reader = FeedReader(db_path, "BTCUSDT", "1m")
+
+    class Store:
+        def insert(self, events):
+            return len(events)
+
+    bot = SignalBot(
+        make_config(timeframe="30min"),
+        reader,
+        Store(),
+        "BTCUSDT",
+        "1m",
+        min_bars=2,
+        mode="live",
+    )
+    monkeypatch.setattr(
+        bot.strategy,
+        "generate_signals",
+        lambda bars, raw: make_signals(bars, [0] * len(bars)),
+    )
+    monkeypatch.setattr(
+        bot.strategy,
+        "prepare_exits",
+        lambda raw, bars: (None, None, None),
+    )
+    calls = []
+    monkeypatch.setattr(
+        bot_app,
+        "build_events_and_result",
+        lambda *args: (
+            calls.append(args)
+            or ([], pd.DataFrame(), pd.DataFrame())
+        ),
+    )
+
+    try:
+        bot.process_once()
+    finally:
+        reader.close()
+
+    intrabar_bars = calls[0][8]
+    assert len(intrabar_bars) == 60
+    assert intrabar_bars.index[-1] == minute_index[59]
+    assert minute_index[60] not in intrabar_bars.index
 
 
 def test_bot_rejects_unknown_mode():
@@ -258,6 +412,51 @@ def test_pending_partial_exit_is_published_for_next_open():
     assert payload["reason_code"] == "EMA_WEAKENING"
     assert payload["stop_action"] == "KEEP"
     assert pending_exit["price"] is None
+
+
+def test_ema_slow_touch_exit_is_published_as_close_confirmed_not_intrabar():
+    bars = make_bars(3)
+    bars.loc[bars.index[1], ["low", "close"]] = [74.0, 75.0]
+    bars.loc[bars.index[2], ["low", "close"]] = [79.0, 81.0]
+    signals = make_signals(bars, [-1, 0, 0])
+    signals["ema_slow"] = 80.0
+    config = make_config(
+        partial_tp_enabled=True,
+        partial_tp_r=1.0,
+        partial_tp_pct=10.0,
+        partial_tp2_r=0.0,
+        partial_tp2_pct=0.0,
+        partial_tp3_r=2.5,
+        partial_tp3_pct=10.0,
+        partial_tp4_r=0.0,
+        partial_tp4_pct=0.0,
+        partial_tp5_r=0.0,
+        partial_tp5_pct=0.0,
+        partial_tp6_r=0.0,
+        partial_tp6_pct=0.0,
+        partial_tp7_r=0.0,
+        partial_tp7_pct=0.0,
+        tp3_ema_slow_penetration_pct=0.0,
+    )
+
+    events = build_events(
+        bars, signals, None, None, None, config, "BTCUSDT", "1m"
+    )
+    slow_exit = next(
+        event for event in events
+        if event["event"] == "EXIT"
+        and event["reason"] == "EMA_SLOW_TOUCH_SHORT_AFTER_TP3"
+    )
+    payload = json.loads(slow_exit["payload"])
+
+    assert slow_exit["bar_time"] == ts_ms(bars.index[2])
+    assert slow_exit["signal_time"] == ts_ms(
+        bars.index[2] + pd.Timedelta("30min")
+    )
+    assert slow_exit["price"] == bars.close.iloc[2]
+    assert "fill_price_is_simulated" not in payload
+    assert "simulated_exit_price" not in payload
+    assert "pnl_is_simulated" not in payload
 
 
 @pytest.mark.parametrize(
@@ -1009,7 +1208,18 @@ def test_events_to_trades_orders_same_open_by_source_bar_then_exit_priority():
 def test_live_only_includes_event_actionable_at_start_even_if_signal_bar_started_before(
     monkeypatch,
 ):
-    bars = make_bars(2)
+    raw_index = pd.date_range("2026-01-01", periods=60, freq="1min", tz="UTC")
+    raw = pd.DataFrame(
+        {
+            "open": 100.0,
+            "high": 100.1,
+            "low": 99.9,
+            "close": 100.0,
+            "volume": 1.0,
+        },
+        index=raw_index,
+    )
+    bars = bot_app.resample(raw, "30min", 1.0)
     boundary = ts_ms(bars.index[-1] + pd.Timedelta("30min"))
     event = {
         "symbol": "BTCUSDT",
@@ -1032,7 +1242,7 @@ def test_live_only_includes_event_actionable_at_start_even_if_signal_bar_started
 
     class Feed:
         def load_closed(self):
-            return bars
+            return raw
 
     class Store:
         inserted = None
