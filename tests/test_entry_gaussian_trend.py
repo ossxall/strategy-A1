@@ -268,7 +268,7 @@ def test_gaussian_filter_config_defaults_and_validation():
     assert config.entry_gaussian_atr_length == 14
     assert config.entry_gaussian_adaptive_width
     assert config.gaussian_trend_reversal_exit_enabled
-    assert config.gaussian_trend_reversal_exit_pct == 25.0
+    assert config.gaussian_trend_reversal_exit_pct == 10.0
 
     with pytest.raises(ValueError, match="Gaussian"):
         Config(entry_gaussian_source="volume")
@@ -291,4 +291,4 @@ def test_live_config_ignores_gaussian_environment_overrides(monkeypatch):
     assert config.entry_gaussian_source == "close"
     assert config.entry_gaussian_length == 14
     assert config.gaussian_trend_reversal_exit_enabled
-    assert config.gaussian_trend_reversal_exit_pct == 25.0
+    assert config.gaussian_trend_reversal_exit_pct == 10.0
