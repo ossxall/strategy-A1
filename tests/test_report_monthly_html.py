@@ -52,6 +52,8 @@ def test_monthly_backtest_html_renders_isolated_panels_per_page(tmp_path, monkey
     assert "padding:8px; border-radius:.55rem" in document
     assert "border-radius:.75rem" in document
     assert "function splitFigure(figure)" in document
+    assert 'trace.name === "reversal ADX"' in document
+    assert 'symbol:"circle"' in document
     assert "Plotly.newPlot(plot, panel.data, panel.layout, config)" in document
     assert "plotly-4.1.1.min.js" in document
     assert "plotly-latest.min.js" not in document

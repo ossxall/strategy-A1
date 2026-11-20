@@ -84,6 +84,12 @@ class Config:
     entry_adx_len: int = 14
     entry_adx_min: float = 20.0
     #
+    # Block entries if ADX made a local peak above entry_adx_min within the
+    # previous N bars of the strategy timeframe, on any entry ADX timeframe.
+    # Set to 0 to disable this additional filter.
+    #
+    entry_adx_reversal_lookback: int = 1
+    #
     # All listed timeframes must clear the threshold to allow an entry.
     #
     entry_adx_timeframe: str | list[str] | tuple[str, ...] = ("30min")
@@ -360,6 +366,8 @@ class Config:
             raise ValueError("confirm_bars cannot be negative.")
         if self.entry_adx_enabled and (self.entry_adx_len <= 0 or self.entry_adx_min < 0):
             raise ValueError("Invalid entry ADX configuration.")
+        if self.entry_adx_enabled and self.entry_adx_reversal_lookback < 0:
+            raise ValueError("entry_adx_reversal_lookback must be >= 0.")
         if self.entry_atr_enabled and (
             self.entry_atr_len <= 0 or self.entry_atr_lookback <= 0
             or self.entry_atr_min_ratio < 0

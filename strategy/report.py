@@ -1171,7 +1171,7 @@ def build_backtest_figure(
         flags = adx_tf["reversal"]
         if flags.any():
             fig.add_trace(_marker_trace(closed_x[flags], adx_values[flags], "reversal ADX",
-                                        "x", ADX_EXIT_COLOR, 9), row=rr, col=1, secondary_y=True)
+                                        "circle", ADX_EXIT_COLOR, 9), row=rr, col=1, secondary_y=True)
         fig.update_yaxes(title_text="precio", row=rr, col=1, secondary_y=False)
         fig.update_yaxes(title_text="ADX", showgrid=False, row=rr, col=1, secondary_y=True)
 
