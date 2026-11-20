@@ -203,6 +203,9 @@
         const traces = figure.data.filter(trace => (trace.xaxis || "x") === xRef);
         const data = traces.map(trace => ({
           ...trace,
+          ...(trace.name === "reversal ADX"
+            ? {marker:{...trace.marker, symbol:"circle"}}
+            : {}),
           xaxis: "x",
           yaxis: yMap.get(trace.yaxis || "y") || "y"
         }));
@@ -255,7 +258,7 @@
         layout.annotations = remapItems(sourceLayout.annotations, xMap, yMap, xRef, yRef);
         const title = yAxes.map(([, axis]) => axis.title?.text).filter(Boolean).join(" · ");
         return {title, data, layout};
-      }).filter(panel => panel.data.length);
+      }).filter(panel => panel.data.length && panel.title !== "precio · ADX");
     }
 
     async function showPage(index, historyMode = "push") {

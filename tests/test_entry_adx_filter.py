@@ -54,7 +54,7 @@ def configure_crosses(monkeypatch, adx_values):
     return bars
 
 
-def make_config(adx_min=20.0, adx_timeframe="30min"):
+def make_config(adx_min=20.0, adx_timeframe="30min", reversal_lookback=0):
     return Config(
         timeframe="30min",
         macd_timeframe=None,
@@ -63,6 +63,7 @@ def make_config(adx_min=20.0, adx_timeframe="30min"):
         entry_adx_len=14,
         entry_adx_min=adx_min,
         entry_adx_timeframe=adx_timeframe,
+        entry_adx_reversal_lookback=reversal_lookback,
         entry_atr_enabled=False,
         entry_gaussian_trend_enabled=False,
         entry_price_ema_filter_enabled=False,
@@ -88,6 +89,21 @@ def test_adx_filter_allows_long_and_short_crosses_above_the_configured_threshold
     assert signals.adx_entry.tolist() == [40.0, 25.01, 40.0, 25.01]
 
 
+def test_recent_adx_reversal_blocks_entries_for_configured_lookback(monkeypatch):
+    bars = configure_crosses(monkeypatch, np.array([25.0, 40.0, 25.0, 25.01]))
+
+    signals = EMACrossStrategy(
+        make_config(adx_min=20.0, reversal_lookback=2)
+    ).generate_signals(bars)
+
+    # El pico ADX de la vela 1 confirma su reversión en la vela 2 y bloquea
+    # también la señal bajista de la vela 3, dentro de las últimas 2 velas.
+    assert signals.target.tolist() == [0, 1, 0, 0]
+    assert signals.entry_adx_reversal_30min.tolist() == [False, False, True, False]
+    assert signals.entry_adx_reversal_blocked.tolist() == [False, False, True, True]
+    assert "reversión ADX reciente" in signals.entry_rejection_reasons_short.iloc[3]
+
+
 def test_entry_adx_defaults_to_enabled_period_14_and_threshold_20():
     cfg = Config()
 
@@ -95,7 +111,15 @@ def test_entry_adx_defaults_to_enabled_period_14_and_threshold_20():
     assert cfg.entry_adx_enabled
     assert cfg.entry_adx_len == 14
     assert cfg.entry_adx_min == 20.0
+    assert cfg.entry_adx_reversal_lookback == 1
     assert cfg.entry_adx_timeframes == ("30min",)
+
+
+def test_entry_adx_reversal_lookback_cannot_be_negative():
+    import pytest
+
+    with pytest.raises(ValueError, match="entry_adx_reversal_lookback"):
+        Config(entry_adx_reversal_lookback=-1)
 
 
 def test_multiple_entry_adx_timeframes_all_must_be_above_the_threshold(monkeypatch):

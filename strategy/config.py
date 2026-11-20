@@ -84,6 +84,12 @@ class Config:
     entry_adx_len: int = 14
     entry_adx_min: float = 20.0
     #
+    # Block entries if ADX made a local peak above entry_adx_min within the
+    # previous N bars of the strategy timeframe, on any entry ADX timeframe.
+    # Set to 0 to disable this additional filter.
+    #
+    entry_adx_reversal_lookback: int = 1
+    #
     # All listed timeframes must clear the threshold to allow an entry.
     #
     entry_adx_timeframe: str | list[str] | tuple[str, ...] = ("30min")
@@ -123,7 +129,7 @@ class Config:
     # against them. The transition is evaluated once on the closed signal bar.
     #
     gaussian_trend_reversal_exit_enabled: bool = True
-    gaussian_trend_reversal_exit_pct: float = 25.0
+    gaussian_trend_reversal_exit_pct: float = 10.0
     #
     # Block LONG entries after a bullish RSI divergence and SHORT entries after a
     # bearish one, within the last N bars of the strategy timeframe.
@@ -208,7 +214,7 @@ class Config:
     # Third partial take-profit, at a larger distance than TP2.
     #
     partial_tp3_r: float = 2.0
-    partial_tp3_pct: float = 5.0
+    partial_tp3_pct: float = 10.0
     #
     # Fourth partial take-profit, at a larger distance than TP3.
     #
@@ -360,6 +366,8 @@ class Config:
             raise ValueError("confirm_bars cannot be negative.")
         if self.entry_adx_enabled and (self.entry_adx_len <= 0 or self.entry_adx_min < 0):
             raise ValueError("Invalid entry ADX configuration.")
+        if self.entry_adx_enabled and self.entry_adx_reversal_lookback < 0:
+            raise ValueError("entry_adx_reversal_lookback must be >= 0.")
         if self.entry_atr_enabled and (
             self.entry_atr_len <= 0 or self.entry_atr_lookback <= 0
             or self.entry_atr_min_ratio < 0
