@@ -431,8 +431,8 @@ def build_backtest_figure(
     * velas del timeframe de la estrategia y las EMAs rápida/lenta;
     * cruces aceptados/rechazados con motivos, sesgo de tendencia y bloqueos
       detectados durante la ejecución;
-    * señal objetivo frente a posición real, trades con detalle de cantidad,
-      costes, riesgo, múltiplos R y escalado de tamaño;
+    * trades con detalle de cantidad, costes, riesgo, múltiplos R y escalado
+      de tamaño;
     * stop efectivo y activación del breakeven, take-profits y salidas por toque
       a la EMA slow (motivo ``EMA_SLOW_TOUCH_*``);
     * paneles de indicadores, equity, drawdown y PnL por lado/motivo de salida;
@@ -582,14 +582,19 @@ def build_backtest_figure(
     adx_panels = [f"adx_tf_{i}" for i in range(len(adx_tfs))]
     weak_panels = [f"weak_tf_{i}" for i in range(len(weak_tfs))]
 
-    entry_adx_series: list[tuple[str | None, str]] = []
+    entry_adx_series: list[tuple[str | None, str, str | None]] = []
     if cfg.entry_adx_enabled and signals is not None:
         for idx, timeframe in enumerate(cfg.entry_adx_timeframes):
             column = f"adx_entry_{timeframe}"
             if column not in signals and idx == 0 and "adx_entry" in signals:
                 column = "adx_entry"
             if column in signals and np.isfinite(signals[column].to_numpy(float)).any():
-                entry_adx_series.append((timeframe, column))
+                reversal_column = f"entry_adx_reversal_{timeframe}"
+                entry_adx_series.append((
+                    timeframe,
+                    column,
+                    reversal_column if reversal_column in signals else None,
+                ))
     adx_entry_panels = [f"adx_entry_tf_{i}" for i in range(len(entry_adx_series))]
 
     summary_rows: list[tuple[str, float, int, int]] = []
@@ -626,9 +631,6 @@ def build_backtest_figure(
     )
     if atr_filter_enabled:
         panels.append("atr")
-    if ((signals is not None and "target" in signals)
-            or (equity is not None and not equity.empty and "position_side" in equity)):
-        panels.append("target")
     panels.extend(adx_panels)
     panels.extend(weak_panels)
     if equity is not None and not equity.empty:
@@ -638,7 +640,7 @@ def build_backtest_figure(
     if summary_rows:
         panels.append("summary")
 
-    weights = {"price": 1.0, "macd": 0.25, "atr": 0.25, "target": 0.2,
+    weights = {"price": 1.0, "macd": 0.25, "atr": 0.25,
                "equity": 0.4, "drawdown": 0.25, "summary": 0.45}
     for name in adx_entry_panels:
         weights[name] = 0.25
@@ -987,24 +989,46 @@ def build_backtest_figure(
 
     # -- Paneles ADX de entrada (uno por timeframe) -------------------------
     adx_colors = (NEUTRAL_COLOR, "#ffca28", "#ab47bc", "#26a69a")
-    for panel_idx, (timeframe, column) in enumerate(entry_adx_series):
+    for panel_idx, (timeframe, column, reversal_column) in enumerate(entry_adx_series):
         panel_name = f"adx_entry_tf_{panel_idx}"
         if panel_name not in row:
             continue
         rr = row[panel_name]
         higher_tf = timeframe is not None and pd.Timedelta(timeframe) > pd.Timedelta(cfg.timeframe)
         label = "ADX entrada" if len(entry_adx_series) == 1 else f"ADX entrada {timeframe}"
+        adx_values = signals[column].to_numpy(float)
+        color = adx_colors[panel_idx % len(adx_colors)]
         fig.add_trace(
             _line_trace(
                 sig_x,
-                signals[column].to_numpy(float),
+                adx_values,
                 label,
-                adx_colors[panel_idx % len(adx_colors)],
+                color,
                 shape="hv" if higher_tf else None,
             ),
             row=rr,
             col=1,
         )
+        if reversal_column is not None:
+            reversal_flags = _flag(signals[reversal_column])
+            if reversal_flags.any():
+                reversal_label = (
+                    f"reversión ADX entrada {timeframe}"
+                    if timeframe is not None
+                    else "reversión ADX entrada"
+                )
+                fig.add_trace(
+                    _marker_trace(
+                        sig_x[reversal_flags],
+                        adx_values[reversal_flags],
+                        reversal_label,
+                        "circle",
+                        color,
+                        9,
+                    ),
+                    row=rr,
+                    col=1,
+                )
         if cfg.entry_adx_enabled and cfg.entry_adx_min:
             fig.add_hline(y=cfg.entry_adx_min, line=dict(color="#90a4ae", width=0.9, dash="dash"),
                           row=rr, col=1)
@@ -1113,33 +1137,6 @@ def build_backtest_figure(
         fig.update_yaxes(title_text="ATR", row=rr, col=1, secondary_y=False)
         fig.update_yaxes(title_text="ATR / media previa", range=[0, ratio_top],
                          row=rr, col=1, secondary_y=True)
-
-    # -- Panel target ------------------------------------------------------
-    if "target" in row:
-        rr = row["target"]
-        if signals is not None and "target" in signals:
-            fig.add_trace(_line_trace(
-                sig_x, signals["target"].to_numpy(float), "señal objetivo (filtrada)",
-                FAST_COLOR, width=1.3, shape="hv",
-            ), row=rr, col=1)
-        if (cfg.streak_trend_only and signals is not None and "trend_bias" in signals
-                and np.isfinite(signals["trend_bias"].to_numpy(float)).any()):
-            fig.add_trace(_line_trace(
-                sig_x, signals["trend_bias"].to_numpy(float),
-                "sesgo tendencia (tras pérdida)", "#ab47bc",
-                width=1.1, dash="dot", shape="hv",
-            ), row=rr, col=1)
-        if (equity is not None and not equity.empty and "position_side" in equity):
-            actual_position = equity["position_side"].map(
-                {"SHORT": -1, "FLAT": 0, "LONG": 1}
-            ).fillna(0).to_numpy(float)
-            fig.add_trace(_line_trace(
-                _x_ms(equity["timestamp"]), actual_position, "posición real",
-                "#29b6f6", width=1.6, shape="hv",
-            ), row=rr, col=1)
-        fig.update_yaxes(title_text="señal / posición", tickvals=[-1, 0, 1],
-                         ticktext=["short", "flat", "long"],
-                         row=rr, col=1)
 
     # -- Timeframes de ADX (uno por timeframe configurado) ----------------
     for idx, adx_tf in enumerate(adx_tfs):
@@ -1253,7 +1250,7 @@ def build_backtest_figure(
                          categoryorder="array", categoryarray=labels)
 
     # -- Layout ------------------------------------------------------------
-    for name in (["macd", "atr", "mfi", "er", "target", "equity", "drawdown"]
+    for name in (["macd", "atr", "mfi", "er", "equity", "drawdown"]
                  + adx_entry_panels):
         if name in row:
             fig.update_xaxes(matches="x", row=row[name], col=1)

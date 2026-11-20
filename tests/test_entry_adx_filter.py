@@ -99,6 +99,7 @@ def test_recent_adx_reversal_blocks_entries_for_configured_lookback(monkeypatch)
     # El pico ADX de la vela 1 confirma su reversión en la vela 2 y bloquea
     # también la señal bajista de la vela 3, dentro de las últimas 2 velas.
     assert signals.target.tolist() == [0, 1, 0, 0]
+    assert signals.entry_adx_reversal_30min.tolist() == [False, False, True, False]
     assert signals.entry_adx_reversal_blocked.tolist() == [False, False, True, True]
     assert "reversión ADX reciente" in signals.entry_rejection_reasons_short.iloc[3]
 

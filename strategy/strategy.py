@@ -265,6 +265,7 @@ class EMACrossStrategy:
             unconfirmed_up, unconfirmed_down, "confirmación EMA no completada"
         )
         entry_adx_by_timeframe: dict[str, np.ndarray] = {}
+        entry_adx_reversals_by_timeframe: dict[str, np.ndarray] = {}
         entry_adx_reversal_by_timeframe: dict[str, np.ndarray] = {}
         if cfg.entry_adx_enabled:
             for timeframe in cfg.entry_adx_timeframes:
@@ -295,6 +296,7 @@ class EMACrossStrategy:
                         cfg.timeframe,
                     )
                 entry_adx_by_timeframe[timeframe] = values
+                entry_adx_reversals_by_timeframe[timeframe] = reversals
                 entry_adx_reversal_by_timeframe[timeframe] = (
                     spread_flags(reversals, cfg.entry_adx_reversal_lookback)
                     if cfg.entry_adx_reversal_lookback > 0
@@ -458,6 +460,9 @@ class EMACrossStrategy:
         }
         for timeframe, values in entry_adx_by_timeframe.items():
             output[f"adx_entry_{timeframe}"] = values
+            output[f"entry_adx_reversal_{timeframe}"] = (
+                entry_adx_reversals_by_timeframe[timeframe]
+            )
         return pd.DataFrame(output, index=bars.index)
 
     def prepare_exits(self, raw: pd.DataFrame, bars: pd.DataFrame) -> tuple[
