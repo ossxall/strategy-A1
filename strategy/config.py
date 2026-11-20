@@ -129,7 +129,7 @@ class Config:
     # against them. The transition is evaluated once on the closed signal bar.
     #
     gaussian_trend_reversal_exit_enabled: bool = True
-    gaussian_trend_reversal_exit_pct: float = 25.0
+    gaussian_trend_reversal_exit_pct: float = 10.0
     #
     # Block LONG entries after a bullish RSI divergence and SHORT entries after a
     # bearish one, within the last N bars of the strategy timeframe.
@@ -214,7 +214,7 @@ class Config:
     # Third partial take-profit, at a larger distance than TP2.
     #
     partial_tp3_r: float = 2.0
-    partial_tp3_pct: float = 5.0
+    partial_tp3_pct: float = 10.0
     #
     # Fourth partial take-profit, at a larger distance than TP3.
     #
