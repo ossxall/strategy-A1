@@ -258,7 +258,7 @@
         layout.annotations = remapItems(sourceLayout.annotations, xMap, yMap, xRef, yRef);
         const title = yAxes.map(([, axis]) => axis.title?.text).filter(Boolean).join(" · ");
         return {title, data, layout};
-      }).filter(panel => panel.data.length);
+      }).filter(panel => panel.data.length && panel.title !== "precio · ADX");
     }
 
     async function showPage(index, historyMode = "push") {
