@@ -90,15 +90,11 @@ def test_entry_and_exit_divergence_use_independent_timeframes(monkeypatch):
     assert entry_flags.shape == exit_flags.shape == (len(bars),)
 
 
-def test_higher_rsi_divergence_timeframe_resamples_strategy_bars_when_raw_is_coarser(
-    monkeypatch,
-):
+def test_rsi_divergence_rejects_raw_data_coarser_than_one_minute(monkeypatch):
     raw = make_raw(periods=8, freq="6h")
     bars = make_raw(periods=48, freq="30min")
-    observed_lengths = []
 
     def fake_divergences(high, low, rsi_values, pivot, lookback):
-        observed_lengths.append(len(high))
         zeros = np.zeros(len(high), dtype=bool)
         return RSIDivergenceSignals(zeros, zeros)
 
@@ -117,13 +113,10 @@ def test_higher_rsi_divergence_timeframe_resamples_strategy_bars_when_raw_is_coa
         streak_trend_only=False,
     )
 
-    flags = indicators.build_rsi_divergence_exit(raw, bars, config)
+    with pytest.raises(ValueError, match="resolución de 1m"):
+        indicators.build_rsi_divergence_exit(raw, bars, config)
 
-    assert observed_lengths == [6]
-    assert flags.shape == (len(bars),)
-
-
-def test_lower_rsi_divergence_timeframe_rejects_insufficient_raw_resolution():
+def test_rsi_divergence_rejects_non_minute_raw_data():
     raw = make_raw(periods=30, freq="1h")
     bars = resample_ohlcv(make_raw(periods=60), "30min")
     config = Config(
@@ -138,7 +131,7 @@ def test_lower_rsi_divergence_timeframe_rejects_insufficient_raw_resolution():
         streak_trend_only=False,
     )
 
-    with pytest.raises(ValueError, match="resolución suficiente"):
+    with pytest.raises(ValueError, match="resolución de 1m"):
         indicators.build_rsi_divergence_exit(raw, bars, config)
 
 

@@ -100,6 +100,7 @@ from strategy.utils import (
     load_parquet,
     resample_ohlcv,
     source_minutes,
+    validate_raw_1m,
     to_timeframe
 )
 from strategy.report import generate_report
@@ -264,6 +265,8 @@ class EMACrossStrategy:
     def generate_signals(
         self, bars: pd.DataFrame, raw: Optional[pd.DataFrame] = None
     ) -> pd.DataFrame:
+        if raw is not None:
+            validate_raw_1m(raw)
         cfg = self.cfg
         fast = ema(bars.close, cfg.ema_fast).to_numpy(float)
         slow = ema(bars.close, cfg.ema_slow).to_numpy(float)
@@ -568,6 +571,7 @@ class EMACrossStrategy:
     def prepare_exits(self, raw: pd.DataFrame, bars: pd.DataFrame) -> tuple[
             Optional[np.ndarray], Optional[np.ndarray], Optional[RSIDivergenceSignals]]:
         """Señales existentes: (ADX reversal, EMA weakening, divergencia RSI)."""
+        validate_raw_1m(raw)
         return (
             build_adx_exit(raw, bars, self.cfg),
             build_weakening_exit(raw, bars, self.cfg),
@@ -595,6 +599,8 @@ class Backtester:
                  process_intrabar_tail: bool = False,
                  intrabar_timeframe: Optional[str] = None,
                  raw: Optional[pd.DataFrame] = None):
+        if raw is not None:
+            validate_raw_1m(raw)
         self.bars, self.cfg = bars, config
         self.signals = (
             signals

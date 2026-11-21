@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 from strategy.config import Config
-from strategy.utils import resample_ohlcv, source_minutes
+from strategy.utils import resample_ohlcv, source_minutes, validate_raw_1m
 
 
 def ema(values: pd.Series, period: int) -> pd.Series:
@@ -507,6 +507,8 @@ def build_adx_exit(
     la unión de sus reversiones, mantenida activa ``cfg.adx_exit_range`` velas
     del timeframe de la estrategia tras cada reversión.
     """
+    if raw is not None:
+        validate_raw_1m(raw)
     if not cfg.adx_exit_enabled or bars.empty:
         return None
     combined = np.zeros(len(bars), dtype=bool)
@@ -556,6 +558,8 @@ def build_weakening_exit(
     suficientes o timeframes incompatibles); si al menos uno es válido, devuelve
     la unión de sus señales de debilitamiento.
     """
+    if raw is not None:
+        validate_raw_1m(raw)
     if not cfg.ema_weakening_exit_enabled or bars.empty:
         return None
     combined = np.zeros(len(bars), dtype=bool)
@@ -764,6 +768,8 @@ def _build_rsi_divergence_signals(
     timeframes: tuple[str, ...],
 ) -> RSIDivergenceSignals | None:
     """Combina divergencias RSI con OR y las alinea a las velas de estrategia."""
+    if raw is not None:
+        validate_raw_1m(raw)
     if bars.empty:
         return None
     bull = np.zeros(len(bars), dtype=bool)

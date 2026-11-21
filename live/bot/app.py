@@ -11,6 +11,7 @@ from pathlib import Path
 import pandas as pd
 
 from strategy.strategy import Backtester, Config, EMACrossStrategy
+from strategy.utils import validate_raw_1m
 
 from .config import (
     DEFAULT_BACKTEST_REPORT_DIR,
@@ -83,6 +84,11 @@ class SignalBot:
         normalized_mode = str(mode).strip().lower()
         if normalized_mode not in {"live", "backtest"}:
             raise ValueError("BOT_MODE debe ser 'live' o 'backtest'")
+        if pd.Timedelta(interval) != pd.Timedelta("1min"):
+            raise ValueError(
+                "El feed raw de strategy debe tener intervalo de 1m; "
+                f"se recibió {interval!r}."
+            )
         self.cfg = cfg
         self.feed = feed
         self.store = store
@@ -219,6 +225,7 @@ class SignalBot:
                 self.health.record_strategy_ready(False)
             return 0
 
+        validate_raw_1m(raw, source="feed raw")
         feed_delta = pd.Timedelta(self.interval)
         bars = resample(
             raw,

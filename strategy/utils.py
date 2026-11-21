@@ -60,6 +60,20 @@ def source_minutes(data: pd.DataFrame) -> float:
     return value if np.isfinite(value) and value > 0 else 1.0
 
 
+def validate_raw_1m(data: pd.DataFrame, source: str = "raw dataset") -> None:
+    """Reject raw strategy inputs whose inferred candle interval is not 1m."""
+    if data.empty:
+        return
+    if not isinstance(data.index, pd.DatetimeIndex):
+        raise ValueError(f"{source} debe tener un DatetimeIndex de velas de 1m.")
+    interval = pd.Timedelta(minutes=source_minutes(data))
+    if interval != pd.Timedelta("1min"):
+        raise ValueError(
+            f"{source} debe tener resolución de 1m; "
+            f"resolución detectada: {interval}."
+        )
+
+
 def resample_ohlcv(data: pd.DataFrame, rule: str, source_interval_minutes: Optional[float] = None) -> pd.DataFrame:
     """Resamplea OHLCV y descarta buckets con menos barras que las esperadas."""
     if data.empty:
@@ -98,7 +112,12 @@ def resample_ohlcv(data: pd.DataFrame, rule: str, source_interval_minutes: Optio
 
 
 def to_timeframe(data: pd.DataFrame, cfg: Config) -> pd.DataFrame:
-    if data.empty or pd.Timedelta(minutes=source_minutes(data)) >= pd.Timedelta(cfg.timeframe):
+    validate_raw_1m(data)
+    if data.empty:
+        return data.copy()
+    if pd.Timedelta(cfg.timeframe) < pd.Timedelta("1min"):
+        raise ValueError("El timeframe de estrategia no puede ser menor que 1m.")
+    if pd.Timedelta(cfg.timeframe) == pd.Timedelta("1min"):
         return data.copy()
     out = resample_ohlcv(data, cfg.timeframe)
     print(f"[RESAMPLE] {source_minutes(data):g}m -> {cfg.timeframe}: {len(out):,} velas", flush=True)
