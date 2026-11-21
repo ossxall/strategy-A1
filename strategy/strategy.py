@@ -986,6 +986,16 @@ class Backtester:
             partial8_done=False,
             partial9_done=False,
             partial10_done=False,
+            partial11_done=False,
+            partial12_done=False,
+            partial13_done=False,
+            partial14_done=False,
+            partial15_done=False,
+            partial16_done=False,
+            partial17_done=False,
+            partial18_done=False,
+            partial19_done=False,
+            partial20_done=False,
         )
         self.opened.append({
             "position_id": self.position_id, "time": ts, "price": price, "side": side,
@@ -1213,111 +1223,23 @@ class Backtester:
         pos_after = pos
         # Objetivos de mayor distancia primero para conservar un solo parcial
         # por vela cuando el rango alcanza varios niveles.
-        if cfg.partial_tp10_r > 0 and not pos.partial10_done:
-            trigger10 = pos.entry_price + pos.side * cfg.partial_tp10_r * risk_unit
-            hit10 = high >= trigger10 if pos.side == 1 else low <= trigger10
-            if hit10:
-                fill10 = max(trigger10, open_price) if pos.side == 1 else min(trigger10, open_price)
+        for level in range(20, 1, -1):
+            tp_r = getattr(cfg, f"partial_tp{level}_r")
+            if tp_r <= 0 or getattr(pos, f"partial{level}_done"):
+                continue
+            trigger = pos.entry_price + pos.side * tp_r * risk_unit
+            hit = high >= trigger if pos.side == 1 else low <= trigger
+            if hit:
+                fill = max(trigger, open_price) if pos.side == 1 else min(trigger, open_price)
                 self.close_position(
-                    cfg.partial_tp10_pct,
-                    fill10,
+                    getattr(cfg, f"partial_tp{level}_pct"),
+                    fill,
                     timestamp,
-                    f"PARTIAL_TP10_{cfg.partial_tp10_r:g}R",
+                    f"PARTIAL_TP{level}_{tp_r:g}R",
                 )
                 pos_after = self.position
                 if pos_after is not None:
-                    pos_after.partial10_done = True
-                return
-        if cfg.partial_tp9_r > 0 and not pos.partial9_done:
-            trigger9 = pos.entry_price + pos.side * cfg.partial_tp9_r * risk_unit
-            hit9 = high >= trigger9 if pos.side == 1 else low <= trigger9
-            if hit9:
-                fill9 = max(trigger9, open_price) if pos.side == 1 else min(trigger9, open_price)
-                self.close_position(
-                    cfg.partial_tp9_pct,
-                    fill9,
-                    timestamp,
-                    f"PARTIAL_TP9_{cfg.partial_tp9_r:g}R",
-                )
-                pos_after = self.position
-                if pos_after is not None:
-                    pos_after.partial9_done = True
-                return
-        if cfg.partial_tp8_r > 0 and not pos.partial8_done:
-            trigger8 = pos.entry_price + pos.side * cfg.partial_tp8_r * risk_unit
-            hit8 = high >= trigger8 if pos.side == 1 else low <= trigger8
-            if hit8:
-                fill8 = max(trigger8, open_price) if pos.side == 1 else min(trigger8, open_price)
-                self.close_position(
-                    cfg.partial_tp8_pct,
-                    fill8,
-                    timestamp,
-                    f"PARTIAL_TP8_{cfg.partial_tp8_r:g}R",
-                )
-                pos_after = self.position
-                if pos_after is not None:
-                    pos_after.partial8_done = True
-                return
-        if cfg.partial_tp7_r > 0 and not pos.partial7_done:
-            trigger7 = pos.entry_price + pos.side * cfg.partial_tp7_r * risk_unit
-            hit7 = high >= trigger7 if pos.side == 1 else low <= trigger7
-            if hit7:
-                fill7 = max(trigger7, open_price) if pos.side == 1 else min(trigger7, open_price)
-                self.close_position(cfg.partial_tp7_pct, fill7, timestamp, f"PARTIAL_TP7_{cfg.partial_tp7_r:g}R")
-                pos_after = self.position
-                if pos_after is not None:
-                    pos_after.partial7_done = True
-                return
-        if cfg.partial_tp6_r > 0 and not pos.partial6_done:
-            trigger6 = pos.entry_price + pos.side * cfg.partial_tp6_r * risk_unit
-            hit6 = high >= trigger6 if pos.side == 1 else low <= trigger6
-            if hit6:
-                fill6 = max(trigger6, open_price) if pos.side == 1 else min(trigger6, open_price)
-                self.close_position(cfg.partial_tp6_pct, fill6, timestamp, f"PARTIAL_TP6_{cfg.partial_tp6_r:g}R")
-                pos_after = self.position
-                if pos_after is not None:
-                    pos_after.partial6_done = True
-                return
-        if cfg.partial_tp5_r > 0 and not pos.partial5_done:
-            trigger5 = pos.entry_price + pos.side * cfg.partial_tp5_r * risk_unit
-            hit5 = high >= trigger5 if pos.side == 1 else low <= trigger5
-            if hit5:
-                fill5 = max(trigger5, open_price) if pos.side == 1 else min(trigger5, open_price)
-                self.close_position(cfg.partial_tp5_pct, fill5, timestamp, f"PARTIAL_TP5_{cfg.partial_tp5_r:g}R")
-                pos_after = self.position
-                if pos_after is not None:
-                    pos_after.partial5_done = True
-                return
-        if cfg.partial_tp4_r > 0 and not pos.partial4_done:
-            trigger4 = pos.entry_price + pos.side * cfg.partial_tp4_r * risk_unit
-            hit4 = high >= trigger4 if pos.side == 1 else low <= trigger4
-            if hit4:
-                fill4 = max(trigger4, open_price) if pos.side == 1 else min(trigger4, open_price)
-                self.close_position(cfg.partial_tp4_pct, fill4, timestamp, f"PARTIAL_TP4_{cfg.partial_tp4_r:g}R")
-                pos_after = self.position
-                if pos_after is not None:
-                    pos_after.partial4_done = True
-                return
-        if cfg.partial_tp3_r > 0 and not pos.partial3_done:
-            trigger3 = pos.entry_price + pos.side * cfg.partial_tp3_r * risk_unit
-            hit3 = high >= trigger3 if pos.side == 1 else low <= trigger3
-            if hit3:
-                fill3 = max(trigger3, open_price) if pos.side == 1 else min(trigger3, open_price)
-                self.close_position(cfg.partial_tp3_pct, fill3, timestamp, f"PARTIAL_TP3_{cfg.partial_tp3_r:g}R")
-                pos_after = self.position
-                if pos_after is not None:
-                    pos_after.partial3_done = True
-                return
-        # TP2 primero si no hecho y trigger alcanzado (mayor distancia)
-        if cfg.partial_tp2_r > 0 and not pos.partial2_done:
-            trigger2 = pos.entry_price + pos.side * cfg.partial_tp2_r * risk_unit
-            hit2 = high >= trigger2 if pos.side == 1 else low <= trigger2
-            if hit2:
-                fill2 = max(trigger2, open_price) if pos.side == 1 else min(trigger2, open_price)
-                self.close_position(cfg.partial_tp2_pct, fill2, timestamp, f"PARTIAL_TP2_{cfg.partial_tp2_r:g}R")
-                pos_after = self.position
-                if pos_after is not None:
-                    pos_after.partial2_done = True
+                    setattr(pos_after, f"partial{level}_done", True)
                 return
         # TP1
         if not pos.partial_done:

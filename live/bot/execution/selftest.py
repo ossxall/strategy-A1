@@ -491,6 +491,16 @@ def _self_test_signal_reason_matrix(root: Path, now_ms: int) -> int:
          STOP_ACTION_KEEP),
         ("PARTIAL_TP10_8R", "LONG", "PARTIAL_CLOSE", "TAKE_PROFIT_10",
          STOP_ACTION_KEEP),
+        *(
+            (
+                f"PARTIAL_TP{level}_{level - 2}R",
+                "LONG",
+                "PARTIAL_CLOSE",
+                f"TAKE_PROFIT_{level}",
+                STOP_ACTION_KEEP,
+            )
+            for level in range(11, 21)
+        ),
         ("ADX_1D_REVERSAL_50%", "LONG", "PARTIAL_CLOSE",
          "ADX_REVERSAL", STOP_ACTION_KEEP),
         ("RSI_DIVERGENCE_BEAR_50%", "LONG", "PARTIAL_CLOSE",

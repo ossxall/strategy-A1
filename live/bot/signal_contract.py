@@ -24,7 +24,7 @@ def reason_code_for(event: str, reason: str) -> str:
 
     if reason.startswith("PARTIAL_TP_"):
         return "TAKE_PROFIT_1"
-    for level in range(2, 11):
+    for level in range(2, 21):
         if reason.startswith(f"PARTIAL_TP{level}_"):
             return f"TAKE_PROFIT_{level}"
     if reason.startswith("STOP_LOSS_"):
