@@ -69,10 +69,30 @@ def resample_ohlcv(data: pd.DataFrame, rule: str, source_interval_minutes: Optio
     target_minutes = td.total_seconds() / 60
     if target_minutes < src:
         raise ValueError(f"No se puede remuestrear de {src:g}m a un timeframe menor ({rule}).")
+    ratio = target_minutes / src
+    expected = int(round(ratio))
+    if expected < 1 or not np.isclose(ratio, expected, rtol=1e-9, atol=1e-9):
+        raise ValueError(
+            f"El timeframe {rule} debe ser múltiplo entero de la resolución "
+            f"de origen ({src:g}m); proporción actual: {ratio:g}."
+        )
+
+    # Source candles are timestamped by their open. Reject any candle whose
+    # duration would cross the target bucket boundary: otherwise its OHLC could
+    # include prices from after that target candle closed (lookahead).
+    source_ns = int(round(src * 60_000_000_000))
+    index_ns = data.index.as_unit("ns").asi8
+    day_start_ns = data.index.normalize().as_unit("ns").asi8
+    bucket_offset_ns = (index_ns - day_start_ns) % td.value
+    if np.any(bucket_offset_ns + source_ns > td.value):
+        raise ValueError(
+            f"Las velas de origen de {src:g}m no están alineadas con los "
+            f"buckets de {rule}; alguna vela cruza el cierre del bucket."
+        )
+
     grouped = data.resample(rule, label="left", closed="left", origin="start_day")
     out = grouped.agg({"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"})
     counts = grouped["close"].count()
-    expected = max(1, int(round(target_minutes / src)))
     out = out[counts.reindex(out.index, fill_value=0) >= expected]
     return out.dropna(subset=["open", "high", "low", "close"])
 
