@@ -38,8 +38,8 @@ def test_lower_rsi_divergence_timeframe_uses_raw_bars_at_requested_resolution(
     monkeypatch.setattr(indicators, "rsi_divergence_flags", fake_divergences)
     config = Config(
         timeframe="30min",
-        rsi_divergence_timeframe="5min",
-        rsi_divergence_exit_enabled=True,
+        exit_rsi_divergence_timeframe="5min",
+        exit_rsi_divergence_enabled=True,
         entry_rsi_divergence_enabled=False,
         rsi_divergence_pivot=1,
         rsi_divergence_len=2,
@@ -56,13 +56,44 @@ def test_lower_rsi_divergence_timeframe_uses_raw_bars_at_requested_resolution(
     assert flags[0] == 1
 
 
+def test_entry_and_exit_divergence_use_independent_timeframes(monkeypatch):
+    raw = make_raw()
+    bars = resample_ohlcv(raw, "30min")
+    observed_lengths = []
+
+    def fake_divergences(high, low, rsi_values, pivot, lookback):
+        observed_lengths.append(len(high))
+        return np.zeros(len(high), dtype=int)
+
+    monkeypatch.setattr(indicators, "rsi_divergence_flags", fake_divergences)
+    config = Config(
+        timeframe="30min",
+        entry_rsi_divergence_timeframe="5min",
+        exit_rsi_divergence_timeframe="1h",
+        exit_rsi_divergence_enabled=True,
+        entry_rsi_divergence_enabled=True,
+        rsi_divergence_pivot=1,
+        entry_adx_enabled=False,
+        entry_atr_enabled=False,
+        adx_exit_enabled=False,
+        ema_weakening_exit_enabled=False,
+        streak_trend_only=False,
+    )
+
+    entry_flags = indicators.build_rsi_divergence_flags(raw, bars, config)
+    exit_flags = indicators.build_rsi_divergence_exit(raw, bars, config)
+
+    assert observed_lengths == [180, 15]
+    assert entry_flags.shape == exit_flags.shape == (len(bars),)
+
+
 def test_lower_rsi_divergence_timeframe_rejects_insufficient_raw_resolution():
     raw = make_raw(periods=30, freq="1h")
     bars = resample_ohlcv(make_raw(periods=60), "30min")
     config = Config(
         timeframe="30min",
-        rsi_divergence_timeframe="5min",
-        rsi_divergence_exit_enabled=True,
+        exit_rsi_divergence_timeframe="5min",
+        exit_rsi_divergence_enabled=True,
         entry_rsi_divergence_enabled=False,
         entry_adx_enabled=False,
         entry_atr_enabled=False,
@@ -73,3 +104,13 @@ def test_lower_rsi_divergence_timeframe_rejects_insufficient_raw_resolution():
 
     with pytest.raises(ValueError, match="resolución suficiente"):
         indicators.build_rsi_divergence_exit(raw, bars, config)
+
+
+def test_entry_and_exit_rsi_divergence_timeframes_are_independent():
+    config = Config(
+        entry_rsi_divergence_timeframe=("1h", "2h"),
+        exit_rsi_divergence_timeframe=("4h", "1D"),
+    )
+
+    assert config.entry_rsi_divergence_timeframes == ("1h", "2h")
+    assert config.exit_rsi_divergence_timeframes == ("4h", "1D")

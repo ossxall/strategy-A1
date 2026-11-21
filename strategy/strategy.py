@@ -15,7 +15,7 @@ independientes de los del cruce de entrada: `ema_weakening_fast` /
 `ema_weakening_slow` (0 = reutilizar `ema_fast` / `ema_slow`).
 
 Y, por último, una **divergencia RSI en contra cierra el porcentaje configurado**
-(`rsi_divergence_exit_pct`, 100 % por defecto): la divergencia bajista (precio
+(`exit_rsi_divergence_pct`, 100 % por defecto): la divergencia bajista (precio
 con máximos más altos, RSI con máximos más bajos) cierra un LONG y la alcista
 (precio con mínimos más bajos, RSI con mínimos más altos) cierra un SHORT. El
 pivote de precio se confirma tras `rsi_divergence_pivot` velas y se compara con
@@ -561,16 +561,23 @@ class Backtester:
     Las señales se evalúan al cierre del timeframe de estrategia y se ejecutan
     en la apertura siguiente. Si se proporciona ``intrabar_bars`` de 1m, sólo
     se usa para recorrer stops y take-profits dentro de cada vela de estrategia.
+    ``raw`` aporta datos de mayor resolución para indicadores configurados en un
+    timeframe inferior al de estrategia.
     """
 
     def __init__(self, bars: pd.DataFrame, config: Config, signals: Optional[pd.DataFrame] = None,
                  adx_exit: Optional[np.ndarray] = None, weak_exit: Optional[np.ndarray] = None,
                  rsi_div_exit: Optional[np.ndarray] = None,
-                 intrabar_bars: Optional[pd.DataFrame] = None,
-                 process_intrabar_tail: bool = False,
-                 intrabar_timeframe: Optional[str] = None):
+                  intrabar_bars: Optional[pd.DataFrame] = None,
+                  process_intrabar_tail: bool = False,
+                  intrabar_timeframe: Optional[str] = None,
+                  raw: Optional[pd.DataFrame] = None):
         self.bars, self.cfg = bars, config
-        self.signals = signals if signals is not None else EMACrossStrategy(config).generate_signals(bars)
+        self.signals = (
+            signals
+            if signals is not None
+            else EMACrossStrategy(config).generate_signals(bars, raw)
+        )
         self._intrabar_bars: Optional[pd.DataFrame] = None
         self._intrabar_slices: list[tuple[int, int, bool]] = []
         self._intrabar_o = self._intrabar_h = self._intrabar_l = None
@@ -603,7 +610,7 @@ class Backtester:
             divergence = None
             if ("entry_rsi_bull_divergence_blocked" not in self.signals
                     or "entry_rsi_bear_divergence_blocked" not in self.signals):
-                divergence = build_rsi_divergence_flags(None, bars, config)
+                divergence = build_rsi_divergence_flags(raw, bars, config)
             if "entry_rsi_bull_divergence_blocked" in self.signals:
                 self.entry_rsi_bull_divergence_blocked = self.signals[
                     "entry_rsi_bull_divergence_blocked"
@@ -1642,7 +1649,7 @@ class Backtester:
                     # Primero se atiende la divergencia RSI confirmada.
                     div_reason = self._rsi_divergence_reason(i)
                     if div_reason is not None:
-                        div_pct = cfg.rsi_divergence_exit_pct
+                        div_pct = cfg.exit_rsi_divergence_pct
                         if div_pct < 100:
                             div_reason = f"{div_reason}_{div_pct:g}%"
                         self.pending_exit = (div_reason, div_pct)
@@ -1753,7 +1760,7 @@ def main() -> int:
         print(f"[ADX] {'disponible' if adx_exit is not None else 'sin datos suficientes/timeframe incompatible'}", flush=True)
     if cfg.ema_weakening_exit_enabled:
         print(f"[WEAKENING] {'disponible' if weak_exit is not None else 'sin datos suficientes'}", flush=True)
-    if cfg.rsi_divergence_exit_enabled:
+    if cfg.exit_rsi_divergence_enabled:
         print(f"[RSI DIV] {'disponible' if rsi_div_exit is not None else 'sin datos suficientes/timeframe incompatible'}", flush=True)
 
     engine = Backtester(

@@ -123,7 +123,7 @@ def test_entry_adx_timeframes_have_separate_panels_with_reversal_circles():
             adx_exit_enabled=False,
             ema_weakening_exit_enabled=False,
             entry_rsi_divergence_enabled=False,
-            rsi_divergence_exit_enabled=False,
+            exit_rsi_divergence_enabled=False,
             streak_trend_only=False,
         ),
         signals=signals,

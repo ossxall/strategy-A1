@@ -62,7 +62,7 @@ def make_config(**overrides):
         "entry_gaussian_trend_enabled": False,
         "adx_exit_enabled": False,
         "ema_weakening_exit_enabled": False,
-        "rsi_divergence_exit_enabled": False,
+        "exit_rsi_divergence_enabled": False,
         "streak_trend_only": False,
         "monthly_loss_limit_pct": 0,
         "force_close_at_end": False,

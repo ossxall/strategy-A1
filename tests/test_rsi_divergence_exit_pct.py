@@ -20,7 +20,8 @@ def test_rsi_divergence_exit_closes_configured_percent():
         index=index,
     )
     config = Config(
-        rsi_divergence_exit_pct=50.0,
+        exit_rsi_divergence_enabled=True,
+        exit_rsi_divergence_pct=50.0,
         partial_tp_enabled=False,
         partial_tp2_r=0,
         partial_tp2_pct=0,
@@ -61,8 +62,8 @@ def test_rsi_divergence_exit_closes_configured_percent():
 def test_rsi_divergence_exit_percent_must_be_between_zero_and_100():
     for pct in (0, 100.1):
         try:
-            Config(rsi_divergence_exit_pct=pct)
+            Config(exit_rsi_divergence_enabled=True, exit_rsi_divergence_pct=pct)
         except ValueError as exc:
-            assert "rsi_divergence_exit_pct" in str(exc)
+            assert "exit_rsi_divergence_pct" in str(exc)
         else:
             raise AssertionError(f"Expected invalid exit percent {pct} to fail")

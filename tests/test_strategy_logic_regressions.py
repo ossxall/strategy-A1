@@ -31,7 +31,7 @@ def _quiet_config(**overrides):
         "entry_gaussian_trend_enabled": False,
         "adx_exit_enabled": False,
         "ema_weakening_exit_enabled": False,
-        "rsi_divergence_exit_enabled": False,
+        "exit_rsi_divergence_enabled": False,
         "partial_tp_enabled": False,
         "partial_tp2_r": 0,
         "partial_tp2_pct": 0,
@@ -221,9 +221,9 @@ def test_higher_timeframe_rsi_exit_is_aligned_as_a_single_event(monkeypatch):
     raw = bars.copy()
     config = _quiet_config(
         timeframe="30min",
-        rsi_divergence_exit_enabled=True,
-        rsi_divergence_timeframe="1D",
-        rsi_divergence_exit_pct=50.0,
+        exit_rsi_divergence_enabled=True,
+        exit_rsi_divergence_timeframe="1D",
+        exit_rsi_divergence_pct=50.0,
         rsi_divergence_pivot=1,
     )
 
@@ -246,8 +246,8 @@ def test_bearish_rsi_divergence_wins_when_timeframes_conflict(monkeypatch):
     bars = _bars(4, "30min")
     config = _quiet_config(
         timeframe="30min",
-        rsi_divergence_exit_enabled=True,
-        rsi_divergence_timeframe=("1h", "2h"),
+        exit_rsi_divergence_enabled=True,
+        exit_rsi_divergence_timeframe=("1h", "2h"),
         rsi_divergence_pivot=1,
     )
 
