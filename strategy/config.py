@@ -135,11 +135,26 @@ class Config:
         str | list[str] | tuple[str, ...] | None
     ) = ("30min", "4h", "1D")
     #
-    # Block LONG entries after a bullish RSI divergence and SHORT entries after a
-    # bearish one, within the last N bars of the strategy timeframe.
+    # --- RSI divergence ------------------------------------------------------
+    # Entry filter: block LONG after bearish divergence and SHORT after bullish
+    # divergence while its age is <= `entry_rsi_divergence_lookback` strategy bars.
     #
     entry_rsi_divergence_enabled: bool = True
-    entry_rsi_divergence_lookback: int = 20
+    entry_rsi_divergence_timeframe: str | list[str] | tuple[str, ...] = ("1D")
+    entry_rsi_divergence_lookback: int = 48
+    #
+    # Exit: close the configured percentage when a divergence appears against
+    # the open position. Entry and exit can use independent timeframes.
+    #
+    exit_rsi_divergence_enabled: bool = True
+    exit_rsi_divergence_pct: float = 100.0
+    exit_rsi_divergence_timeframe: str | list[str] | tuple[str, ...] = ("1D")
+    #
+    # Shared RSI divergence calculation parameters for entry and exit.
+    #
+    rsi_divergence_len: int = 14       # RSI period (Wilder)
+    rsi_divergence_pivot: int = 5      # Bars on each side to confirm a pivot
+    rsi_divergence_lookback: int = 60  # Previous-pivot search window
     #
     #
     # ADX-based exit (reversal) configuration.
@@ -177,27 +192,6 @@ class Config:
     ema_weakening_slow: int = 55
     ema_weakening_gap_pct: float = 0.0001
     ema_weakening_exit_pct: float = 100.0
-    #
-    # --- RSI divergence exit -----------------------------------------------
-    # Closes 100% of the position when an RSI divergence appears against it:
-    # a **bearish** one (price higher highs, RSI lower highs) closes a LONG and
-    # a **bullish** one (price lower lows, RSI higher lows) closes a SHORT. A
-    # price pivot is confirmed after `rsi_divergence_pivot` bars on each side
-    # and is compared with the previous pivot of the same type within
-    # `rsi_divergence_lookback` bars; the signal is emitted on pivot
-    # confirmation, without lookahead.
-    #
-    rsi_divergence_exit_enabled: bool = True
-    rsi_divergence_exit_pct: float = 100.0  
-    #
-    # One or several timeframes (combined with OR), like the other exits.
-    #
-    rsi_divergence_timeframe: str | list[str] | tuple[str, ...] = "1D"
-    rsi_divergence_len: int = 14       # RSI period (Wilder)
-    rsi_divergence_pivot: int = 5      # Bars on each side to confirm a pivot
-    rsi_divergence_lookback: int = 60  # Lookback window for the previous pivot
-    #
-    #
     # Exit management aimed at reducing whipsaw loss streaks: when price reaches
     # `partial_tp_r` times the initial risk, profit is locked by closing
     # `partial_tp_pct` of the position and, optionally, moving the stop of the
@@ -325,9 +319,14 @@ class Config:
         return fast, slow
 
     @property
-    def rsi_divergence_timeframes(self) -> tuple[str, ...]:
-        """RSI divergence timeframes normalized; exit uses OR across them."""
-        return timeframe_tuple(self.rsi_divergence_timeframe)
+    def entry_rsi_divergence_timeframes(self) -> tuple[str, ...]:
+        """Entry divergence timeframes normalized."""
+        return timeframe_tuple(self.entry_rsi_divergence_timeframe)
+
+    @property
+    def exit_rsi_divergence_timeframes(self) -> tuple[str, ...]:
+        """Exit divergence timeframes normalized."""
+        return timeframe_tuple(self.exit_rsi_divergence_timeframe)
 
     @property
     def gaussian_trend_reversal_exit_timeframes(self) -> tuple[str, ...]:
@@ -371,12 +370,18 @@ class Config:
         for timeframe in self.ema_weakening_timeframes:
             if pd.Timedelta(timeframe) <= pd.Timedelta(0):
                 raise ValueError(f"invalid ema_weakening_timeframe: {timeframe!r}.")
-        if (self.rsi_divergence_exit_enabled or self.entry_rsi_divergence_enabled) \
-                and not self.rsi_divergence_timeframes:
-            raise ValueError("rsi_divergence_timeframe cannot be empty.")
-        for timeframe in self.rsi_divergence_timeframes:
+        if self.entry_rsi_divergence_enabled \
+                and not self.entry_rsi_divergence_timeframes:
+            raise ValueError("entry_rsi_divergence_timeframe cannot be empty.")
+        if self.exit_rsi_divergence_enabled \
+                and not self.exit_rsi_divergence_timeframes:
+            raise ValueError("exit_rsi_divergence_timeframe cannot be empty.")
+        for timeframe in (
+            *self.entry_rsi_divergence_timeframes,
+            *self.exit_rsi_divergence_timeframes,
+        ):
             if pd.Timedelta(timeframe) <= pd.Timedelta(0):
-                raise ValueError(f"invalid rsi_divergence_timeframe: {timeframe!r}.")
+                raise ValueError(f"invalid RSI divergence timeframe: {timeframe!r}.")
         if self.initial_capital <= 0:
             raise ValueError("Capital must be positive.")
         if not 0 < self.risk_pct <= 0.2:
@@ -431,15 +436,15 @@ class Config:
             if self.ema_weakening_slow > 0 and self.ema_weakening_fast > 0 \
                     and self.ema_weakening_fast >= self.ema_weakening_slow:
                 raise ValueError("Requires ema_weakening_fast < ema_weakening_slow (or 0 to use crossover ones).")
-        if self.rsi_divergence_exit_enabled or self.entry_rsi_divergence_enabled:
+        if self.exit_rsi_divergence_enabled or self.entry_rsi_divergence_enabled:
             if self.rsi_divergence_len <= 0:
                 raise ValueError("rsi_divergence_len must be positive.")
             if self.rsi_divergence_pivot < 1:
                 raise ValueError("rsi_divergence_pivot must be >= 1.")
             if self.rsi_divergence_lookback < 1:
                 raise ValueError("rsi_divergence_lookback must be >= 1.")
-        if self.rsi_divergence_exit_enabled and not 0 < self.rsi_divergence_exit_pct <= 100:
-            raise ValueError("rsi_divergence_exit_pct must be in (0, 100].")
+        if self.exit_rsi_divergence_enabled and not 0 < self.exit_rsi_divergence_pct <= 100:
+            raise ValueError("exit_rsi_divergence_pct must be in (0, 100].")
         if self.gaussian_trend_reversal_exit_enabled and not (
             0 < self.gaussian_trend_reversal_exit_pct <= 100
         ):

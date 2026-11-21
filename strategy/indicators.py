@@ -619,14 +619,14 @@ def _rsi_divergence_flags(
     if timeframe_delta < strategy_delta:
         if raw is None or raw.empty:
             raise ValueError(
-                f"rsi_divergence_timeframe={timeframe} requiere datos raw "
+                f"El timeframe de divergencia RSI ({timeframe}) requiere datos raw "
                 "de mayor resolución que el timeframe de estrategia."
             )
         raw_delta = pd.Timedelta(minutes=source_minutes(raw))
         if raw_delta > timeframe_delta:
             raise ValueError(
                 f"Los datos raw ({raw_delta}) no tienen resolución suficiente "
-                f"para rsi_divergence_timeframe={timeframe}."
+                f"para el timeframe de divergencia RSI ({timeframe})."
             )
         source_bars = raw if raw_delta == timeframe_delta else resample_ohlcv(
             raw, timeframe
@@ -660,16 +660,19 @@ def _rsi_divergence_flags(
     return aligned.astype(int)
 
 
-def build_rsi_divergence_flags(
-    raw: pd.DataFrame | None, bars: pd.DataFrame, cfg: Config
+def _build_rsi_divergence_flags(
+    raw: pd.DataFrame | None,
+    bars: pd.DataFrame,
+    cfg: Config,
+    timeframes: tuple[str, ...],
 ) -> np.ndarray | None:
-    """Divergencias RSI combinadas con OR en los timeframes configurados."""
+    """Combina divergencias RSI con OR y las alinea a las velas de estrategia."""
     if bars.empty:
         return None
     bull = np.zeros(len(bars), bool)
     bear = np.zeros(len(bars), bool)
     built = False
-    for timeframe in cfg.rsi_divergence_timeframes or (cfg.timeframe,):
+    for timeframe in timeframes or (cfg.timeframe,):
         flags = _rsi_divergence_flags(raw, bars, cfg, timeframe)
         if flags is None:
             continue
@@ -683,6 +686,15 @@ def build_rsi_divergence_flags(
     return np.where(bear, -1, bull.astype(int)).astype(int)
 
 
+def build_rsi_divergence_flags(
+    raw: pd.DataFrame | None, bars: pd.DataFrame, cfg: Config
+) -> np.ndarray | None:
+    """Divergencias RSI usadas por el filtro de entrada."""
+    return _build_rsi_divergence_flags(
+        raw, bars, cfg, cfg.entry_rsi_divergence_timeframes
+    )
+
+
 def build_rsi_divergence_exit(
     raw: pd.DataFrame, bars: pd.DataFrame, cfg: Config
 ) -> np.ndarray | None:
@@ -694,6 +706,8 @@ def build_rsi_divergence_exit(
     ``-1`` (bajista) y ``0`` (sin señal). Al coincidir ambas direcciones gana
     la bajista.
     """
-    if not cfg.rsi_divergence_exit_enabled or bars.empty:
+    if not cfg.exit_rsi_divergence_enabled or bars.empty:
         return None
-    return build_rsi_divergence_flags(raw, bars, cfg)
+    return _build_rsi_divergence_flags(
+        raw, bars, cfg, cfg.exit_rsi_divergence_timeframes
+    )

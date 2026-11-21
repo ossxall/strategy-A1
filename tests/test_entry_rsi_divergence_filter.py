@@ -79,6 +79,33 @@ def test_entries_are_filtered_by_recent_divergence_in_the_same_direction(monkeyp
     assert rejected.entry_rejection_reasons_short.iloc[3] == "divergencia RSI"
 
 
+def test_entry_divergence_remains_active_at_exact_lookback_age(monkeypatch):
+    bars = make_bars(50)
+    divergence = np.zeros(len(bars), dtype=int)
+    divergence[0] = 1
+    monkeypatch.setattr(
+        strategy_module, "build_rsi_divergence_flags", lambda raw, source_bars, cfg: divergence
+    )
+    cfg = Config(
+        timeframe="30min",
+        macd_timeframe=None,
+        entry_rsi_divergence_enabled=True,
+        entry_rsi_divergence_lookback=48,
+        entry_adx_enabled=False,
+        entry_atr_enabled=False,
+        entry_gaussian_trend_enabled=False,
+        gaussian_trend_reversal_exit_enabled=False,
+        exit_rsi_divergence_enabled=False,
+        entry_price_ema_filter_enabled=False,
+        streak_trend_only=False,
+    )
+
+    signals = EMACrossStrategy(cfg).generate_signals(bars)
+
+    assert signals.entry_rsi_bull_divergence_blocked.iloc[48]
+    assert not signals.entry_rsi_bull_divergence_blocked.iloc[49]
+
+
 def test_backtester_applies_recent_divergence_to_custom_long_signals_only():
     bars = make_bars(7)
     signals = pd.DataFrame(
@@ -105,6 +132,47 @@ def test_backtester_applies_recent_divergence_to_custom_long_signals_only():
 
     assert len(trades) == 1
     assert trades.side.tolist() == ["LONG"]
+
+
+def test_backtester_uses_raw_for_lower_entry_divergence_timeframe():
+    bars = make_bars(4)
+    raw_index = pd.date_range(
+        bars.index[0], periods=len(bars) * 30, freq="1min", tz="UTC"
+    )
+    close = np.linspace(100.0, 101.0, len(raw_index))
+    raw = pd.DataFrame(
+        {
+            "open": close,
+            "high": close + 0.5,
+            "low": close - 0.5,
+            "close": close,
+            "volume": 1.0,
+        },
+        index=raw_index,
+    )
+    signals = pd.DataFrame(
+        {"valid": True, "target": 0, "trend_bias": 0},
+        index=bars.index,
+    )
+    cfg = Config(
+        timeframe="30min",
+        entry_rsi_divergence_enabled=True,
+        entry_rsi_divergence_timeframe="5min",
+        rsi_divergence_len=2,
+        rsi_divergence_pivot=1,
+        entry_adx_enabled=False,
+        entry_atr_enabled=False,
+        entry_gaussian_trend_enabled=False,
+        gaussian_trend_reversal_exit_enabled=False,
+        adx_exit_enabled=False,
+        ema_weakening_exit_enabled=False,
+        streak_trend_only=False,
+    )
+
+    engine = Backtester(bars, cfg, signals=signals, raw=raw)
+
+    assert len(engine.entry_rsi_bull_divergence_blocked) == len(bars)
+    assert len(engine.entry_rsi_bear_divergence_blocked) == len(bars)
 
 
 def test_rsi_entry_lookback_must_be_positive():
