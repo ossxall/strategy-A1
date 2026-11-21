@@ -60,11 +60,14 @@ def normalize_ohlcv(
     frame: pd.DataFrame,
     *,
     timestamp_unit: str | None = None,
+    require_ordered_unique: bool = False,
 ) -> pd.DataFrame:
     """Devuelve el contrato OHLCV común: índice UTC por apertura y float64.
 
     Los epochs enteros o numéricos en texto requieren unidad explícita. Las
     fechas ISO y las columnas datetime se convierten directamente a UTC.
+    ``require_ordered_unique`` rechaza timestamps repetidos o fuera de orden
+    antes de aplicar la normalización histórica de orden y duplicados.
     """
     required = ("timestamp", *OHLCV_COLUMNS)
     missing = [column for column in required if column not in frame.columns]
@@ -76,6 +79,14 @@ def normalize_ohlcv(
         raise ValueError("El DataFrame contiene nombres de columna duplicados.")
 
     timestamps = _parse_timestamp(frame["timestamp"], timestamp_unit)
+    if require_ordered_unique:
+        if timestamps.duplicated().any():
+            raise ValueError("El raw contiene timestamps duplicados.")
+        if not timestamps.is_monotonic_increasing:
+            raise ValueError(
+                "El raw debe tener timestamps en orden cronológico ascendente."
+            )
+
     numeric_columns: list[np.ndarray] = []
     for column in OHLCV_COLUMNS:
         values = pd.to_numeric(frame[column], errors="coerce")
@@ -110,6 +121,7 @@ def normalize_columns(
     df: pd.DataFrame,
     *,
     timestamp_unit: str | None = None,
+    require_ordered_unique: bool = False,
 ) -> pd.DataFrame:
     """Normaliza aliases OHLCV al contrato UTC común.
 
@@ -130,7 +142,11 @@ def normalize_columns(
     if missing:
         raise ValueError(f"Faltan columnas {missing}; disponibles: {list(df.columns)}")
     out = df.rename(columns=rename).copy()
-    return normalize_ohlcv(out, timestamp_unit=timestamp_unit)
+    return normalize_ohlcv(
+        out,
+        timestamp_unit=timestamp_unit,
+        require_ordered_unique=require_ordered_unique,
+    )
 
 
 def load_parquet(
@@ -143,6 +159,7 @@ def load_parquet(
     data = normalize_columns(
         pd.read_parquet(path),
         timestamp_unit=timestamp_unit,
+        require_ordered_unique=True,
     )
     print(f"[LOAD] {len(data):,} velas en {time.perf_counter()-start:.2f}s | {data.index.min()} -> {data.index.max()}", flush=True)
     return data

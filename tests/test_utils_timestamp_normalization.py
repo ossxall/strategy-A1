@@ -1,7 +1,42 @@
 import pandas as pd
 import pytest
 
-from strategy.utils import normalize_columns, normalize_ohlcv
+from strategy.utils import load_parquet, normalize_columns, normalize_ohlcv
+
+
+def _raw_frame(timestamps):
+    return pd.DataFrame(
+        {
+            "timestamp": timestamps,
+            "open": [1.0] * len(timestamps),
+            "high": [2.0] * len(timestamps),
+            "low": [0.5] * len(timestamps),
+            "close": [1.5] * len(timestamps),
+            "volume": [10.0] * len(timestamps),
+        }
+    )
+
+
+def test_load_parquet_rejects_unsorted_timestamps(monkeypatch, tmp_path):
+    frame = _raw_frame(
+        [
+            pd.Timestamp("2020-01-01T00:01:00Z"),
+            pd.Timestamp("2020-01-01T00:00:00Z"),
+        ]
+    )
+    monkeypatch.setattr("strategy.utils.pd.read_parquet", lambda _path: frame)
+
+    with pytest.raises(ValueError, match="orden cronológico ascendente"):
+        load_parquet(tmp_path / "raw.parquet")
+
+
+def test_load_parquet_rejects_duplicate_timestamps(monkeypatch, tmp_path):
+    timestamp = pd.Timestamp("2020-01-01T00:00:00Z")
+    frame = _raw_frame([timestamp, timestamp])
+    monkeypatch.setattr("strategy.utils.pd.read_parquet", lambda _path: frame)
+
+    with pytest.raises(ValueError, match="timestamps duplicados"):
+        load_parquet(tmp_path / "raw.parquet")
 
 
 def test_normalize_columns_interprets_early_unix_seconds_as_seconds():
