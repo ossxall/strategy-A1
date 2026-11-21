@@ -43,7 +43,7 @@ class Config:
     #
     # None = use the strategy's main timeframe.
     #
-    macd_timeframe: str | None = "1h"
+    macd_timeframe: str | None = "30min"
     #
     # Main strategy timeframe.
     #
