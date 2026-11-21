@@ -19,6 +19,7 @@ export LETSENCRYPT_EMAIL
 
 compose=(
   docker-compose
+  --profile production
   -f docker-compose.yml
   -p blacker-bot1
 )

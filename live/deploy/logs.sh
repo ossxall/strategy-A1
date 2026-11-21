@@ -1,6 +1,7 @@
 cd strategy-A1/live
 
 docker-compose \
+  --profile production \
   --env-file .env.prod \
   -f docker-compose.yml \
   -f docker-compose.runtime.yml \

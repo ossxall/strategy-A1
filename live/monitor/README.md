@@ -22,14 +22,16 @@ el JSON, por lo que tolera cambios en el esquema.
    python -m pip install -r requirements.txt
    ```
 
-5. Arranca todos los servicios desde `live/`:
+5. Para iniciar el monitor en producción, activa el perfil `production`:
 
    ```sh
-   APP_ENV=prod docker-compose --env-file .env.prod -f docker-compose.yml -f docker-compose.runtime.yml -p blacker-bot1 up -d --build
+   APP_ENV=prod docker-compose --profile production --env-file .env.prod -f docker-compose.yml -f docker-compose.runtime.yml -p blacker-bot1 up -d --build
    ```
 
-   `monitor` inicia automáticamente con el stack. Para ver los logs:
-   `APP_ENV=prod docker-compose --env-file .env.prod -f docker-compose.yml -f docker-compose.runtime.yml -p blacker-bot1 logs -f monitor`.
+   En desarrollo no se inicia por defecto. Para activarlo en dev, configura el
+   token y la contraseña en `.env.dev` y ejecuta con `--profile monitor`.
+   Para ver los logs de producción:
+   `APP_ENV=prod docker-compose --profile production --env-file .env.prod -f docker-compose.yml -f docker-compose.runtime.yml -p blacker-bot1 logs -f monitor`.
    También puedes ejecutarlo directamente desde `live/` con `python monitor.py`;
    cargará el YAML y los secretos correspondientes a `APP_ENV`.
 

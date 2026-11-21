@@ -123,6 +123,13 @@ def test_normalizer_returns_a_typed_empty_ohlcv_frame():
     assert normalized.dtypes.tolist() == [float] * 5
 
 
+def test_normalizer_rejects_sub_millisecond_timestamps():
+    frame = _raw_frame([pd.Timestamp("2020-01-01T00:00:00.000000001Z")])
+
+    with pytest.raises(ValueError, match="precisión de milisegundos"):
+        normalize_ohlcv(frame)
+
+
 @pytest.mark.parametrize(
     "bad_row",
     [

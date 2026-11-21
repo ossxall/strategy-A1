@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-# En Docker, la estrategia se monta como paquete hermano bajo /app/legacy;
+# En Docker, la estrategia se copia como paquete hermano bajo /app;
 # en el checkout, está en la raíz del repositorio.
 _PACKAGE_DIR = Path(__file__).resolve().parent
 for _parent in (_PACKAGE_DIR, *_PACKAGE_DIR.parents):

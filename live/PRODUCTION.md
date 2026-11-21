@@ -28,9 +28,9 @@ Desde `live/`:
 ```bash
 export AUTHELIA_UID="$(id -u)"
 export AUTHELIA_GID="$(id -g)"
-APP_ENV=prod docker-compose --env-file .env.prod -f docker-compose.yml -f docker-compose.runtime.yml -p blacker-bot1 up -d --build
-APP_ENV=prod docker-compose --env-file .env.prod -f docker-compose.yml -f docker-compose.runtime.yml -p blacker-bot1 ps
-APP_ENV=prod docker-compose --env-file .env.prod -f docker-compose.yml -f docker-compose.runtime.yml -p blacker-bot1 logs --tail=200 feed bot executor monitor
+APP_ENV=prod docker-compose --profile production --env-file .env.prod -f docker-compose.yml -f docker-compose.runtime.yml -p blacker-bot1 up -d --build
+APP_ENV=prod docker-compose --profile production --env-file .env.prod -f docker-compose.yml -f docker-compose.runtime.yml -p blacker-bot1 ps
+APP_ENV=prod docker-compose --profile production --env-file .env.prod -f docker-compose.yml -f docker-compose.runtime.yml -p blacker-bot1 logs --tail=200 feed bot executor monitor
 ```
 
 Para detener el stack sin `.env.prod` ni secretos:
@@ -52,7 +52,7 @@ snapshots de SQLite cuando aplica.
 
 **Docker Compose no reinicia automáticamente un contenedor solo por estar
 `unhealthy`.** `restart: unless-stopped` cubre salidas del proceso, no fallos de
-readiness. Supervisa `APP_ENV=prod docker-compose --env-file .env.prod -f docker-compose.yml -f docker-compose.runtime.yml -p blacker-bot1 ps`
+readiness. Supervisa `APP_ENV=prod docker-compose --profile production --env-file .env.prod -f docker-compose.yml -f docker-compose.runtime.yml -p blacker-bot1 ps`
 y configura alertas/acción operativa
 para `unhealthy`; no reinicies automáticamente el executor ante una discrepancia
 de cuenta o `RECONCILIATION_REQUIRED`, porque podría repetir una acción insegura.

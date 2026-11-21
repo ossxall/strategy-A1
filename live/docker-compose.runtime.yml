@@ -1,4 +1,4 @@
-version: "2.4"
+version: "3.9"
 
 # Compatibilidad con comandos y scripts de despliegue existentes.
 # La configuración no secreta usa config.dev.yaml como base y aplica

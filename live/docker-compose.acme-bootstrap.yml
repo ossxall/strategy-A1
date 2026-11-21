@@ -1,5 +1,3 @@
-version: "2.4"
-
 # Temporary HTTP-only Nginx config used exclusively to obtain the first
 # Let's Encrypt certificate. Switch back to docker-compose.yml immediately
 # after Certbot succeeds.

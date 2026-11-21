@@ -252,7 +252,7 @@ especialmente si la prueba falla.
 El bot actualiza el visor mensual al cambiar una vela de estrategia. Escribe
 `live/bot/data/backtest_out/html/backtest.html` y los datos JSON en
 `live/bot/data/backtest_out/html/data/`. En Docker Compose, `BOT_BACKTEST_REPORT_DIR`
-apunta a `/app/legacy/bot1/bot/data/backtest_out`, persistido en el volumen
+apunta a `/app/bot/data/backtest_out`, persistido en el volumen
 `blacker-bot1-reports`. Se puede cambiar con `BOT_BACKTEST_REPORT_DIR`.
 
 `backtest.html` es una plantilla estática compartida con `strategy/report.py`;
