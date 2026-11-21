@@ -213,7 +213,7 @@ class Config:
     # position. Partial 2 is intended to be at a larger distance than TP1.
     #
     partial_tp2_r: float = 1.5
-    partial_tp2_pct: float = 10.0
+    partial_tp2_pct: float = 5.0
     #
     # Third partial take-profit, at a larger distance than TP2.
     #
