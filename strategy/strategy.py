@@ -1529,7 +1529,15 @@ class Backtester:
             key = (self.times[i].year, self.times[i].month)
             if key != month_key:
                 month_key = key
-                self.halt_until = None
+                # Un cooldown configurado en días puede cruzar el cambio de
+                # mes. No levantarlo antes de su fecha límite; si ya venció,
+                # el nuevo mes empieza con su propio límite mensual.
+                if (
+                    cfg.monthly_loss_limit_days <= 0
+                    or self.halt_until is None
+                    or self.times[i] >= self.halt_until
+                ):
+                    self.halt_until = None
                 month_start_equity = self._equity_value(self.c[i - 1]) if i else cfg.initial_capital
             # Una vela de estrategia puede faltar si su bucket quedó
             # incompleto. Aun así, los minutos cerrados de ese hueco deben

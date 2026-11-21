@@ -9,6 +9,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from strategy.utils import normalize_ohlcv
+
 from .config import logger, opt_float
 from .signal_contract import apply_signal_policy
 
@@ -1503,15 +1505,15 @@ class FeedReader:
             ),
         )
         if frame.empty:
-            return frame.drop(columns=["history_revision"])
+            frame = frame.drop(columns=["history_revision", "open_time"])
+            frame["timestamp"] = pd.Series(dtype="datetime64[ms]")
+            return normalize_ohlcv(frame)
         self.history_revision = int(frame["history_revision"].iloc[0])
         frame = frame.drop(columns=["history_revision"])
-        frame["timestamp"] = pd.to_datetime(frame.pop("open_time"), unit="ms", utc=True)
-        return (
-            frame.dropna(subset=["open", "high", "low", "close"])
-            .drop_duplicates("timestamp", keep="last")
-            .sort_values("timestamp")
-            .set_index("timestamp")[["open", "high", "low", "close", "volume"]]
+        frame = frame.rename(columns={"open_time": "timestamp"})
+        return normalize_ohlcv(
+            frame,
+            timestamp_unit="ms",
         )
 
     def close(self) -> None:

@@ -2,6 +2,8 @@
 
 import math
 
+from strategy.ohlcv import normalize_ohlcv_values
+
 
 def normalize_candle(
     open_time,
@@ -18,24 +20,16 @@ def normalize_candle(
     is_closed=False,
     source="rest",
 ):
-    values = [
-        open_price,
-        high,
-        low,
-        close_price,
-        volume,
-        quote_volume,
-        taker_buy_base,
-        taker_buy_quote,
+    op, hi, lo, cl, vol = normalize_ohlcv_values(
+        open_price, high, low, close_price, volume
+    )
+    extra_values = [
+        float(quote_volume),
+        float(taker_buy_base),
+        float(taker_buy_quote),
     ]
-    values = [float(v) for v in values]
-    if not all(math.isfinite(value) for value in values):
+    if not all(math.isfinite(value) for value in extra_values):
         raise ValueError("La vela contiene valores no finitos")
-    op, hi, lo, cl, vol = values[:5]
-    if min(op, hi, lo, cl) <= 0 or vol < 0:
-        raise ValueError("Precio o volumen inválido")
-    if hi < max(op, cl, lo) or lo > min(op, cl, hi):
-        raise ValueError("Rango high/low inválido")
     if int(close_time) < int(open_time):
         raise ValueError("close_time anterior a open_time")
     return {
@@ -46,10 +40,10 @@ def normalize_candle(
         "low": lo,
         "close": cl,
         "volume": vol,
-        "quote_volume": values[5],
+        "quote_volume": extra_values[0],
         "trades": int(trades),
-        "taker_buy_base": values[6],
-        "taker_buy_quote": values[7],
+        "taker_buy_base": extra_values[1],
+        "taker_buy_quote": extra_values[2],
         "is_closed": int(bool(is_closed)),
         "source": source,
     }

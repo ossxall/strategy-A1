@@ -1,7 +1,11 @@
 import sqlite3
 
+import pandas as pd
+from pandas.testing import assert_frame_equal
+
 from live.feed import database
 from live.bot.storage import FeedReader
+from strategy.utils import normalize_columns
 
 
 def test_feed_init_upgrades_existing_database_without_losing_candles_or_state(
@@ -161,6 +165,77 @@ def test_history_revision_tracks_corrections_and_late_closed_candles(
         assert reader.history_revision == 2
     finally:
         reader.close()
+
+
+def test_feed_and_parquet_adapters_return_the_same_ohlcv_frame(
+    tmp_path, monkeypatch
+):
+    db_path = tmp_path / "feed.db"
+    monkeypatch.setattr(database, "DB_PATH", str(db_path))
+    database.init_db()
+
+    open_times_ms = [1_700_000_040_000, 1_700_000_100_000]
+    rows = [
+        {
+            "open": 100.0 + index,
+            "high": 102.0 + index,
+            "low": 99.0 + index,
+            "close": 101.0 + index,
+            "volume": 5.0 + index,
+        }
+        for index in range(2)
+    ]
+    for open_time, row in zip(open_times_ms, rows):
+        database.save_candle(
+            {
+                "open_time": open_time,
+                "close_time": open_time + 59_999,
+                **row,
+                "quote_volume": row["close"] * row["volume"],
+                "trades": 1,
+                "taker_buy_base": row["volume"] / 2,
+                "taker_buy_quote": row["close"] * row["volume"] / 2,
+                "is_closed": 1,
+                "source": "rest",
+            }
+        )
+    # The live adapter must exclude a provisional candle just as the historical
+    # adapter only receives finalized rows from the archive.
+    database.save_candle(
+        {
+            "open_time": open_times_ms[-1] + 60_000,
+            "close_time": open_times_ms[-1] + 119_999,
+            **rows[-1],
+            "quote_volume": rows[-1]["close"] * rows[-1]["volume"],
+            "trades": 1,
+            "taker_buy_base": rows[-1]["volume"] / 2,
+            "taker_buy_quote": rows[-1]["close"] * rows[-1]["volume"] / 2,
+            "is_closed": 0,
+            "source": "websocket",
+        }
+    )
+
+    reader = FeedReader(db_path, "BTCUSDT", "1m")
+    try:
+        live_frame = reader.load_closed()
+    finally:
+        reader.close()
+
+    parquet_like = pd.DataFrame(
+        {
+            "open_time": pd.to_datetime(open_times_ms, unit="ms"),
+            **{
+                column: [row[column] for row in rows]
+                for column in ("open", "high", "low", "close", "volume")
+            },
+        }
+    )
+    historical_frame = normalize_columns(parquet_like)
+
+    assert_frame_equal(live_frame, historical_frame)
+    assert live_frame.index.name == "timestamp"
+    assert str(live_frame.index.dtype) == "datetime64[ms, UTC]"
+    assert live_frame.dtypes.tolist() == [float] * 5
 
 
 def _seed_candles(database_path, monkeypatch, open_times):

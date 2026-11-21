@@ -303,6 +303,41 @@ def test_monthly_loss_limit_rearms_at_the_start_of_the_next_calendar_month():
     assert engine.position.entry_time == bars.index[3]
 
 
+def test_monthly_loss_cooldown_is_not_cleared_at_month_boundary():
+    bars = make_bars(
+        [
+            {"open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0, "volume": 1.0},
+            {"open": 100.0, "high": 101.0, "low": 90.0, "close": 90.0, "volume": 1.0},
+            {"open": 90.0, "high": 91.0, "low": 89.0, "close": 90.0, "volume": 1.0},
+            {"open": 90.0, "high": 91.0, "low": 89.0, "close": 90.0, "volume": 1.0},
+        ]
+    )
+    bars.index = pd.DatetimeIndex(
+        [
+            "2026-01-31 22:30:00+00:00",
+            "2026-01-31 23:00:00+00:00",
+            "2026-02-01 00:00:00+00:00",
+            "2026-02-01 00:30:00+00:00",
+        ]
+    )
+    engine = Backtester(
+        bars,
+        quiet_config(
+            monthly_loss_limit_pct=5.0,
+            monthly_loss_limit_days=5,
+        ),
+        signals=manual_signals(bars, [1, 0, 1, 0]),
+    )
+
+    trades, equity = engine.run()
+
+    assert trades.reason.tolist() == ["MONTHLY_LOSS_LIMIT_5%"]
+    assert len(engine.opened) == 1
+    assert engine.position is None
+    assert "protección mensual" in equity.execution_rejection.iloc[2]
+    assert engine.halt_until == bars.index[1] + pd.Timedelta(days=5)
+
+
 def test_equity_records_effective_stop_and_breakeven_activation():
     bars = make_bars(
         [

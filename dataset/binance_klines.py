@@ -43,6 +43,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator, Sequence
 
+# This command is also invoked directly as ``python dataset/binance_klines.py``.
+# Put the repository root on the path so the Parquet writer and live feed use
+# the same OHLCV contract.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from strategy.ohlcv import OHLCV_COLUMNS, normalize_ohlcv_values
+
 try:
     import requests
 except ImportError:
@@ -312,7 +321,7 @@ def merge_parquet(csvs: Sequence[Path], out: Path) -> int:
     fields: list = []
     for col in COLUMNS:
         if col in ("open_time", "close_time"):
-            fields.append(pa.field(col, pa.timestamp("ms")))
+            fields.append(pa.field(col, pa.timestamp("ms", tz="UTC")))
         elif col in INT_COLS:
             fields.append(pa.field(col, pa.int64()))
         else:
@@ -344,6 +353,18 @@ def merge_parquet(csvs: Sequence[Path], out: Path) -> int:
                 )
                 table = table.set_column(
                     table.schema.get_field_index(col), col, normalized
+                )
+            normalized_ohlcv = normalize_ohlcv_values(
+                *(
+                    table[column].to_numpy(zero_copy_only=False)
+                    for column in OHLCV_COLUMNS
+                )
+            )
+            for column, values in zip(OHLCV_COLUMNS, normalized_ohlcv):
+                table = table.set_column(
+                    table.schema.get_field_index(column),
+                    column,
+                    pa.array(values, type=pa.float64()),
                 )
             table = table.cast(schema)
             writer.write_table(table, row_group_size=250_000)
