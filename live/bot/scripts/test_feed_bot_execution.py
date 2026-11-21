@@ -65,6 +65,8 @@ def _strategy_config():
         partial_tp6_pct=0,
         partial_tp7_r=0,
         partial_tp7_pct=0,
+        partial_tp8_r=0,
+        partial_tp8_pct=0,
         streak_trend_only=False,
         force_close_at_end=False,
     )

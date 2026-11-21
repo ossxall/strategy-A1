@@ -21,6 +21,8 @@ def quiet_config(**overrides):
         "adx_exit_enabled": False,
         "exit_rsi_divergence_enabled": False,
         "streak_trend_only": False,
+        "partial_tp2_r": 0.0,
+        "partial_tp2_pct": 0.0,
         "stop_loss_pct": 0,
         "monthly_loss_limit_pct": 0,
         "force_close_at_end": False,

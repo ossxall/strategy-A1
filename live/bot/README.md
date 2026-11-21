@@ -91,7 +91,7 @@ señales v3 heredadas mediante una traducción de compatibilidad, además de v4.
 Señales anteriores a v3 quedan rechazadas.
 
 Los códigos de entrada son `ENTRY_CROSS`/`ENTRY_OTHER`; los de salida:
-`TAKE_PROFIT_1`…`TAKE_PROFIT_7`, `STOP_LOSS`,
+`TAKE_PROFIT_1`…`TAKE_PROFIT_10`, `STOP_LOSS`,
 `BREAKEVEN`, `EMA_CROSS_EXIT`, `ADX_REVERSAL`,
 `RSI_DIVERGENCE_BEAR/BULL`, `GAUSSIAN_TREND_BEAR/BULL`, `EMA_SLOW_TOUCH`,
 `MONTHLY_LOSS_LIMIT`, `TEST_PARTIAL`, `TEST_CLOSE` y `EXIT_OTHER`. `CLOSE`

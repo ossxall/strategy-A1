@@ -206,18 +206,33 @@ class Config:
     #
     # Fifth partial take-profit, at a larger distance than TP4.
     #
-    partial_tp5_r: float = 2.5
+    partial_tp5_r: float = 3.0
     partial_tp5_pct: float = 5.0
     #
     # Sixth partial take-profit, at a larger distance than TP5.
     #
-    partial_tp6_r: float = 3.0
+    partial_tp6_r: float = 4.0
     partial_tp6_pct: float = 5.0
     #
     # Seventh partial take-profit, at a larger distance than TP6.
     #
-    partial_tp7_r: float = 3.5
+    partial_tp7_r: float = 5.0
     partial_tp7_pct: float = 5.0
+    #
+    # Eighth partial take-profit, at a larger distance than TP7.
+    #
+    partial_tp8_r: float = 6.0
+    partial_tp8_pct: float = 5.0
+    #
+    # Ninth partial take-profit, at a larger distance than TP8.
+    #
+    partial_tp9_r: float = 7.0
+    partial_tp9_pct: float = 5.0
+    #
+    # Tenth partial take-profit, at a larger distance than TP9.
+    #
+    partial_tp10_r: float = 8.0
+    partial_tp10_pct: float = 5.0
     #
     # After TP3, the remaining SHORT exits if price exceeds the slow EMA by
     # this %. 0 = touching it is enough.
@@ -445,6 +460,21 @@ class Config:
                 raise ValueError("Invalid partial take-profit 7 configuration.")
             if self.partial_tp7_r <= self.partial_tp6_r:
                 raise ValueError("partial_tp7_r must be greater than TP6.")
+        if self.partial_tp8_r > 0 or self.partial_tp8_pct > 0:
+            if self.partial_tp8_r <= 0 or not 0 < self.partial_tp8_pct <= 100:
+                raise ValueError("Invalid partial take-profit 8 configuration.")
+            if self.partial_tp8_r <= self.partial_tp7_r:
+                raise ValueError("partial_tp8_r must be greater than TP7.")
+        if self.partial_tp9_r > 0 or self.partial_tp9_pct > 0:
+            if self.partial_tp9_r <= 0 or not 0 < self.partial_tp9_pct <= 100:
+                raise ValueError("Invalid partial take-profit 9 configuration.")
+            if self.partial_tp9_r <= self.partial_tp8_r:
+                raise ValueError("partial_tp9_r must be greater than TP8.")
+        if self.partial_tp10_r > 0 or self.partial_tp10_pct > 0:
+            if self.partial_tp10_r <= 0 or not 0 < self.partial_tp10_pct <= 100:
+                raise ValueError("Invalid partial take-profit 10 configuration.")
+            if self.partial_tp10_r <= self.partial_tp9_r:
+                raise ValueError("partial_tp10_r must be greater than TP9.")
         if not (self.allow_long or self.allow_short):
             raise ValueError("LONG, SHORT or both must be enabled.")
         if self.streak_trend_only and pd.Timedelta(self.trend_timeframe) <= pd.Timedelta(0):

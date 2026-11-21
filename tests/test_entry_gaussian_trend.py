@@ -50,6 +50,8 @@ def make_config(**overrides):
         "partial_tp6_pct": 0,
         "partial_tp7_r": 0,
         "partial_tp7_pct": 0,
+        "partial_tp8_r": 0,
+        "partial_tp8_pct": 0,
         "adx_exit_enabled": False,
         "exit_rsi_divergence_enabled": False,
         "force_close_at_end": False,

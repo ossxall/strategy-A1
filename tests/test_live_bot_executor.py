@@ -1406,6 +1406,8 @@ def test_generated_tp1_full_close_flows_through_worker_without_be_error(
         partial_tp6_pct=0.0,
         partial_tp7_r=0.0,
         partial_tp7_pct=0.0,
+        partial_tp8_r=0.0,
+        partial_tp8_pct=0.0,
         stop_loss_pct=0.01,
         commission_bps=0.0,
         slippage_bps=0.0,

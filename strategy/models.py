@@ -21,6 +21,9 @@ class Position:
     partial5_done: bool = False
     partial6_done: bool = False
     partial7_done: bool = False
+    partial8_done: bool = False
+    partial9_done: bool = False
+    partial10_done: bool = False
 
 
 @dataclass

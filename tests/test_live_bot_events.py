@@ -404,6 +404,8 @@ def test_ema_slow_touch_exit_is_published_as_close_confirmed_not_intrabar():
         partial_tp6_pct=0.0,
         partial_tp7_r=0.0,
         partial_tp7_pct=0.0,
+        partial_tp8_r=0.0,
+        partial_tp8_pct=0.0,
         tp3_ema_slow_penetration_pct=0.0,
     )
 
@@ -458,6 +460,8 @@ def test_generated_tp1_signal_has_explicit_stop_policy(
         partial_tp6_pct=0.0,
         partial_tp7_r=0.0,
         partial_tp7_pct=0.0,
+        partial_tp8_r=0.0,
+        partial_tp8_pct=0.0,
         move_stop_to_breakeven=True,
     )
 
