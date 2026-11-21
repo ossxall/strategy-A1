@@ -5,6 +5,7 @@ import pytest
 from strategy.config import Config
 from strategy.indicators import (
     RSIDivergenceSignals,
+    build_adx_exit,
     build_rsi_divergence_exit,
     build_rsi_divergence_exit_signals,
 )
@@ -129,6 +130,20 @@ def test_streak_filter_does_not_block_closing_open_position_on_reversal():
     assert equity.execution_rejection_time.iloc[1] == bars.index[0]
 
 
+def test_adx_exit_uses_strategy_bars_when_timeframe_matches():
+    bars = _bars(100, "30min")
+    config = _quiet_config(
+        timeframe="30min",
+        adx_exit_enabled=True,
+        adx_timeframe="30min",
+    )
+
+    flags = build_adx_exit(None, bars, config)
+
+    assert flags is not None
+    assert len(flags) == len(bars)
+
+
 @pytest.mark.parametrize(
     "position_side,signal_target,disabled_side",
     [(-1, 1, "allow_long"), (1, -1, "allow_short")],
@@ -222,7 +237,11 @@ def test_stop_loss_at_or_above_100_percent_is_valid_for_short_only_config():
 
 def test_higher_timeframe_rsi_exit_is_aligned_as_a_single_event(monkeypatch):
     bars = _bars(4 * 48, "30min")
-    raw = bars.copy()
+    raw_index = pd.date_range(
+        bars.index[0], periods=len(bars) * 30, freq="1min", tz="UTC"
+    )
+    raw = _bars(len(raw_index), "1min")
+    raw.index = raw_index
     config = _quiet_config(
         timeframe="30min",
         exit_rsi_divergence_enabled=True,
@@ -267,7 +286,8 @@ def test_bullish_and_bearish_rsi_divergences_are_preserved_across_timeframes(mon
 
     monkeypatch.setattr("strategy.indicators._rsi_divergence_flags", fake_flags)
 
-    exit_flags = build_rsi_divergence_exit_signals(bars, bars, config)
+    raw = _bars(120, "1min")
+    exit_flags = build_rsi_divergence_exit_signals(raw, bars, config)
 
     assert exit_flags is not None
     assert exit_flags.bullish.tolist() == [False, True, False, False]

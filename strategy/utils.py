@@ -6,9 +6,127 @@ import time
 import numpy as np
 import pandas as pd
 
+from strategy.ohlcv import OHLCV_COLUMNS, normalize_ohlcv_values
 
-def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """Normaliza aliases OHLCV y devuelve un DataFrame indexado por timestamp UTC."""
+TIMESTAMP_UNITS = {"s", "ms", "us", "ns"}
+
+
+def _parse_timestamp(values: pd.Series, unit: str | None) -> pd.Series:
+    """Convierte timestamps a UTC sin adivinar unidades de epochs numéricos."""
+    if unit is not None and unit not in TIMESTAMP_UNITS:
+        raise ValueError(
+            f"timestamp_unit debe ser uno de {sorted(TIMESTAMP_UNITS)}."
+        )
+
+    if pd.api.types.is_datetime64_any_dtype(values.dtype):
+        if unit is not None:
+            raise ValueError(
+                "timestamp_unit no se aplica a una columna datetime."
+            )
+        parsed = pd.to_datetime(values, utc=True, errors="coerce")
+    else:
+        numeric = pd.to_numeric(values, errors="coerce")
+        supplied = values.notna()
+        numeric_rows = numeric.notna()
+        has_numeric = bool((supplied & numeric_rows).any())
+        has_non_numeric = bool((supplied & ~numeric_rows).any())
+
+        if has_numeric and has_non_numeric:
+            raise ValueError(
+                "La columna timestamp mezcla epochs numéricos y fechas de texto."
+            )
+        if has_numeric:
+            if unit is None:
+                raise ValueError(
+                    "timestamp_unit es obligatorio para timestamps numéricos "
+                    "(s, ms, us o ns)."
+                )
+            parsed = pd.to_datetime(
+                numeric, unit=unit, utc=True, errors="coerce"
+            )
+        else:
+            if unit is not None:
+                raise ValueError(
+                    "timestamp_unit solo se permite para timestamps numéricos."
+                )
+            parsed = pd.to_datetime(values, utc=True, errors="coerce")
+
+    if parsed.isna().any():
+        raise ValueError("Hay timestamps inválidos.")
+    return parsed
+
+
+def normalize_ohlcv(
+    frame: pd.DataFrame,
+    *,
+    timestamp_unit: str | None = None,
+    require_ordered_unique: bool = False,
+) -> pd.DataFrame:
+    """Devuelve el contrato OHLCV común: índice UTC por apertura y float64.
+
+    Los epochs enteros o numéricos en texto requieren unidad explícita. Las
+    fechas ISO y las columnas datetime se convierten directamente a UTC.
+    ``require_ordered_unique`` rechaza timestamps repetidos o fuera de orden
+    antes de aplicar la normalización histórica de orden y duplicados.
+    """
+    required = ("timestamp", *OHLCV_COLUMNS)
+    missing = [column for column in required if column not in frame.columns]
+    if missing:
+        raise ValueError(
+            f"Faltan columnas canónicas {missing}; disponibles: {list(frame.columns)}"
+        )
+    if frame.columns.duplicated().any():
+        raise ValueError("El DataFrame contiene nombres de columna duplicados.")
+
+    timestamps = _parse_timestamp(frame["timestamp"], timestamp_unit)
+    if require_ordered_unique:
+        if timestamps.duplicated().any():
+            raise ValueError("El raw contiene timestamps duplicados.")
+        if not timestamps.is_monotonic_increasing:
+            raise ValueError(
+                "El raw debe tener timestamps en orden cronológico ascendente."
+            )
+
+    numeric_columns: list[np.ndarray] = []
+    for column in OHLCV_COLUMNS:
+        values = pd.to_numeric(frame[column], errors="coerce")
+        try:
+            array = values.to_numpy(dtype=np.float64, na_value=np.nan)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{column} contiene valores no numéricos.") from exc
+        numeric_columns.append(array)
+    normalized_values = normalize_ohlcv_values(*numeric_columns)
+    numeric = dict(zip(OHLCV_COLUMNS, normalized_values))
+
+    try:
+        # Binance open times have millisecond precision. Fixing the index unit
+        # also makes Parquet datetimes and SQLite epochs byte-for-byte
+        # comparable at the pandas dtype level.
+        index = pd.DatetimeIndex(timestamps).as_unit("ms", round_ok=False)
+    except (OverflowError, ValueError) as exc:
+        raise ValueError(
+            "timestamp debe tener precisión de milisegundos y poder "
+            "representarse en ese formato."
+        ) from exc
+    out = pd.DataFrame(numeric, index=index)
+    out.index.name = "timestamp"
+    out = out.sort_index(kind="stable")
+    # Coincide con la política histórica y con FeedReader: en timestamps
+    # repetidos, prevalece la última fila recibida.
+    out = out.loc[~out.index.duplicated(keep="last")]
+    return out.loc[:, OHLCV_COLUMNS].astype("float64")
+
+
+def normalize_columns(
+    df: pd.DataFrame,
+    *,
+    timestamp_unit: str | None = None,
+    require_ordered_unique: bool = False,
+) -> pd.DataFrame:
+    """Normaliza aliases OHLCV al contrato UTC común.
+
+    Si el timestamp es un epoch numérico, ``timestamp_unit`` es obligatorio.
+    """
     df = df.rename(columns={c: str(c).strip().lower() for c in df.columns})
     aliases = {
         "timestamp": ("timestamp", "open_time", "datetime", "date", "time", "ts"),
@@ -20,36 +138,29 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
         found = next((c for c in choices if c in df.columns), None)
         if found is not None:
             rename[found] = canonical
-    missing = [c for c in ("timestamp", "open", "high", "low", "close") if c not in rename.values()]
+    missing = [c for c in ("timestamp", *OHLCV_COLUMNS) if c not in rename.values()]
     if missing:
         raise ValueError(f"Faltan columnas {missing}; disponibles: {list(df.columns)}")
     out = df.rename(columns=rename).copy()
-    if "volume" not in out:
-        out["volume"] = 0.0
-
-    ts = out["timestamp"]
-    if pd.api.types.is_numeric_dtype(ts):
-        nums = pd.to_numeric(ts, errors="coerce")
-        finite = nums.dropna()
-        magnitude = float(finite.abs().median()) if len(finite) else 0
-        unit = "ns" if magnitude >= 1e17 else "us" if magnitude >= 1e14 else "ms" if magnitude >= 1e11 else "s" if magnitude >= 1e9 else None
-        ts = pd.to_datetime(nums, unit=unit, utc=True, errors="coerce") if unit else pd.to_datetime(ts, utc=True, errors="coerce")
-    else:
-        ts = pd.to_datetime(ts, utc=True, errors="coerce")
-    if ts.isna().any():
-        raise ValueError("Hay timestamps inválidos.")
-    out["timestamp"] = ts
-    for c in ("open", "high", "low", "close", "volume"):
-        out[c] = pd.to_numeric(out[c], errors="coerce")
-    out = out.dropna(subset=["timestamp", "open", "high", "low", "close"])
-    out = out.sort_values("timestamp").drop_duplicates("timestamp", keep="last").set_index("timestamp")
-    return out[["open", "high", "low", "close", "volume"]]
+    return normalize_ohlcv(
+        out,
+        timestamp_unit=timestamp_unit,
+        require_ordered_unique=require_ordered_unique,
+    )
 
 
-def load_parquet(path: str | Path) -> pd.DataFrame:
+def load_parquet(
+    path: str | Path,
+    *,
+    timestamp_unit: str | None = None,
+) -> pd.DataFrame:
     start = time.perf_counter()
     print(f"[LOAD] {path}", flush=True)
-    data = normalize_columns(pd.read_parquet(path))
+    data = normalize_columns(
+        pd.read_parquet(path),
+        timestamp_unit=timestamp_unit,
+        require_ordered_unique=True,
+    )
     print(f"[LOAD] {len(data):,} velas en {time.perf_counter()-start:.2f}s | {data.index.min()} -> {data.index.max()}", flush=True)
     return data
 
@@ -58,6 +169,26 @@ def source_minutes(data: pd.DataFrame) -> float:
     delta = data.index.to_series().diff().dropna().dt.total_seconds() / 60
     value = float(delta.median()) if len(delta) else 1.0
     return value if np.isfinite(value) and value > 0 else 1.0
+
+
+def validate_raw_1m(data: pd.DataFrame, source: str = "raw dataset") -> None:
+    """Reject raw strategy inputs whose inferred candle interval is not 1m."""
+    if data.empty:
+        return
+    if not isinstance(data.index, pd.DatetimeIndex):
+        raise ValueError(f"{source} debe tener un DatetimeIndex de velas de 1m.")
+    if not data.index.is_monotonic_increasing:
+        raise ValueError(
+            f"{source} debe tener timestamps en orden cronológico ascendente."
+        )
+    if data.index.has_duplicates:
+        raise ValueError(f"{source} no debe contener timestamps duplicados.")
+    interval = pd.Timedelta(minutes=source_minutes(data))
+    if interval != pd.Timedelta("1min"):
+        raise ValueError(
+            f"{source} debe tener resolución de 1m; "
+            f"resolución detectada: {interval}."
+        )
 
 
 def resample_ohlcv(data: pd.DataFrame, rule: str, source_interval_minutes: Optional[float] = None) -> pd.DataFrame:
@@ -98,7 +229,12 @@ def resample_ohlcv(data: pd.DataFrame, rule: str, source_interval_minutes: Optio
 
 
 def to_timeframe(data: pd.DataFrame, cfg: Config) -> pd.DataFrame:
-    if data.empty or pd.Timedelta(minutes=source_minutes(data)) >= pd.Timedelta(cfg.timeframe):
+    validate_raw_1m(data)
+    if data.empty:
+        return data.copy()
+    if pd.Timedelta(cfg.timeframe) < pd.Timedelta("1min"):
+        raise ValueError("El timeframe de estrategia no puede ser menor que 1m.")
+    if pd.Timedelta(cfg.timeframe) == pd.Timedelta("1min"):
         return data.copy()
     out = resample_ohlcv(data, cfg.timeframe)
     print(f"[RESAMPLE] {source_minutes(data):g}m -> {cfg.timeframe}: {len(out):,} velas", flush=True)

@@ -169,8 +169,8 @@ def test_macd_can_use_lower_timeframe_when_raw_bars_are_provided(monkeypatch):
         **make_config().__dict__,
         "macd_timeframe": "15min",
     })
-    raw_index = pd.date_range("2026-01-01", periods=24, freq="5min", tz="UTC")
-    raw = make_bars(24)
+    raw_index = pd.date_range("2026-01-01", periods=120, freq="1min", tz="UTC")
+    raw = make_bars(120)
     raw.index = raw_index
 
     signals = EMACrossStrategy(cfg).generate_signals(make_bars(), raw=raw)

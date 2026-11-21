@@ -1,7 +1,13 @@
+import csv
 import sqlite3
 
+import pandas as pd
+from pandas.testing import assert_frame_equal
+
+from dataset.binance_klines import COLUMNS, merge_parquet
 from live.feed import database
 from live.bot.storage import FeedReader
+from strategy.utils import load_parquet
 
 
 def test_feed_init_upgrades_existing_database_without_losing_candles_or_state(
@@ -161,6 +167,89 @@ def test_history_revision_tracks_corrections_and_late_closed_candles(
         assert reader.history_revision == 2
     finally:
         reader.close()
+
+
+def test_feed_and_parquet_adapters_return_the_same_ohlcv_frame(
+    tmp_path, monkeypatch
+):
+    db_path = tmp_path / "feed.db"
+    monkeypatch.setattr(database, "DB_PATH", str(db_path))
+    database.init_db()
+
+    open_times_ms = [1_700_000_040_000, 1_700_000_100_000]
+    rows = [
+        {
+            "open": 100.0 + index,
+            "high": 102.0 + index,
+            "low": 99.0 + index,
+            "close": 101.0 + index,
+            "volume": 5.0 + index,
+        }
+        for index in range(2)
+    ]
+    for open_time, row in zip(open_times_ms, rows):
+        database.save_candle(
+            {
+                "open_time": open_time,
+                "close_time": open_time + 59_999,
+                **row,
+                "quote_volume": row["close"] * row["volume"],
+                "trades": 1,
+                "taker_buy_base": row["volume"] / 2,
+                "taker_buy_quote": row["close"] * row["volume"] / 2,
+                "is_closed": 1,
+                "source": "rest",
+            }
+        )
+    # The live adapter must exclude a provisional candle just as the historical
+    # adapter only receives finalized rows from the archive.
+    database.save_candle(
+        {
+            "open_time": open_times_ms[-1] + 60_000,
+            "close_time": open_times_ms[-1] + 119_999,
+            **rows[-1],
+            "quote_volume": rows[-1]["close"] * rows[-1]["volume"],
+            "trades": 1,
+            "taker_buy_base": rows[-1]["volume"] / 2,
+            "taker_buy_quote": rows[-1]["close"] * rows[-1]["volume"] / 2,
+            "is_closed": 0,
+            "source": "websocket",
+        }
+    )
+
+    reader = FeedReader(db_path, "BTCUSDT", "1m")
+    try:
+        live_frame = reader.load_closed()
+    finally:
+        reader.close()
+
+    source_csv = tmp_path / "binance-1m.csv"
+    archive_rows = [
+        {
+            "open_time": open_time,
+            **row,
+            "close_time": open_time + 59_999,
+            "quote_volume": row["close"] * row["volume"],
+            "count": 1,
+            "taker_buy_volume": row["volume"] / 2,
+            "taker_buy_quote_volume": row["close"] * row["volume"] / 2,
+            "ignore": 0,
+        }
+        for open_time, row in zip(open_times_ms, rows)
+    ]
+    with source_csv.open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(stream, fieldnames=COLUMNS)
+        writer.writeheader()
+        writer.writerows(archive_rows)
+
+    parquet_path = tmp_path / "merged.parquet"
+    assert merge_parquet([source_csv], parquet_path) == len(rows)
+    historical_frame = load_parquet(parquet_path)
+
+    assert_frame_equal(live_frame, historical_frame)
+    assert live_frame.index.name == "timestamp"
+    assert str(live_frame.index.dtype) == "datetime64[ms, UTC]"
+    assert live_frame.dtypes.tolist() == [float] * 5
 
 
 def _seed_candles(database_path, monkeypatch, open_times):

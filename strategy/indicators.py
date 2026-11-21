@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 from strategy.config import Config
-from strategy.utils import resample_ohlcv, source_minutes
+from strategy.utils import resample_ohlcv, source_minutes, validate_raw_1m
 
 
 def ema(values: pd.Series, period: int) -> pd.Series:
@@ -469,18 +469,32 @@ def spread_flags(flags: np.ndarray, window: int) -> np.ndarray:
 
 
 def _adx_exit_flags(
-    raw: pd.DataFrame, bars: pd.DataFrame, cfg: Config, timeframe: str
+    raw: pd.DataFrame | None, bars: pd.DataFrame, cfg: Config, timeframe: str
 ) -> np.ndarray | None:
     """Flags de reversión ADX para un único timeframe, alineadas a ``bars``."""
-    if pd.Timedelta(minutes=source_minutes(raw)) >= pd.Timedelta(timeframe):
-        return None
-    low = resample_ohlcv(raw, timeframe)
+    timeframe_delta = pd.Timedelta(timeframe)
+    strategy_delta = pd.Timedelta(cfg.timeframe)
+    if timeframe_delta == strategy_delta:
+        low, source_tf = bars, cfg.timeframe
+    elif timeframe_delta > strategy_delta:
+        low, source_tf = resample_ohlcv(bars, timeframe), timeframe
+    else:
+        if raw is None or raw.empty:
+            return None
+        raw_delta = pd.Timedelta(minutes=source_minutes(raw))
+        if raw_delta > timeframe_delta:
+            return None
+        low = raw if raw_delta == timeframe_delta else resample_ohlcv(raw, timeframe)
+        source_tf = timeframe
+
     if len(low) < cfg.adx_dilen + cfg.adx_adxlen + 2:
         return None
     flags = adx_reversal_flags(
         adx(low, cfg.adx_dilen, cfg.adx_adxlen)["adx"].to_numpy(), cfg.adx_key_level
     )
-    return align_closed_events(low.index, flags, bars.index, timeframe, cfg.timeframe)
+    if low.index.equals(bars.index):
+        return flags
+    return align_closed_events(low.index, flags, bars.index, source_tf, cfg.timeframe)
 
 
 def build_adx_exit(
@@ -493,6 +507,8 @@ def build_adx_exit(
     la unión de sus reversiones, mantenida activa ``cfg.adx_exit_range`` velas
     del timeframe de la estrategia tras cada reversión.
     """
+    if raw is not None:
+        validate_raw_1m(raw)
     if not cfg.adx_exit_enabled or bars.empty:
         return None
     combined = np.zeros(len(bars), dtype=bool)
@@ -542,6 +558,8 @@ def build_weakening_exit(
     suficientes o timeframes incompatibles); si al menos uno es válido, devuelve
     la unión de sus señales de debilitamiento.
     """
+    if raw is not None:
+        validate_raw_1m(raw)
     if not cfg.ema_weakening_exit_enabled or bars.empty:
         return None
     combined = np.zeros(len(bars), dtype=bool)
@@ -750,6 +768,8 @@ def _build_rsi_divergence_signals(
     timeframes: tuple[str, ...],
 ) -> RSIDivergenceSignals | None:
     """Combina divergencias RSI con OR y las alinea a las velas de estrategia."""
+    if raw is not None:
+        validate_raw_1m(raw)
     if bars.empty:
         return None
     bull = np.zeros(len(bars), dtype=bool)

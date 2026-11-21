@@ -1,10 +1,13 @@
 import csv
 import importlib.util
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
+import pandas as pd
 import pytest
+
+from strategy.utils import load_parquet
 
 pyarrow = pytest.importorskip("pyarrow")
 pytest.importorskip("pyarrow.parquet")
@@ -52,14 +55,28 @@ def test_merge_parquet_normalizes_millisecond_and_microsecond_spot_timestamps(tm
     assert merge_parquet([old_csv, new_csv], output) == 2
 
     table = pyarrow.parquet.read_table(output)
-    assert table["open_time"].to_pylist() == [
-        datetime(2020, 1, 1),
-        datetime(2025, 1, 1),
+    assert table.column_names == [
+        "timestamp", "open", "high", "low", "close", "volume"
     ]
-    assert table["close_time"].to_pylist() == [
-        datetime(2020, 1, 1, 0, 0, 59, 999000),
-        datetime(2025, 1, 1, 0, 0, 59, 999000),
+    assert table.schema.field("timestamp").type.tz == "UTC"
+    assert table.schema.field("timestamp").type.unit == "ms"
+    assert table["timestamp"].to_pylist() == [
+        datetime(2020, 1, 1, tzinfo=timezone.utc),
+        datetime(2025, 1, 1, tzinfo=timezone.utc),
     ]
+    assert all(
+        table.schema.field(column).type == pyarrow.float64()
+        for column in ("open", "high", "low", "close", "volume")
+    )
+    business_frame = load_parquet(output)
+    assert business_frame.index.tolist() == [
+        pd.Timestamp("2020-01-01T00:00:00Z"),
+        pd.Timestamp("2025-01-01T00:00:00Z"),
+    ]
+    assert business_frame.columns.tolist() == [
+        "open", "high", "low", "close", "volume"
+    ]
+    assert str(business_frame.index.dtype) == "datetime64[ms, UTC]"
 
 
 def test_ts_to_iso_accepts_microsecond_timestamps():

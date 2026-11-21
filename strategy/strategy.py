@@ -3,8 +3,9 @@
 Strategy 2 — EMA Cross + MACD + ADX / EMA Weakening
 ============================================
 
-Gestión de salida por defecto: take-profit parcial a 1R (50%) y stop a
-breakeven del resto (`partial_tp_enabled`). Sube el win rate y recorta la
+Gestión de salida por defecto: take-profit parcial a 1R por el porcentaje
+configurado en `partial_tp_pct` (10% por defecto) y stop a breakeven del resto
+(`partial_tp_enabled`). Sube el win rate y recorta la
 racha de pérdidas en whipsaw; puede desactivarse con `partial_tp_enabled=False`.
 
 La salida por debilitamiento de las EMAs (`ema_weakening_exit_enabled`) cierra
@@ -99,6 +100,7 @@ from strategy.utils import (
     load_parquet,
     resample_ohlcv,
     source_minutes,
+    validate_raw_1m,
     to_timeframe
 )
 from strategy.report import generate_report
@@ -263,6 +265,8 @@ class EMACrossStrategy:
     def generate_signals(
         self, bars: pd.DataFrame, raw: Optional[pd.DataFrame] = None
     ) -> pd.DataFrame:
+        if raw is not None:
+            validate_raw_1m(raw)
         cfg = self.cfg
         fast = ema(bars.close, cfg.ema_fast).to_numpy(float)
         slow = ema(bars.close, cfg.ema_slow).to_numpy(float)
@@ -567,6 +571,7 @@ class EMACrossStrategy:
     def prepare_exits(self, raw: pd.DataFrame, bars: pd.DataFrame) -> tuple[
             Optional[np.ndarray], Optional[np.ndarray], Optional[RSIDivergenceSignals]]:
         """Señales existentes: (ADX reversal, EMA weakening, divergencia RSI)."""
+        validate_raw_1m(raw)
         return (
             build_adx_exit(raw, bars, self.cfg),
             build_weakening_exit(raw, bars, self.cfg),
@@ -594,6 +599,8 @@ class Backtester:
                  process_intrabar_tail: bool = False,
                  intrabar_timeframe: Optional[str] = None,
                  raw: Optional[pd.DataFrame] = None):
+        if raw is not None:
+            validate_raw_1m(raw)
         self.bars, self.cfg = bars, config
         self.signals = (
             signals
@@ -1522,7 +1529,15 @@ class Backtester:
             key = (self.times[i].year, self.times[i].month)
             if key != month_key:
                 month_key = key
-                self.halt_until = None
+                # Un cooldown configurado en días puede cruzar el cambio de
+                # mes. No levantarlo antes de su fecha límite; si ya venció,
+                # el nuevo mes empieza con su propio límite mensual.
+                if (
+                    cfg.monthly_loss_limit_days <= 0
+                    or self.halt_until is None
+                    or self.times[i] >= self.halt_until
+                ):
+                    self.halt_until = None
                 month_start_equity = self._equity_value(self.c[i - 1]) if i else cfg.initial_capital
             # Una vela de estrategia puede faltar si su bucket quedó
             # incompleto. Aun así, los minutos cerrados de ese hueco deben
@@ -1597,6 +1612,12 @@ class Backtester:
                     slow_ema_touch_exit = self._tp3_slow_ema_touch_exit(i)
                 if not stop_hit and not slow_ema_touch_exit:
                     self._manage(i)
+                    # Sin datos intrabar no se conoce el orden exacto del
+                    # recorrido OHLC. Si TP1 acaba de activar breakeven y la
+                    # misma vela también lo atravesó, se prioriza el stop para
+                    # no inflar el resultado del backtest.
+                    if self._breakeven_activated_this_bar:
+                        stop_hit = self._stop(i)
 
             # Equity mark-to-market para el límite de pérdida mensual.
             equity_now = self._equity_value(self.c[i])

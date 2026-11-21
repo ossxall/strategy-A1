@@ -1412,6 +1412,114 @@ class ExecutionWorker:
         )
         return final_status == "FILLED"
 
+    def _recover_tp1_protective_stop(
+        self, signal: dict, snapshot: dict
+    ) -> str | None:
+        """Restaura o mueve el stop de TP1 sin dejar la posición desprotegida."""
+        position_id = int(signal["position_id"])
+        position = self._position_for_symbol(snapshot)
+        if position is None:
+            return None
+
+        sl_id = self._algo_order_id(position_id, "sl")
+        be_id = self._algo_order_id(position_id, "be")
+
+        # Un reinicio puede ocurrir después de instalar breakeven y antes de
+        # persistir el fill. Si ya existe, se confirma antes de tocar el SL.
+        try:
+            existing_be = self.gateway.query_protective_stop(be_id)
+            be_status = str(
+                _get(existing_be, "algoStatus", "status", default="")
+            ).upper()
+            if be_status in {
+                "CANCELED",
+                "EXPIRED",
+                "REJECTED",
+                "FINISHED",
+                "TRIGGERED",
+            }:
+                existing_be = None
+        except BinanceOrderNotFound:
+            existing_be = self._find_open_protective_stop(be_id)
+        except Exception:
+            existing_be = self._find_open_protective_stop(be_id)
+            if existing_be is None:
+                raise RuntimeError(
+                    "No se pudo comprobar el stop a breakeven; se conserva "
+                    "la protección existente."
+                )
+
+        if existing_be is not None:
+            self._verify_protective_stop(be_id)
+            self._cancel_position_stop(position_id, "sl")
+            return be_id
+
+        # Garantizar primero el SL original. Si el mercado ya volvió al nivel
+        # de entrada, no se reemplaza por un breakeven que podría dispararse
+        # inmediatamente.
+        sl_id = self._ensure_protective_stop(signal, snapshot)
+        if not sl_id:
+            return None
+        self._verify_protective_stop(sl_id)
+
+        mark_data = _items(
+            self.gateway.mark_price(self.settings.symbol), "data"
+        )
+        mark_value = _float(
+            _get(mark_data[0] if mark_data else {}, "markPrice", "mark_price")
+        )
+        if mark_value is None or mark_value <= 0:
+            LOG.warning(
+                "No se pudo verificar mark price tras TP1; se conserva el SL"
+            )
+            return sl_id
+
+        entry_price = _decimal(position["entry_price"], "entry_price")
+        mark_price = _decimal(mark_value, "mark_price")
+        breakeven_reached = (
+            mark_price > entry_price
+            if signal["side"] == "LONG"
+            else mark_price < entry_price
+        )
+        if not breakeven_reached:
+            return sl_id
+
+        try:
+            self._cancel_position_stop(position_id, "sl")
+        except Exception:
+            self._verify_protective_stop(sl_id)
+            LOG.warning(
+                "No se pudo cancelar el SL durante recuperación de TP1; "
+                "se conserva el SL"
+            )
+            return sl_id
+
+        try:
+            be_id = self._protective_stop(signal, snapshot, breakeven=True)
+            self._verify_protective_stop(be_id)
+        except Exception as exc:
+            try:
+                restore_snapshot = self._account_snapshot(force=True)
+                restored_sl_id = self._ensure_protective_stop(
+                    signal, restore_snapshot
+                )
+                if not restored_sl_id:
+                    raise RuntimeError("stop_loss_pct no produjo un SL")
+                self._verify_protective_stop(restored_sl_id)
+            except Exception as restore_exc:
+                raise RuntimeError(
+                    "Falló el stop a breakeven durante la recuperación y no "
+                    f"se pudo restaurar el SL original: {restore_exc}"
+                ) from exc
+            LOG.warning(
+                "No se pudo mover a breakeven durante la recuperación; "
+                "se restauró el SL original: %s",
+                exc,
+            )
+            return restored_sl_id
+
+        return be_id
+
     def _submit_market(
         self,
         signal: dict,
@@ -1793,16 +1901,9 @@ class ExecutionWorker:
                     elif signal_row["action"] == "PARTIAL_CLOSE" \
                             and signal_stop_action(signal_row) \
                             == STOP_ACTION_MOVE_TO_BREAKEVEN:
-                        self._cancel_position_stops(
-                            int(signal_row["position_id"])
-                        )
                         snapshot = self._account_snapshot(force=True)
-                        stop_id = (
-                            self._ensure_protective_stop(
-                                signal_row, snapshot, breakeven=True
-                            )
-                            if self._position_for_symbol(snapshot) is not None
-                            else None
+                        stop_id = self._recover_tp1_protective_stop(
+                            signal_row, snapshot
                         )
                     else:
                         stop_id = None

@@ -345,8 +345,8 @@ def test_gaussian_filter_config_defaults_and_validation():
     assert config.entry_gaussian_adaptive_width
     assert config.gaussian_trend_reversal_exit_enabled
     assert config.gaussian_trend_reversal_exit_pct == 10.0
-    assert config.gaussian_trend_reversal_exit_timeframe == "4h"
-    assert config.gaussian_trend_reversal_exit_timeframes == ("4h",)
+    assert config.gaussian_trend_reversal_exit_timeframe == ("30min", "4h", "1D")
+    assert config.gaussian_trend_reversal_exit_timeframes == ("30min", "4h", "1D")
     assert Config(
         gaussian_trend_reversal_exit_timeframe=("1h", "4h")
     ).gaussian_trend_reversal_exit_timeframes == ("1h", "4h")
