@@ -44,27 +44,23 @@ def _wilder_dm_sum(values: np.ndarray, length: int) -> np.ndarray:
         raise ValueError("La longitud DMI debe ser positiva.")
     values = np.asarray(values, dtype=float)
     out = np.full(len(values), np.nan, dtype=float)
-    first = next(
-        (i for i, value in enumerate(values) if np.isfinite(value)),
-        None,
-    )
-    if first is None:
-        return out
-    seed_count = length - 1
-    update_start = first + seed_count
-    if update_start >= len(values):
-        return out
-    seed = values[first:update_start]
-    if len(seed) != seed_count or not np.isfinite(seed).all():
-        return out
-    previous = float(np.sum(seed))
-    for i in range(update_start, len(values)):
-        value = values[i]
+    seed: list[float] = []
+    previous = np.nan
+    for i, value in enumerate(values):
         if not np.isfinite(value):
+            seed.clear()
             previous = np.nan
             continue
         if not np.isfinite(previous):
-            return out
+            if length == 1:
+                previous = 0.0
+            else:
+                seed.append(float(value))
+                if len(seed) < length - 1:
+                    continue
+                previous = float(np.sum(seed))
+                seed.clear()
+                continue
         previous = previous - previous / length + value
         out[i] = previous
     return out
@@ -294,11 +290,25 @@ def adx(bars: pd.DataFrame, dilen: int = 14, adxlen: int = 14) -> pd.DataFrame:
     if n > 1:
         up[1:] = np.diff(h)
         down[1:] = -np.diff(l)
+    tr = true_range(h, l, c)
+    valid_ohlc = np.isfinite(h) & np.isfinite(l) & np.isfinite(c)
+    tr[~valid_ohlc] = np.nan
+    # ADX/DI debe reiniciar todas las series si cualquiera de sus componentes
+    # no puede calcularse; de lo contrario TR y DM se suavizan sobre ventanas
+    # distintas tras una vela incompleta.
+    valid_movement = (
+        np.isfinite(up)
+        & np.isfinite(down)
+        & np.isfinite(tr)
+        & valid_ohlc
+    )
+    tr[~valid_movement] = np.nan
     plus_dm = np.where((up > down) & (up > 0), up, 0.0)
     minus_dm = np.where((down > up) & (down > 0), down, 0.0)
+    plus_dm[~valid_movement] = np.nan
+    minus_dm[~valid_movement] = np.nan
     # DMI/ADX no dispone de movimiento direccional para la primera barra.
     plus_dm[0] = minus_dm[0] = np.nan
-    tr = true_range(h, l, c)
     tr[0] = np.nan
     tr_rma = _wilder_dm_sum(tr, dilen)
     p_rma = _wilder_dm_sum(plus_dm, dilen)

@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pytest
 import talib
 
 from strategy.indicators import adx, atr, rsi
@@ -61,3 +62,34 @@ def test_flat_rsi_is_neutral_only_after_its_seed_window():
 
     assert actual.iloc[:14].isna().all()
     np.testing.assert_allclose(actual.iloc[14:].to_numpy(), 50.0)
+
+
+@pytest.mark.parametrize(
+    "missing_fields",
+    [("high", "low", "close"), ("close",), ("high",)],
+)
+def test_adx_and_di_recover_after_a_non_finite_bar(missing_fields):
+    rng = np.random.default_rng(12)
+    close = 100 + np.cumsum(rng.normal(size=160))
+    bars = pd.DataFrame(
+        {
+            "high": close + rng.uniform(0.2, 1.5, size=len(close)),
+            "low": close - rng.uniform(0.2, 1.5, size=len(close)),
+            "close": close,
+        }
+    )
+    bars.loc[70, list(missing_fields)] = np.nan
+
+    actual = adx(bars, dilen=14, adxlen=14)
+    after_gap = adx(bars.iloc[71:], dilen=14, adxlen=14)
+
+    assert np.isfinite(actual.iloc[69]["adx"])
+    assert actual.iloc[70:]["plus_di"].notna().any()
+    assert actual.iloc[70:]["minus_di"].notna().any()
+    assert actual.iloc[70:]["adx"].notna().any()
+    np.testing.assert_allclose(
+        actual.iloc[71:].to_numpy(),
+        after_gap.to_numpy(),
+        atol=1e-12,
+        equal_nan=True,
+    )
