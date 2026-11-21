@@ -1,11 +1,13 @@
+import csv
 import sqlite3
 
 import pandas as pd
 from pandas.testing import assert_frame_equal
 
+from dataset.binance_klines import COLUMNS, merge_parquet
 from live.feed import database
 from live.bot.storage import FeedReader
-from strategy.utils import normalize_columns
+from strategy.utils import load_parquet
 
 
 def test_feed_init_upgrades_existing_database_without_losing_candles_or_state(
@@ -221,16 +223,28 @@ def test_feed_and_parquet_adapters_return_the_same_ohlcv_frame(
     finally:
         reader.close()
 
-    parquet_like = pd.DataFrame(
+    source_csv = tmp_path / "binance-1m.csv"
+    archive_rows = [
         {
-            "open_time": pd.to_datetime(open_times_ms, unit="ms"),
-            **{
-                column: [row[column] for row in rows]
-                for column in ("open", "high", "low", "close", "volume")
-            },
+            "open_time": open_time,
+            **row,
+            "close_time": open_time + 59_999,
+            "quote_volume": row["close"] * row["volume"],
+            "count": 1,
+            "taker_buy_volume": row["volume"] / 2,
+            "taker_buy_quote_volume": row["close"] * row["volume"] / 2,
+            "ignore": 0,
         }
-    )
-    historical_frame = normalize_columns(parquet_like)
+        for open_time, row in zip(open_times_ms, rows)
+    ]
+    with source_csv.open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(stream, fieldnames=COLUMNS)
+        writer.writeheader()
+        writer.writerows(archive_rows)
+
+    parquet_path = tmp_path / "merged.parquet"
+    assert merge_parquet([source_csv], parquet_path) == len(rows)
+    historical_frame = load_parquet(parquet_path)
 
     assert_frame_equal(live_frame, historical_frame)
     assert live_frame.index.name == "timestamp"
