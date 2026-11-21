@@ -31,6 +31,23 @@ def test_to_timeframe_rejects_non_minute_raw_data():
         to_timeframe(make_bars(10, "5min"), cfg)
 
 
+def test_to_timeframe_rejects_unsorted_raw_timestamps():
+    cfg = Config(timeframe="1min")
+    raw = make_bars(3, "5min").iloc[::-1]
+
+    with pytest.raises(ValueError, match="raw dataset.*orden cronológico"):
+        to_timeframe(raw, cfg)
+
+
+def test_to_timeframe_rejects_duplicate_raw_timestamps():
+    cfg = Config(timeframe="1min")
+    raw = make_bars(3, "1min")
+    raw = pd.concat([raw, raw.iloc[[1]]]).sort_index()
+
+    with pytest.raises(ValueError, match="raw dataset.*timestamps duplicados"):
+        to_timeframe(raw, cfg)
+
+
 def test_signal_generation_rejects_non_minute_raw_data():
     cfg = Config(timeframe="30min")
 

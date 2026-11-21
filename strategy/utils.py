@@ -66,6 +66,12 @@ def validate_raw_1m(data: pd.DataFrame, source: str = "raw dataset") -> None:
         return
     if not isinstance(data.index, pd.DatetimeIndex):
         raise ValueError(f"{source} debe tener un DatetimeIndex de velas de 1m.")
+    if not data.index.is_monotonic_increasing:
+        raise ValueError(
+            f"{source} debe tener timestamps en orden cronológico ascendente."
+        )
+    if data.index.has_duplicates:
+        raise ValueError(f"{source} no debe contener timestamps duplicados.")
     interval = pd.Timedelta(minutes=source_minutes(data))
     if interval != pd.Timedelta("1min"):
         raise ValueError(
