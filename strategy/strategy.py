@@ -15,7 +15,7 @@ independientes de los del cruce de entrada: `ema_weakening_fast` /
 `ema_weakening_slow` (0 = reutilizar `ema_fast` / `ema_slow`).
 
 Y, por último, una **divergencia RSI en contra cierra el porcentaje configurado**
-(`exit_rsi_divergence_pct`, 25 % por defecto): la divergencia bajista (precio
+(`exit_rsi_divergence_pct`, 100 % por defecto): la divergencia bajista (precio
 con máximos más altos, RSI con máximos más bajos) cierra un LONG y la alcista
 (precio con mínimos más bajos, RSI con mínimos más altos) cierra un SHORT. El
 pivote de precio se confirma tras `rsi_divergence_pivot` velas y se compara con

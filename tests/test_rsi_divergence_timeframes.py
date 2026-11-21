@@ -90,6 +90,39 @@ def test_entry_and_exit_divergence_use_independent_timeframes(monkeypatch):
     assert entry_flags.shape == exit_flags.shape == (len(bars),)
 
 
+def test_higher_rsi_divergence_timeframe_resamples_strategy_bars_when_raw_is_coarser(
+    monkeypatch,
+):
+    raw = make_raw(periods=8, freq="6h")
+    bars = make_raw(periods=48, freq="30min")
+    observed_lengths = []
+
+    def fake_divergences(high, low, rsi_values, pivot, lookback):
+        observed_lengths.append(len(high))
+        zeros = np.zeros(len(high), dtype=bool)
+        return RSIDivergenceSignals(zeros, zeros)
+
+    monkeypatch.setattr(indicators, "rsi_divergence_signals", fake_divergences)
+    config = Config(
+        timeframe="30min",
+        exit_rsi_divergence_timeframe="4h",
+        exit_rsi_divergence_enabled=True,
+        entry_rsi_divergence_enabled=False,
+        rsi_divergence_pivot=1,
+        rsi_divergence_len=2,
+        entry_adx_enabled=False,
+        entry_atr_enabled=False,
+        adx_exit_enabled=False,
+        ema_weakening_exit_enabled=False,
+        streak_trend_only=False,
+    )
+
+    flags = indicators.build_rsi_divergence_exit(raw, bars, config)
+
+    assert observed_lengths == [6]
+    assert flags.shape == (len(bars),)
+
+
 def test_lower_rsi_divergence_timeframe_rejects_insufficient_raw_resolution():
     raw = make_raw(periods=30, freq="1h")
     bars = resample_ohlcv(make_raw(periods=60), "30min")

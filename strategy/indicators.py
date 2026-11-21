@@ -707,12 +707,21 @@ def _rsi_divergence_flags(
             source_bars, source_tf = bars, cfg.timeframe
         else:
             source_bars, source_tf = resample_ohlcv(bars, timeframe), timeframe
-    elif timeframe_delta <= pd.Timedelta(cfg.timeframe) or pd.Timedelta(
-        minutes=source_minutes(raw)
-    ) >= timeframe_delta:
+    elif timeframe_delta <= pd.Timedelta(cfg.timeframe):
         source_bars, source_tf = bars, cfg.timeframe
     else:
-        source_bars, source_tf = resample_ohlcv(raw, timeframe), timeframe
+        raw_delta = pd.Timedelta(minutes=source_minutes(raw))
+        if raw_delta <= timeframe_delta:
+            source_bars = (
+                raw
+                if raw_delta == timeframe_delta
+                else resample_ohlcv(raw, timeframe)
+            )
+        else:
+            # If raw is coarser than the requested higher timeframe, the
+            # strategy bars are still a valid finer source for that timeframe.
+            source_bars = resample_ohlcv(bars, timeframe)
+        source_tf = timeframe
     if len(source_bars) < 2 * cfg.rsi_divergence_pivot + 1:
         return None
     signals = rsi_divergence_signals(
