@@ -137,7 +137,7 @@ class Config:
     #
     # --- RSI divergence ------------------------------------------------------
     # Entry filter: block LONG after bearish divergence and SHORT after bullish
-    # divergence, for `entry_rsi_divergence_lookback` strategy-timeframe bars.
+    # divergence while its age is <= `entry_rsi_divergence_lookback` strategy bars.
     #
     entry_rsi_divergence_enabled: bool = True
     entry_rsi_divergence_timeframe: str | list[str] | tuple[str, ...] = ("1D")
@@ -147,8 +147,8 @@ class Config:
     # the open position. Entry and exit can use independent timeframes.
     #
     exit_rsi_divergence_enabled: bool = False
-    exit_rsi_divergence_pct: float = 100.0
-    exit_rsi_divergence_timeframe: str | list[str] | tuple[str, ...] = ("30min", "1h", "4h", "1D")
+    exit_rsi_divergence_pct: float = 50.0
+    exit_rsi_divergence_timeframe: str | list[str] | tuple[str, ...] = ("1D")
     #
     # Shared RSI divergence calculation parameters for entry and exit.
     #

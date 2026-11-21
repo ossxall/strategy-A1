@@ -79,6 +79,33 @@ def test_entries_are_filtered_by_recent_divergence_in_the_same_direction(monkeyp
     assert rejected.entry_rejection_reasons_short.iloc[3] == "divergencia RSI"
 
 
+def test_entry_divergence_remains_active_at_exact_lookback_age(monkeypatch):
+    bars = make_bars(50)
+    divergence = np.zeros(len(bars), dtype=int)
+    divergence[0] = 1
+    monkeypatch.setattr(
+        strategy_module, "build_rsi_divergence_flags", lambda raw, source_bars, cfg: divergence
+    )
+    cfg = Config(
+        timeframe="30min",
+        macd_timeframe=None,
+        entry_rsi_divergence_enabled=True,
+        entry_rsi_divergence_lookback=48,
+        entry_adx_enabled=False,
+        entry_atr_enabled=False,
+        entry_gaussian_trend_enabled=False,
+        gaussian_trend_reversal_exit_enabled=False,
+        exit_rsi_divergence_enabled=False,
+        entry_price_ema_filter_enabled=False,
+        streak_trend_only=False,
+    )
+
+    signals = EMACrossStrategy(cfg).generate_signals(bars)
+
+    assert signals.entry_rsi_bull_divergence_blocked.iloc[48]
+    assert not signals.entry_rsi_bull_divergence_blocked.iloc[49]
+
+
 def test_backtester_applies_recent_divergence_to_custom_long_signals_only():
     bars = make_bars(7)
     signals = pd.DataFrame(

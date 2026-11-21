@@ -110,6 +110,16 @@ import pandas as pd
 # Estrategia: compartida por backtesting y bots
 # ---------------------------------------------------------------------------
 
+def _entry_rsi_divergence_blocked(flags: np.ndarray, lookback: int) -> np.ndarray:
+    """Mantiene el bloqueo hasta que la señal alcanza ``lookback`` barras de edad.
+
+    Se incluye la barra de detección y también la barra situada exactamente a
+    ``lookback`` intervalos de ella; por eso el ancho contiene ``lookback + 1``
+    velas.
+    """
+    return spread_flags(flags, lookback + 1)
+
+
 class EMACrossStrategy:
     """Generador de señales sin estado de cartera ni ejecución de órdenes."""
 
@@ -354,11 +364,11 @@ class EMACrossStrategy:
             atr_allowed = np.ones(len(bars), dtype=bool)
         if cfg.entry_rsi_divergence_enabled:
             divergence = build_rsi_divergence_flags(raw, bars, cfg)
-            entry_rsi_bull_divergence_blocked = spread_flags(
+            entry_rsi_bull_divergence_blocked = _entry_rsi_divergence_blocked(
                 divergence > 0 if divergence is not None else np.zeros(len(bars), bool),
                 cfg.entry_rsi_divergence_lookback,
             )
-            entry_rsi_bear_divergence_blocked = spread_flags(
+            entry_rsi_bear_divergence_blocked = _entry_rsi_divergence_blocked(
                 divergence < 0 if divergence is not None else np.zeros(len(bars), bool),
                 cfg.entry_rsi_divergence_lookback,
             )
@@ -616,7 +626,7 @@ class Backtester:
                     "entry_rsi_bull_divergence_blocked"
                 ].to_numpy(bool)
             else:
-                self.entry_rsi_bull_divergence_blocked = spread_flags(
+                self.entry_rsi_bull_divergence_blocked = _entry_rsi_divergence_blocked(
                     divergence > 0 if divergence is not None else np.zeros(len(bars), bool),
                     config.entry_rsi_divergence_lookback,
                 )
@@ -629,7 +639,7 @@ class Backtester:
                     "entry_rsi_divergence_blocked"
                 ].to_numpy(bool)
             else:
-                self.entry_rsi_bear_divergence_blocked = spread_flags(
+                self.entry_rsi_bear_divergence_blocked = _entry_rsi_divergence_blocked(
                     divergence < 0 if divergence is not None else np.zeros(len(bars), bool),
                     config.entry_rsi_divergence_lookback,
                 )
