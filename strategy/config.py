@@ -148,7 +148,7 @@ class Config:
     #
     exit_rsi_divergence_enabled: bool = True
     exit_rsi_divergence_pct: float = 25.0
-    exit_rsi_divergence_timeframe: str | list[str] | tuple[str, ...] = ("1D")
+    exit_rsi_divergence_timeframe: str | list[str] | tuple[str, ...] = ("1D", "4h")
     #
     # Shared RSI divergence calculation parameters for entry and exit.
     #
