@@ -33,8 +33,6 @@ def reason_code_for(event: str, reason: str) -> str:
         return "BREAKEVEN"
     if reason == "EMA_CROSS_EXIT":
         return "EMA_CROSS_EXIT"
-    if reason.startswith("EMA_WEAKENING_"):
-        return "EMA_WEAKENING"
     if reason.startswith("ADX_"):
         return "ADX_REVERSAL"
     if reason.startswith("RSI_DIVERGENCE_BEAR"):

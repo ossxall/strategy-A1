@@ -206,7 +206,6 @@ def test_backtester_uses_raw_for_lower_entry_divergence_timeframe():
         entry_gaussian_trend_enabled=False,
         gaussian_trend_reversal_exit_enabled=False,
         adx_exit_enabled=False,
-        ema_weakening_exit_enabled=False,
         streak_trend_only=False,
     )
 

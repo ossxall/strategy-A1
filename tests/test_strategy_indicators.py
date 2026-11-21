@@ -3,7 +3,6 @@ import numpy as np
 from strategy.indicators import (
     adx_reversal_flags,
     confirmed_crosses,
-    ema_weakening_flags,
     rsi_divergence_flags,
     rsi_divergence_signals,
 )
@@ -64,12 +63,3 @@ def test_adx_reversal_requires_a_peak_above_key_level():
     flags = adx_reversal_flags(values, key_level=23.0)
 
     assert flags.tolist() == [False, False, True, False, False, False, False]
-
-
-def test_ema_weakening_fires_only_when_a_separated_pair_converges():
-    slow = np.full(4, 100.0)
-    fast = np.array([103.0, 102.0, 100.9, 100.5])
-
-    flags = ema_weakening_flags(fast, slow, gap_pct=0.01)
-
-    assert flags.tolist() == [False, False, True, False]

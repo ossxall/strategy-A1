@@ -1390,7 +1390,6 @@ def test_generated_tp1_full_close_flows_through_worker_without_be_error(
         entry_gaussian_trend_enabled=False,
         gaussian_trend_reversal_exit_enabled=False,
         adx_exit_enabled=False,
-        ema_weakening_exit_enabled=False,
         exit_rsi_divergence_enabled=False,
         partial_tp_enabled=True,
         partial_tp_r=1.0,
@@ -1417,7 +1416,6 @@ def test_generated_tp1_full_close_flows_through_worker_without_be_error(
     events = build_events(
         bars,
         strategy_signals,
-        None,
         None,
         None,
         strategy,

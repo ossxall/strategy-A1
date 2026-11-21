@@ -37,7 +37,6 @@ def setup_entry():
         partial_tp_enabled=False,
         partial_tp2_r=0.0,
         partial_tp2_pct=0.0,
-        ema_weakening_exit_enabled=False,
         adx_exit_enabled=False,
         exit_rsi_divergence_enabled=False,
         streak_trend_only=False,
@@ -63,7 +62,7 @@ def test_entry_opens_full_position_at_next_open_without_later_add():
 def test_live_event_reports_single_full_entry_without_add_event():
     index, bars, signals, config = setup_entry()
     events = build_events(
-        bars, signals, None, None, None, config, "BTCUSDT", "30m"
+        bars, signals, None, None, config, "BTCUSDT", "30m"
     )
 
     entry = next(event for event in events if event["event"] == "ENTRY")
@@ -86,7 +85,7 @@ def test_tp1_on_entry_candle_keeps_exit_partial_without_entry_add():
         setattr(config, f"partial_tp{stage}_pct", 0.0)
 
     events = build_events(
-        bars, signals, None, None, None, config, "BTCUSDT", "30m"
+        bars, signals, None, None, config, "BTCUSDT", "30m"
     )
     exit_event = next(event for event in events if event["event"] == "EXIT")
 

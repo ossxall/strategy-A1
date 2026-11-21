@@ -121,7 +121,6 @@ def test_entry_adx_timeframes_have_separate_panels_with_reversal_circles():
             entry_gaussian_trend_enabled=False,
             gaussian_trend_reversal_exit_enabled=False,
             adx_exit_enabled=False,
-            ema_weakening_exit_enabled=False,
             entry_rsi_divergence_enabled=False,
             exit_rsi_divergence_enabled=False,
             streak_trend_only=False,
@@ -129,7 +128,6 @@ def test_entry_adx_timeframes_have_separate_panels_with_reversal_circles():
         signals=signals,
         trades=pd.DataFrame(),
         adx_exit=no_flags,
-        weak_exit=no_flags,
         rsi_div_exit=np.zeros(len(index), dtype=int),
     )
 
@@ -184,7 +182,6 @@ def test_backtest_figure_visualizes_atr_filter_and_hides_it_when_disabled():
             signals=signals,
             trades=pd.DataFrame(),
             adx_exit=exit_flags,
-            weak_exit=exit_flags,
             rsi_div_exit=np.zeros(len(index), dtype=int),
         )
 
@@ -279,14 +276,12 @@ def test_backtest_figure_shows_rejections_position_risk_and_drawdown():
             entry_atr_enabled=False,
             entry_adx_enabled=False,
             adx_exit_enabled=False,
-            ema_weakening_exit_enabled=False,
             streak_trend_only=True,
         ),
         signals=signals,
         trades=trades,
         equity=equity,
         adx_exit=no_flags,
-        weak_exit=no_flags,
         rsi_div_exit=np.zeros(len(index), dtype=int),
     )
 

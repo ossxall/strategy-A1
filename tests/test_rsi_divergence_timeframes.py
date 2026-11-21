@@ -48,7 +48,6 @@ def test_lower_rsi_divergence_timeframe_uses_raw_bars_at_requested_resolution(
         entry_adx_enabled=False,
         entry_atr_enabled=False,
         adx_exit_enabled=False,
-        ema_weakening_exit_enabled=False,
         streak_trend_only=False,
     )
 
@@ -79,7 +78,6 @@ def test_entry_and_exit_divergence_use_independent_timeframes(monkeypatch):
         entry_adx_enabled=False,
         entry_atr_enabled=False,
         adx_exit_enabled=False,
-        ema_weakening_exit_enabled=False,
         streak_trend_only=False,
     )
 
@@ -109,7 +107,6 @@ def test_rsi_divergence_rejects_raw_data_coarser_than_one_minute(monkeypatch):
         entry_adx_enabled=False,
         entry_atr_enabled=False,
         adx_exit_enabled=False,
-        ema_weakening_exit_enabled=False,
         streak_trend_only=False,
     )
 
@@ -127,7 +124,6 @@ def test_rsi_divergence_rejects_non_minute_raw_data():
         entry_adx_enabled=False,
         entry_atr_enabled=False,
         adx_exit_enabled=False,
-        ema_weakening_exit_enabled=False,
         streak_trend_only=False,
     )
 

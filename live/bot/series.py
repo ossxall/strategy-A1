@@ -41,7 +41,7 @@ def series_frame(
             exits = strategy.prepare_exits(raw, bars)
         else:
             signals, *exits = computed
-        adx_exit, weak_exit, rsi_div_exit = exits
+        adx_exit, rsi_div_exit = exits
     except Exception:  # noqa: BLE001 - una serie opcional no detiene el bot
         logger.exception("No se pudieron calcular las series de %s", name)
         return frame
@@ -51,7 +51,6 @@ def series_frame(
             frame[column] = signals[column].to_numpy()
     for column, values in (
         ("adx_exit", adx_exit),
-        ("weak_exit", weak_exit),
         ("rsi_div_exit", rsi_div_exit),
     ):
         if values is not None and len(values) == len(frame):
@@ -87,13 +86,7 @@ def build_series_frames(
     add("raw", interval, lambda: series_frame(strategy, raw, raw, interval))
 
     adx_timeframes = cfg.adx_timeframes if cfg.adx_exit_enabled else ()
-    weakening_timeframes = (
-        cfg.ema_weakening_timeframes if cfg.ema_weakening_exit_enabled else ()
-    )
-    for role, timeframe in (
-        *(("adx_exit", tf) for tf in adx_timeframes),
-        *(("ema_weakening", tf) for tf in weakening_timeframes),
-    ):
+    for role, timeframe in (("adx_exit", tf) for tf in adx_timeframes):
         if timeframe:
             add(
                 role,

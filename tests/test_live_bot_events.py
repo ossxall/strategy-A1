@@ -60,7 +60,6 @@ def make_config(**overrides):
         "entry_rsi_divergence_enabled": False,
         "entry_gaussian_trend_enabled": False,
         "adx_exit_enabled": False,
-        "ema_weakening_exit_enabled": False,
         "exit_rsi_divergence_enabled": False,
         "partial_tp_enabled": False,
         "stop_loss_pct": 0.1,
@@ -164,7 +163,7 @@ def test_backtest_mode_generates_report_without_publishing_signals(
     monkeypatch.setattr(
         bot.strategy,
         "prepare_exits",
-        lambda raw, frame: (None, None, None),
+        lambda raw, frame: (None, None),
     )
 
     assert bot.process_once() == 0
@@ -212,7 +211,7 @@ def test_live_process_passes_closed_one_minute_feed_to_intrabar_replay(monkeypat
     monkeypatch.setattr(
         bot.strategy,
         "prepare_exits",
-        lambda source, frame: (None, None, None),
+        lambda source, frame: (None, None),
     )
     calls = []
     monkeypatch.setattr(
@@ -291,7 +290,7 @@ def test_live_tail_uses_only_closed_feed_db_minutes(tmp_path, monkeypatch):
     monkeypatch.setattr(
         bot.strategy,
         "prepare_exits",
-        lambda raw, bars: (None, None, None),
+        lambda raw, bars: (None, None),
     )
     calls = []
     monkeypatch.setattr(
@@ -308,7 +307,7 @@ def test_live_tail_uses_only_closed_feed_db_minutes(tmp_path, monkeypatch):
     finally:
         reader.close()
 
-    intrabar_bars = calls[0][8]
+    intrabar_bars = calls[0][7]
     assert len(intrabar_bars) == 60
     assert intrabar_bars.index[-1] == minute_index[59]
     assert minute_index[60] not in intrabar_bars.index
@@ -335,7 +334,6 @@ def test_last_closed_bar_entry_is_published_for_next_open_without_waiting_next_c
     events = build_events(
         bars,
         make_signals(bars, [0, 1]),
-        None,
         None,
         None,
         make_config(),
@@ -367,7 +365,6 @@ def test_pending_reversal_publishes_exit_before_entry_at_next_open():
         make_signals(bars, [1, 0, -1]),
         None,
         None,
-        None,
         make_config(),
         "BTCUSDT",
         "1m",
@@ -383,35 +380,6 @@ def test_pending_reversal_publishes_exit_before_entry_at_next_open():
     assert json.loads(pending[0]["payload"])["stop_action"] == "CANCEL"
     assert json.loads(pending[1]["payload"])["action"] == "OPEN"
     assert json.loads(pending[1]["payload"])["reason_code"] == "ENTRY_CROSS"
-
-
-def test_pending_partial_exit_is_published_for_next_open():
-    bars = make_bars(3)
-    events = build_events(
-        bars,
-        make_signals(bars, [1, 0, 0]),
-        None,
-        np.array([False, False, True]),
-        None,
-        make_config(ema_weakening_exit_pct=50.0),
-        "BTCUSDT",
-        "1m",
-    )
-
-    pending_exit = next(
-        event for event in events
-        if event["event"] == "EXIT" and json.loads(event["payload"]).get("pending")
-    )
-
-    assert pending_exit["bar_time"] == ts_ms(bars.index[-1])
-    assert pending_exit["signal_time"] == ts_ms(
-        bars.index[-1] + pd.Timedelta("30min")
-    )
-    payload = json.loads(pending_exit["payload"])
-    assert payload["close_pct"] == 50.0
-    assert payload["reason_code"] == "EMA_WEAKENING"
-    assert payload["stop_action"] == "KEEP"
-    assert pending_exit["price"] is None
 
 
 def test_ema_slow_touch_exit_is_published_as_close_confirmed_not_intrabar():
@@ -440,7 +408,7 @@ def test_ema_slow_touch_exit_is_published_as_close_confirmed_not_intrabar():
     )
 
     events = build_events(
-        bars, signals, None, None, None, config, "BTCUSDT", "1m"
+        bars, signals, None, None, config, "BTCUSDT", "1m"
     )
     slow_exit = next(
         event for event in events
@@ -498,7 +466,6 @@ def test_generated_tp1_signal_has_explicit_stop_policy(
         make_signals(bars, [1, 0, 0]),
         None,
         None,
-        None,
         config,
         "BTCUSDT",
         "1m",
@@ -526,7 +493,6 @@ def test_monthly_limit_event_uses_the_bar_that_triggered_it():
     events = build_events(
         bars,
         make_signals(bars, [1, 0, 0]),
-        None,
         None,
         None,
         config,
@@ -1273,7 +1239,7 @@ def test_live_only_includes_event_actionable_at_start_even_if_signal_bar_started
     monkeypatch.setattr(
         signal_bot.strategy,
         "prepare_exits",
-        lambda raw, frame: (None, None, None),
+        lambda raw, frame: (None, None),
     )
     monkeypatch.setattr(
         bot_app,
@@ -1314,11 +1280,11 @@ def test_live_backtest_files_refresh_when_bars_change_or_output_is_removed(
     monkeypatch.setattr("strategy.report.build_monthly_backtest_htmls", write_report)
 
     bot._publish_backtest_files(
-        bars, bars, make_signals(bars, [0, 0]), None, None, None,
+        bars, bars, make_signals(bars, [0, 0]), None, None,
         pd.DataFrame(), pd.DataFrame(),
     )
     bot._publish_backtest_files(
-        bars, bars, make_signals(bars, [0, 0]), None, None, None,
+        bars, bars, make_signals(bars, [0, 0]), None, None,
         pd.DataFrame(), pd.DataFrame(),
     )
     assert len(calls) == 1
@@ -1326,7 +1292,7 @@ def test_live_backtest_files_refresh_when_bars_change_or_output_is_removed(
 
     shutil.rmtree(tmp_path / "html")
     bot._publish_backtest_files(
-        bars, bars, make_signals(bars, [0, 0]), None, None, None,
+        bars, bars, make_signals(bars, [0, 0]), None, None,
         pd.DataFrame(), pd.DataFrame(),
     )
     assert len(calls) == 2
@@ -1335,7 +1301,7 @@ def test_live_backtest_files_refresh_when_bars_change_or_output_is_removed(
     updated = bars.copy()
     updated.iloc[-1, updated.columns.get_loc("close")] += 1
     bot._publish_backtest_files(
-        updated, updated, make_signals(updated, [0, 0]), None, None, None,
+        updated, updated, make_signals(updated, [0, 0]), None, None,
         pd.DataFrame(), pd.DataFrame(),
     )
     assert len(calls) == 3

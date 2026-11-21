@@ -156,7 +156,7 @@ class SignalBot:
             logger.exception("No se pudo actualizar el snapshot de series")
 
     def _publish_backtest_files(
-        self, raw, bars, signals, adx_exit, weak_exit, rsi_div_exit, trades, equity
+        self, raw, bars, signals, adx_exit, rsi_div_exit, trades, equity
     ) -> None:
         """Actualiza los archivos del visor solo cuando llega una vela nueva."""
         if self.backtest_report_dir is None or bars.empty:
@@ -182,7 +182,6 @@ class SignalBot:
                 trades=trades,
                 equity=equity,
                 adx_exit=adx_exit,
-                weak_exit=weak_exit,
                 rsi_div_exit=rsi_div_exit,
                 raw=raw,
                 source=f"{self.symbol} live",
@@ -247,7 +246,7 @@ class SignalBot:
 
         intrabar_bars = raw if feed_delta == pd.Timedelta("1min") else None
         signals = self.strategy.generate_signals(bars, raw)
-        adx_exit, weak_exit, rsi_div_exit = self.strategy.prepare_exits(raw, bars)
+        adx_exit, rsi_div_exit = self.strategy.prepare_exits(raw, bars)
         if self.mode == "backtest":
             if self.backtest_report_dir is None:
                 raise ValueError(
@@ -258,7 +257,6 @@ class SignalBot:
                 self.cfg,
                 signals,
                 adx_exit,
-                weak_exit,
                 rsi_div_exit,
                 intrabar_bars=intrabar_bars,
                 intrabar_timeframe=(
@@ -278,7 +276,6 @@ class SignalBot:
                 raw=raw,
                 signals=signals,
                 adx_exit=adx_exit,
-                weak_exit=weak_exit,
                 rsi_div_exit=rsi_div_exit,
             )
             self._backtest_complete = True
@@ -293,7 +290,6 @@ class SignalBot:
             bars,
             signals,
             adx_exit,
-            weak_exit,
             rsi_div_exit,
             self.cfg,
             self.symbol,
@@ -305,7 +301,7 @@ class SignalBot:
         self._publish_snapshot(
             raw,
             bars,
-            (signals, adx_exit, weak_exit, rsi_div_exit),
+            (signals, adx_exit, rsi_div_exit),
             events,
         )
         if self.live_since_ms is not None:
@@ -322,7 +318,7 @@ class SignalBot:
                 len(events),
             )
         self._publish_backtest_files(
-            raw, bars, signals, adx_exit, weak_exit, rsi_div_exit, trades, equity
+            raw, bars, signals, adx_exit, rsi_div_exit, trades, equity
         )
         return inserted
 

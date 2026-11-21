@@ -1,19 +1,12 @@
 #!/usr/bin/env python3
 """
-Strategy 2 — EMA Cross + MACD + ADX / EMA Weakening
+Strategy 2 — EMA Cross + MACD + ADX
 ============================================
 
 Gestión de salida por defecto: take-profit parcial a 1R por el porcentaje
 configurado en `partial_tp_pct` (10% por defecto) y stop a breakeven del resto
 (`partial_tp_enabled`). Sube el win rate y recorta la
 racha de pérdidas en whipsaw; puede desactivarse con `partial_tp_enabled=False`.
-
-La salida por debilitamiento de las EMAs (`ema_weakening_exit_enabled`) cierra
-`ema_weakening_exit_pct` % de la posición cuando el cruce de las EMAs del
-timeframe `ema_weakening_timeframe` se estrecha por debajo de
-`ema_weakening_gap_pct` (paso de separado a convergido). Sus periodos son
-independientes de los del cruce de entrada: `ema_weakening_fast` /
-`ema_weakening_slow` (0 = reutilizar `ema_fast` / `ema_slow`).
 
 Y, por último, una **divergencia RSI en contra cierra el porcentaje configurado**
 (`exit_rsi_divergence_pct`, 100 % por defecto): la divergencia bajista (precio
@@ -90,7 +83,6 @@ from strategy.indicators import (
     align_closed_events,
     adx_reversal_flags,
     build_adx_exit,
-    build_weakening_exit,
     build_rsi_divergence_signals,
     build_rsi_divergence_exit_signals,
     RSIDivergenceSignals,
@@ -569,12 +561,11 @@ class EMACrossStrategy:
         return pd.DataFrame(output, index=bars.index)
 
     def prepare_exits(self, raw: pd.DataFrame, bars: pd.DataFrame) -> tuple[
-            Optional[np.ndarray], Optional[np.ndarray], Optional[RSIDivergenceSignals]]:
-        """Señales existentes: (ADX reversal, EMA weakening, divergencia RSI)."""
+            Optional[np.ndarray], Optional[RSIDivergenceSignals]]:
+        """Señales de salida (reversión ADX, divergencia RSI)."""
         validate_raw_1m(raw)
         return (
             build_adx_exit(raw, bars, self.cfg),
-            build_weakening_exit(raw, bars, self.cfg),
             build_rsi_divergence_exit_signals(raw, bars, self.cfg),
         )
 
@@ -593,7 +584,7 @@ class Backtester:
     """
 
     def __init__(self, bars: pd.DataFrame, config: Config, signals: Optional[pd.DataFrame] = None,
-                 adx_exit: Optional[np.ndarray] = None, weak_exit: Optional[np.ndarray] = None,
+                 adx_exit: Optional[np.ndarray] = None,
                  rsi_div_exit: Optional[np.ndarray | RSIDivergenceSignals] = None,
                  intrabar_bars: Optional[pd.DataFrame] = None,
                  process_intrabar_tail: bool = False,
@@ -752,7 +743,6 @@ class Backtester:
                 & (previous_exit_gaussian_dir == 1)
             )
         self.adx_exit = np.asarray(adx_exit, bool) if adx_exit is not None else np.zeros(len(bars), bool)
-        self.weak_exit = np.asarray(weak_exit, bool) if weak_exit is not None else np.zeros(len(bars), bool)
         # Mantener ambas direcciones permite atender la posición correspondiente
         # cuando coinciden divergencias alcistas y bajistas.
         if isinstance(rsi_div_exit, RSIDivergenceSignals):
@@ -773,7 +763,6 @@ class Backtester:
             else ema(bars.close, config.ema_slow).to_numpy(float)
         )
         if len(self.adx_exit) != len(bars): self.adx_exit = np.zeros(len(bars), bool)
-        if len(self.weak_exit) != len(bars): self.weak_exit = np.zeros(len(bars), bool)
         if len(self.rsi_div) != len(bars):
             self.rsi_div = np.zeros(len(bars), int)
             self.rsi_div_bull = np.zeros(len(bars), dtype=bool)
@@ -1509,13 +1498,6 @@ class Backtester:
                               for tf in cfg.adx_timeframes)
         adx_base = f"ADX_{adx_labels}_REVERSAL"
         adx_reason = adx_base if cfg.adx_exit_pct >= 100 else f"{adx_base}_{cfg.adx_exit_pct:g}%"
-        weak_tfs = cfg.ema_weakening_timeframes or (cfg.timeframe,)
-        weak_fast, weak_slow = cfg.ema_weakening_lengths
-        weak_base = "EMA_WEAKENING_" + "_".join(tf.upper() for tf in weak_tfs)
-        weak_len = f"EMA{weak_fast}/{weak_slow}"
-        if (weak_fast, weak_slow) != (cfg.ema_fast, cfg.ema_slow):
-            weak_base = f"{weak_base}_{weak_len}"
-        weak_reason = weak_base if cfg.ema_weakening_exit_pct >= 100 else f"{weak_base}_{cfg.ema_weakening_exit_pct:g}%"
         started = time.perf_counter()
         print(f"[BACKTEST] {n:,} velas {cfg.timeframe}", flush=True)
         month_key: Optional[tuple[int, int]] = None
@@ -1714,9 +1696,7 @@ class Backtester:
                     else:
                         self.pending_target = target
                         skip_exit_checks = True
-                if not skip_exit_checks and self.position is not None and self.weak_exit[i]:
-                    self.pending_exit = (weak_reason, cfg.ema_weakening_exit_pct)
-                elif not skip_exit_checks and self.position is not None and self.adx_exit[i]:
+                if not skip_exit_checks and self.position is not None and self.adx_exit[i]:
                     self.pending_exit = (adx_reason, cfg.adx_exit_pct)
                 elif not skip_exit_checks and self.position is not None:
                     # Primero se atiende la divergencia RSI confirmada.
@@ -1828,11 +1808,9 @@ def main() -> int:
 
     strategy = EMACrossStrategy(cfg)
     signals = strategy.generate_signals(bars, raw)
-    adx_exit, weak_exit, rsi_div_exit = strategy.prepare_exits(raw, bars)
+    adx_exit, rsi_div_exit = strategy.prepare_exits(raw, bars)
     if cfg.adx_exit_enabled:
         print(f"[ADX] {'disponible' if adx_exit is not None else 'sin datos suficientes/timeframe incompatible'}", flush=True)
-    if cfg.ema_weakening_exit_enabled:
-        print(f"[WEAKENING] {'disponible' if weak_exit is not None else 'sin datos suficientes'}", flush=True)
     if cfg.exit_rsi_divergence_enabled:
         print(f"[RSI DIV] {'disponible' if rsi_div_exit is not None else 'sin datos suficientes/timeframe incompatible'}", flush=True)
 
@@ -1841,7 +1819,6 @@ def main() -> int:
         cfg,
         signals,
         adx_exit,
-        weak_exit,
         rsi_div_exit,
         intrabar_bars=raw,
         intrabar_timeframe="1min",
@@ -1857,7 +1834,6 @@ def main() -> int:
         raw=raw,
         signals=signals,
         adx_exit=adx_exit,
-        weak_exit=weak_exit,
         rsi_div_exit=rsi_div_exit,
     )
     return 0

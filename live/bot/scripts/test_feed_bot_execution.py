@@ -51,7 +51,6 @@ def _strategy_config():
         entry_rsi_divergence_enabled=False,
         gaussian_trend_reversal_exit_enabled=False,
         adx_exit_enabled=False,
-        ema_weakening_exit_enabled=False,
         exit_rsi_divergence_enabled=False,
         partial_tp_enabled=False,
         partial_tp2_r=0,

@@ -177,24 +177,6 @@ class Config:
     adx_adxlen: int = 14
     adx_key_level: float = 23.0
     adx_exit_pct: float = 100.0
-    #
-    # EMA-weakening exit configuration.
-    #
-    ema_weakening_exit_enabled: bool = True
-    #
-    # One or several timeframes (combined with OR). Accepts "1D", "1D,30min" or
-    # ["1D", "30min"]; the weakening exit triggers if weakening occurs in any.
-    #
-    ema_weakening_timeframe: str | list[str] | tuple[str, ...] = ("4h", "1D")
-    #
-    # Lengths of the EMAs used by the weakening exit. If > 0 they override
-    # `ema_fast`/`ema_slow` (allowing a different period without touching the
-    # entry crossover); with 0 the crossover EMAs are reused.
-    #
-    ema_weakening_fast: int = 21
-    ema_weakening_slow: int = 55
-    ema_weakening_gap_pct: float = 0.0001
-    ema_weakening_exit_pct: float = 100.0
     # Exit management aimed at reducing whipsaw loss streaks: when price reaches
     # `partial_tp_r` times the initial risk, profit is locked by closing
     # `partial_tp_pct` of the position and, optionally, moving the stop of the
@@ -295,22 +277,6 @@ class Config:
         return timeframe_tuple(self.entry_adx_timeframe)
 
     @property
-    def ema_weakening_timeframes(self) -> tuple[str, ...]:
-        """Weakening timeframes normalized (one or several); exit uses OR across them."""
-        return timeframe_tuple(self.ema_weakening_timeframe)
-
-    @property
-    def ema_weakening_lengths(self) -> tuple[int, int]:
-        """Lengths (fast, slow) of the EMAs used by the weakening exit.
-
-        Uses `ema_weakening_fast`/`ema_weakening_slow` when defined (> 0);
-        otherwise falls back to the crossover EMAs (`ema_fast`/`ema_slow`).
-        """
-        fast = self.ema_weakening_fast if self.ema_weakening_fast > 0 else self.ema_fast
-        slow = self.ema_weakening_slow if self.ema_weakening_slow > 0 else self.ema_slow
-        return fast, slow
-
-    @property
     def trend_ema_lengths(self) -> tuple[int, int]:
         """Lengths (fast, slow) used for the trend-timeframe bias.
 
@@ -373,11 +339,6 @@ class Config:
                 raise ValueError(f"invalid entry_adx_timeframe: {timeframe!r}.")
         if self.entry_adx_enabled and not self.entry_adx_timeframes:
             raise ValueError("entry_adx_timeframe cannot be empty.")
-        if self.ema_weakening_exit_enabled and not self.ema_weakening_timeframes:
-            raise ValueError("ema_weakening_timeframe cannot be empty.")
-        for timeframe in self.ema_weakening_timeframes:
-            if pd.Timedelta(timeframe) <= pd.Timedelta(0):
-                raise ValueError(f"invalid ema_weakening_timeframe: {timeframe!r}.")
         if self.entry_rsi_divergence_enabled \
                 and not self.entry_rsi_divergence_timeframes:
             raise ValueError("entry_rsi_divergence_timeframe cannot be empty.")
@@ -436,14 +397,6 @@ class Config:
                 raise ValueError("adx_exit_pct must be in (0, 100].")
             if self.adx_exit_range < 1:
                 raise ValueError("adx_exit_range must be >= 1.")
-        if self.ema_weakening_exit_enabled:
-            if self.ema_weakening_gap_pct <= 0 or not 0 < self.ema_weakening_exit_pct <= 100:
-                raise ValueError("Invalid weakening configuration.")
-            if min(self.ema_weakening_fast, self.ema_weakening_slow) < 0:
-                raise ValueError("ema_weakening_fast/ema_weakening_slow cannot be negative.")
-            if self.ema_weakening_slow > 0 and self.ema_weakening_fast > 0 \
-                    and self.ema_weakening_fast >= self.ema_weakening_slow:
-                raise ValueError("Requires ema_weakening_fast < ema_weakening_slow (or 0 to use crossover ones).")
         if self.exit_rsi_divergence_enabled or self.entry_rsi_divergence_enabled:
             if self.rsi_divergence_len <= 0:
                 raise ValueError("rsi_divergence_len must be positive.")

@@ -362,19 +362,6 @@ def adx_reversal_flags(values: np.ndarray, key_level: float) -> np.ndarray:
     return flags
 
 
-def ema_weakening_flags(
-    fast: np.ndarray, slow: np.ndarray, gap_pct: float
-) -> np.ndarray:
-    fast, slow = np.asarray(fast, float), np.asarray(slow, float)
-    flags = np.zeros(len(fast), dtype=bool)
-    if len(fast) < 2 or gap_pct <= 0:
-        return flags
-    with np.errstate(divide="ignore", invalid="ignore"):
-        gap = np.abs(fast - slow) / slow
-    flags[1:] = (gap[:-1] > gap_pct) & (gap[1:] <= gap_pct)
-    return flags
-
-
 def align_closed_flags(
     source_index: pd.DatetimeIndex,
     flags: np.ndarray,
@@ -522,67 +509,6 @@ def build_adx_exit(
     if not built:
         return None
     return spread_flags(combined, cfg.adx_exit_range)
-
-
-def _weakening_exit_flags(
-    raw: pd.DataFrame, bars: pd.DataFrame, cfg: Config, timeframe: str
-) -> np.ndarray | None:
-    """Flags de weakening para un único timeframe, alineadas a ``bars``."""
-    timeframe_delta = pd.Timedelta(timeframe)
-    strategy_delta = pd.Timedelta(cfg.timeframe)
-    if timeframe_delta == strategy_delta:
-        source_bars, source_tf = bars, cfg.timeframe
-    elif timeframe_delta < strategy_delta:
-        if raw is None or raw.empty:
-            return None
-        raw_delta = pd.Timedelta(minutes=source_minutes(raw))
-        if raw_delta > timeframe_delta:
-            return None
-        source_bars = (
-            raw if raw_delta == timeframe_delta else resample_ohlcv(raw, timeframe)
-        )
-        source_tf = timeframe
-    else:
-        source_bars, source_tf = resample_ohlcv(raw, timeframe), timeframe
-    fast_len, slow_len = cfg.ema_weakening_lengths
-    if len(source_bars) < slow_len + 2:
-        return None
-    flags = ema_weakening_flags(
-        ema(source_bars.close, fast_len).to_numpy(),
-        ema(source_bars.close, slow_len).to_numpy(),
-        cfg.ema_weakening_gap_pct,
-    )
-    if source_bars.index.equals(bars.index):
-        return flags
-    return align_closed_events(
-        source_bars.index, flags, bars.index, source_tf, cfg.timeframe
-    )
-
-
-def build_weakening_exit(
-    raw: pd.DataFrame, bars: pd.DataFrame, cfg: Config
-) -> np.ndarray | None:
-    """Salida EMA weakening combinando con OR todos los ``cfg.ema_weakening_timeframes``.
-
-    Devuelve ``None`` si no se pudo calcular ninguno (deshabilitado, sin datos
-    suficientes o timeframes incompatibles); si al menos uno es válido, devuelve
-    la unión de sus señales de debilitamiento.
-    """
-    if raw is not None:
-        validate_raw_1m(raw)
-    if not cfg.ema_weakening_exit_enabled or bars.empty:
-        return None
-    combined = np.zeros(len(bars), dtype=bool)
-    built = False
-    for timeframe in cfg.ema_weakening_timeframes or (cfg.timeframe,):
-        flags = _weakening_exit_flags(raw, bars, cfg, timeframe)
-        if flags is None:
-            continue
-        built = True
-        combined |= flags
-    if not built:
-        return None
-    return combined
 
 
 @dataclass(frozen=True)
