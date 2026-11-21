@@ -136,7 +136,7 @@ class Config:
     # One or several timeframes (combined with OR); None = main timeframe.
     gaussian_trend_reversal_exit_timeframe: (
         str | list[str] | tuple[str, ...] | None
-    ) = ("30min", "4h", "1D")
+    ) = ("30min")
     #
     # --- RSI divergence ------------------------------------------------------
     # Entry filter: block LONG after bearish divergence and SHORT after bullish
