@@ -90,8 +90,9 @@ from strategy.indicators import (
     adx_reversal_flags,
     build_adx_exit,
     build_weakening_exit,
-    build_rsi_divergence_flags,
-    build_rsi_divergence_exit,
+    build_rsi_divergence_signals,
+    build_rsi_divergence_exit_signals,
+    RSIDivergenceSignals,
     spread_flags,
 )
 from strategy.utils import (
@@ -363,16 +364,27 @@ class EMACrossStrategy:
             entry_atr_ready = np.zeros(len(bars), dtype=bool)
             atr_allowed = np.ones(len(bars), dtype=bool)
         if cfg.entry_rsi_divergence_enabled:
-            divergence = build_rsi_divergence_flags(raw, bars, cfg)
+            divergence = build_rsi_divergence_signals(raw, bars, cfg)
+            if isinstance(divergence, RSIDivergenceSignals):
+                bull_divergence = divergence.bullish
+                bear_divergence = divergence.bearish
+            else:
+                signed_divergence = (
+                    np.asarray(divergence, int)
+                    if divergence is not None
+                    else np.zeros(len(bars), dtype=int)
+                )
+                bull_divergence = signed_divergence > 0
+                bear_divergence = signed_divergence < 0
             entry_rsi_bull_divergence_blocked = _entry_rsi_divergence_blocked(
-                divergence > 0 if divergence is not None else np.zeros(len(bars), bool),
+                bull_divergence,
                 cfg.entry_rsi_divergence_lookback,
             )
             entry_rsi_bear_divergence_blocked = _entry_rsi_divergence_blocked(
-                divergence < 0 if divergence is not None else np.zeros(len(bars), bool),
+                bear_divergence,
                 cfg.entry_rsi_divergence_lookback,
             )
-            # Divergencia alcista (+) anticipa subida → bloquea SHORT; bajista (-) anticipa caída → bloquea LONG.
+            # Si coinciden, ambas señales quedan bloqueadas.
             record_rejection(
                 candidate_up & entry_rsi_bear_divergence_blocked,
                 candidate_down & entry_rsi_bull_divergence_blocked,
@@ -553,12 +565,12 @@ class EMACrossStrategy:
         return pd.DataFrame(output, index=bars.index)
 
     def prepare_exits(self, raw: pd.DataFrame, bars: pd.DataFrame) -> tuple[
-            Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]:
+            Optional[np.ndarray], Optional[np.ndarray], Optional[RSIDivergenceSignals]]:
         """Señales existentes: (ADX reversal, EMA weakening, divergencia RSI)."""
         return (
             build_adx_exit(raw, bars, self.cfg),
             build_weakening_exit(raw, bars, self.cfg),
-            build_rsi_divergence_exit(raw, bars, self.cfg),
+            build_rsi_divergence_exit_signals(raw, bars, self.cfg),
         )
 
 # ---------------------------------------------------------------------------
@@ -577,11 +589,11 @@ class Backtester:
 
     def __init__(self, bars: pd.DataFrame, config: Config, signals: Optional[pd.DataFrame] = None,
                  adx_exit: Optional[np.ndarray] = None, weak_exit: Optional[np.ndarray] = None,
-                 rsi_div_exit: Optional[np.ndarray] = None,
-                  intrabar_bars: Optional[pd.DataFrame] = None,
-                  process_intrabar_tail: bool = False,
-                  intrabar_timeframe: Optional[str] = None,
-                  raw: Optional[pd.DataFrame] = None):
+                 rsi_div_exit: Optional[np.ndarray | RSIDivergenceSignals] = None,
+                 intrabar_bars: Optional[pd.DataFrame] = None,
+                 process_intrabar_tail: bool = False,
+                 intrabar_timeframe: Optional[str] = None,
+                 raw: Optional[pd.DataFrame] = None):
         self.bars, self.cfg = bars, config
         self.signals = (
             signals
@@ -620,14 +632,25 @@ class Backtester:
             divergence = None
             if ("entry_rsi_bull_divergence_blocked" not in self.signals
                     or "entry_rsi_bear_divergence_blocked" not in self.signals):
-                divergence = build_rsi_divergence_flags(raw, bars, config)
+                divergence = build_rsi_divergence_signals(raw, bars, config)
+            if isinstance(divergence, RSIDivergenceSignals):
+                bull_divergence = divergence.bullish
+                bear_divergence = divergence.bearish
+            else:
+                signed_divergence = (
+                    np.asarray(divergence, int)
+                    if divergence is not None
+                    else np.zeros(len(bars), dtype=int)
+                )
+                bull_divergence = signed_divergence > 0
+                bear_divergence = signed_divergence < 0
             if "entry_rsi_bull_divergence_blocked" in self.signals:
                 self.entry_rsi_bull_divergence_blocked = self.signals[
                     "entry_rsi_bull_divergence_blocked"
                 ].to_numpy(bool)
             else:
                 self.entry_rsi_bull_divergence_blocked = _entry_rsi_divergence_blocked(
-                    divergence > 0 if divergence is not None else np.zeros(len(bars), bool),
+                    bull_divergence,
                     config.entry_rsi_divergence_lookback,
                 )
             if "entry_rsi_bear_divergence_blocked" in self.signals:
@@ -640,7 +663,7 @@ class Backtester:
                 ].to_numpy(bool)
             else:
                 self.entry_rsi_bear_divergence_blocked = _entry_rsi_divergence_blocked(
-                    divergence < 0 if divergence is not None else np.zeros(len(bars), bool),
+                    bear_divergence,
                     config.entry_rsi_divergence_lookback,
                 )
         else:
@@ -723,8 +746,20 @@ class Backtester:
             )
         self.adx_exit = np.asarray(adx_exit, bool) if adx_exit is not None else np.zeros(len(bars), bool)
         self.weak_exit = np.asarray(weak_exit, bool) if weak_exit is not None else np.zeros(len(bars), bool)
-        # Divergencia RSI: +1 alcista (cierra SHORT), -1 bajista (cierra LONG), 0 sin señal.
-        self.rsi_div = np.asarray(rsi_div_exit, int) if rsi_div_exit is not None else np.zeros(len(bars), int)
+        # Mantener ambas direcciones permite atender la posición correspondiente
+        # cuando coinciden divergencias alcistas y bajistas.
+        if isinstance(rsi_div_exit, RSIDivergenceSignals):
+            self.rsi_div_bull = rsi_div_exit.bullish.copy()
+            self.rsi_div_bear = rsi_div_exit.bearish.copy()
+            self.rsi_div = np.asarray(rsi_div_exit, int)
+        else:
+            self.rsi_div = (
+                np.asarray(rsi_div_exit, int)
+                if rsi_div_exit is not None
+                else np.zeros(len(bars), dtype=int)
+            )
+            self.rsi_div_bull = self.rsi_div > 0
+            self.rsi_div_bear = self.rsi_div < 0
         self.ema_slow_line = (
             self.signals["ema_slow"].to_numpy(float)
             if "ema_slow" in self.signals
@@ -732,7 +767,10 @@ class Backtester:
         )
         if len(self.adx_exit) != len(bars): self.adx_exit = np.zeros(len(bars), bool)
         if len(self.weak_exit) != len(bars): self.weak_exit = np.zeros(len(bars), bool)
-        if len(self.rsi_div) != len(bars): self.rsi_div = np.zeros(len(bars), int)
+        if len(self.rsi_div) != len(bars):
+            self.rsi_div = np.zeros(len(bars), int)
+            self.rsi_div_bull = np.zeros(len(bars), dtype=bool)
+            self.rsi_div_bear = np.zeros(len(bars), dtype=bool)
         self.o, self.h, self.l, self.c = (bars[k].to_numpy(float) for k in ("open", "high", "low", "close"))
         self.times = bars.index
         self.cash = config.initial_capital
@@ -1120,10 +1158,9 @@ class Backtester:
         pos = self.position
         if pos is None or i >= len(self.rsi_div):
             return None
-        flag = int(self.rsi_div[i])
-        if flag < 0 and pos.side == 1:
+        if self.rsi_div_bear[i] and pos.side == 1:
             return RSI_DIVERGENCE_BEAR_REASON
-        if flag > 0 and pos.side == -1:
+        if self.rsi_div_bull[i] and pos.side == -1:
             return RSI_DIVERGENCE_BULL_REASON
         return None
 

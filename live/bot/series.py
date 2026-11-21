@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from strategy.indicators import RSIDivergenceSignals
 from strategy.strategy import Config, EMACrossStrategy
 from strategy.utils import resample_ohlcv, source_minutes
 
@@ -55,6 +56,9 @@ def series_frame(
     ):
         if values is not None and len(values) == len(frame):
             frame[column] = np.asarray(values)
+    if isinstance(rsi_div_exit, RSIDivergenceSignals) and len(rsi_div_exit) == len(frame):
+        frame["rsi_div_bull_exit"] = rsi_div_exit.bullish
+        frame["rsi_div_bear_exit"] = rsi_div_exit.bearish
     return frame
 
 

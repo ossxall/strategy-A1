@@ -3,7 +3,11 @@ import pandas as pd
 import pytest
 
 from strategy.config import Config
-from strategy.indicators import build_rsi_divergence_exit
+from strategy.indicators import (
+    RSIDivergenceSignals,
+    build_rsi_divergence_exit,
+    build_rsi_divergence_exit_signals,
+)
 from strategy.models import Position
 from strategy.strategy import Backtester
 
@@ -228,12 +232,13 @@ def test_higher_timeframe_rsi_exit_is_aligned_as_a_single_event(monkeypatch):
     )
 
     def fake_divergence_flags(high, low, rsi_values, pivot, lookback):
-        flags = np.zeros(len(high), dtype=int)
-        flags[1] = -1
-        return flags
+        bullish = np.zeros(len(high), dtype=bool)
+        bearish = np.zeros(len(high), dtype=bool)
+        bearish[1] = True
+        return RSIDivergenceSignals(bullish, bearish)
 
     monkeypatch.setattr(
-        "strategy.indicators.rsi_divergence_flags", fake_divergence_flags
+        "strategy.indicators.rsi_divergence_signals", fake_divergence_flags
     )
 
     exit_flags = build_rsi_divergence_exit(raw, bars, config)
@@ -242,7 +247,7 @@ def test_higher_timeframe_rsi_exit_is_aligned_as_a_single_event(monkeypatch):
     assert np.flatnonzero(exit_flags).tolist() == [2 * 48 - 1]
 
 
-def test_bearish_rsi_divergence_wins_when_timeframes_conflict(monkeypatch):
+def test_bullish_and_bearish_rsi_divergences_are_preserved_across_timeframes(monkeypatch):
     bars = _bars(4, "30min")
     config = _quiet_config(
         timeframe="30min",
@@ -252,13 +257,18 @@ def test_bearish_rsi_divergence_wins_when_timeframes_conflict(monkeypatch):
     )
 
     def fake_flags(raw, bars, cfg, timeframe):
-        flags = np.zeros(len(bars), dtype=int)
-        flags[1] = 1 if timeframe == "1h" else -1
-        return flags
+        bullish = np.zeros(len(bars), dtype=bool)
+        bearish = np.zeros(len(bars), dtype=bool)
+        if timeframe == "1h":
+            bullish[1] = True
+        else:
+            bearish[1] = True
+        return RSIDivergenceSignals(bullish, bearish)
 
     monkeypatch.setattr("strategy.indicators._rsi_divergence_flags", fake_flags)
 
-    exit_flags = build_rsi_divergence_exit(bars, bars, config)
+    exit_flags = build_rsi_divergence_exit_signals(bars, bars, config)
 
     assert exit_flags is not None
-    assert exit_flags.tolist() == [0, -1, 0, 0]
+    assert exit_flags.bullish.tolist() == [False, True, False, False]
+    assert exit_flags.bearish.tolist() == [False, True, False, False]

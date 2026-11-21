@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 import pandas as pd
 
@@ -555,34 +557,87 @@ def build_weakening_exit(
     return combined
 
 
-def rsi_divergence_flags(
+@dataclass(frozen=True)
+class RSIDivergenceSignals:
+    """Señales de divergencia por dirección, alineadas a las mismas velas.
+
+    La conversión a ``ndarray`` conserva compatibilidad con el formato firmado
+    histórico ``+1/-1/0``; en un empate representa la bajista. El motor usa las
+    dos máscaras originales para no descartar ninguna dirección.
+    """
+
+    bullish: np.ndarray
+    bearish: np.ndarray
+
+    def __post_init__(self) -> None:
+        bullish = np.asarray(self.bullish, dtype=bool)
+        bearish = np.asarray(self.bearish, dtype=bool)
+        if bullish.ndim != 1 or bearish.ndim != 1 or len(bullish) != len(bearish):
+            raise ValueError("Las señales RSI alcista y bajista deben ser vectores de igual longitud.")
+        object.__setattr__(self, "bullish", bullish)
+        object.__setattr__(self, "bearish", bearish)
+
+    @property
+    def shape(self) -> tuple[int]:
+        return self.bullish.shape
+
+    @property
+    def signed(self) -> np.ndarray:
+        """Representación histórica de signo único (bajista gana los empates)."""
+        return np.where(self.bearish, -1, self.bullish.astype(int)).astype(int)
+
+    def __array__(self, dtype=None, copy=None) -> np.ndarray:
+        result = self.signed
+        if dtype is not None:
+            result = result.astype(dtype, copy=False)
+        if copy:
+            result = result.copy()
+        return result
+
+    def __len__(self) -> int:
+        return len(self.bullish)
+
+    def __getitem__(self, key):
+        if isinstance(key, (int, np.integer)):
+            return self.signed[key]
+        return RSIDivergenceSignals(self.bullish[key], self.bearish[key])
+
+    def any(self) -> bool:
+        return bool(self.bullish.any() or self.bearish.any())
+
+    def tolist(self) -> list[int]:
+        return self.signed.tolist()
+
+
+def rsi_divergence_signals(
     high: np.ndarray,
     low: np.ndarray,
     rsi_values: np.ndarray,
     pivot: int,
     lookback: int,
-) -> np.ndarray:
+) -> RSIDivergenceSignals:
     """Divergencias RSI respecto a los pivotes previos del precio.
 
-    Devuelve ``+1`` en divergencia **alcista** (el precio hace mínimos más
-    bajos pero el RSI mínimos más altos), ``-1`` en **bajista** (el precio hace
-    máximos más altos pero el RSI máximos más bajos) y ``0`` sin señal.
+    ``bullish`` indica divergencia **alcista** (el precio hace mínimos más
+    bajos pero el RSI mínimos más altos); ``bearish`` indica divergencia
+    **bajista** (el precio hace máximos más altos pero el RSI máximos más bajos).
 
     Un pivote es un máximo/mínimo local estricto respecto de las ``pivot``
     velas a su izquierda (los empates con la derecha se resuelven en la barra
     más a la izquierda, para no duplicar señales). Sólo se compara con el pivote
     anterior del mismo tipo dentro de ``lookback`` velas y el flag se emite en
     la vela que **confirma** el pivote (índice del pivote + ``pivot``), de modo
-    que en esa vela sólo se usan datos ya cerrados: no hay lookahead. Si
-    coinciden divergencias alcista y bajista en la misma vela, gana la bajista.
+    que en esa vela sólo se usan datos ya cerrados: no hay lookahead. Las dos
+    direcciones pueden estar activas simultáneamente.
     """
     high = np.asarray(high, float)
     low = np.asarray(low, float)
     rsi_values = np.asarray(rsi_values, float)
     n = len(high)
-    flags = np.zeros(n, dtype=int)
+    bullish = np.zeros(n, dtype=bool)
+    bearish = np.zeros(n, dtype=bool)
     if pivot < 1 or lookback < 1 or len(low) != n or len(rsi_values) != n or n < 2 * pivot + 1:
-        return flags
+        return RSIDivergenceSignals(bullish, bearish)
     # Máximo/mínimo de las `pivot` velas a cada lado (excluida la propia).
     # Para el lado derecho se recorre la serie con `.iloc[::-1]`, que invierte
     # el orden pero conserva las etiquetas del índice.
@@ -599,20 +654,35 @@ def rsi_divergence_flags(
         if swing_high[p]:
             if (prev_high is not None and p - prev_high <= lookback
                     and high[p] > high[prev_high] and rsi_values[p] < rsi_values[prev_high]):
-                flags[confirm] = -1  # máximos al alza con el RSI a la baja
+                bearish[confirm] = True  # máximos al alza con el RSI a la baja
             prev_high = p
         if swing_low[p]:
             if (prev_low is not None and p - prev_low <= lookback
                     and low[p] < low[prev_low] and rsi_values[p] > rsi_values[prev_low]
-                    and flags[confirm] == 0):
-                flags[confirm] = 1  # mínimos a la baja con el RSI al alza
+            ):
+                bullish[confirm] = True  # mínimos a la baja con el RSI al alza
             prev_low = p
-    return flags
+    return RSIDivergenceSignals(bullish, bearish)
+
+
+def rsi_divergence_flags(
+    high: np.ndarray,
+    low: np.ndarray,
+    rsi_values: np.ndarray,
+    pivot: int,
+    lookback: int,
+) -> np.ndarray:
+    """Compatibilidad: devuelve un único flag firmado por vela.
+
+    En caso de coincidencia prevalece la divergencia bajista. El motor de
+    estrategia usa :func:`rsi_divergence_signals` para conservar ambas.
+    """
+    return rsi_divergence_signals(high, low, rsi_values, pivot, lookback).signed
 
 
 def _rsi_divergence_flags(
     raw: pd.DataFrame | None, bars: pd.DataFrame, cfg: Config, timeframe: str
-) -> np.ndarray | None:
+) -> RSIDivergenceSignals | None:
     """Flags de divergencia RSI para un único timeframe, alineadas a ``bars``."""
     timeframe_delta = pd.Timedelta(timeframe)
     strategy_delta = pd.Timedelta(cfg.timeframe)
@@ -637,77 +707,103 @@ def _rsi_divergence_flags(
             source_bars, source_tf = bars, cfg.timeframe
         else:
             source_bars, source_tf = resample_ohlcv(bars, timeframe), timeframe
-    elif timeframe_delta <= pd.Timedelta(cfg.timeframe) or pd.Timedelta(
-        minutes=source_minutes(raw)
-    ) >= timeframe_delta:
+    elif timeframe_delta <= pd.Timedelta(cfg.timeframe):
         source_bars, source_tf = bars, cfg.timeframe
     else:
-        source_bars, source_tf = resample_ohlcv(raw, timeframe), timeframe
+        raw_delta = pd.Timedelta(minutes=source_minutes(raw))
+        if raw_delta <= timeframe_delta:
+            source_bars = (
+                raw
+                if raw_delta == timeframe_delta
+                else resample_ohlcv(raw, timeframe)
+            )
+        else:
+            # If raw is coarser than the requested higher timeframe, the
+            # strategy bars are still a valid finer source for that timeframe.
+            source_bars = resample_ohlcv(bars, timeframe)
+        source_tf = timeframe
     if len(source_bars) < 2 * cfg.rsi_divergence_pivot + 1:
         return None
-    flags = rsi_divergence_flags(
+    signals = rsi_divergence_signals(
         source_bars["high"].to_numpy(float),
         source_bars["low"].to_numpy(float),
         rsi(source_bars.close, cfg.rsi_divergence_len).to_numpy(float),
         cfg.rsi_divergence_pivot,
         cfg.rsi_divergence_lookback,
     )
+    bull_flags, bear_flags = signals.bullish, signals.bearish
     if source_bars.index.equals(bars.index):
-        return flags
-    aligned = align_closed_events(
-        source_bars.index, flags, bars.index, source_tf, cfg.timeframe
+        return RSIDivergenceSignals(bull_flags, bear_flags)
+    bull = align_closed_events(
+        source_bars.index, bull_flags, bars.index, source_tf, cfg.timeframe
     )
-    return aligned.astype(int)
+    bear = align_closed_events(
+        source_bars.index, bear_flags, bars.index, source_tf, cfg.timeframe
+    )
+    return RSIDivergenceSignals(bull, bear)
 
 
-def _build_rsi_divergence_flags(
+def _build_rsi_divergence_signals(
     raw: pd.DataFrame | None,
     bars: pd.DataFrame,
     cfg: Config,
     timeframes: tuple[str, ...],
-) -> np.ndarray | None:
+) -> RSIDivergenceSignals | None:
     """Combina divergencias RSI con OR y las alinea a las velas de estrategia."""
     if bars.empty:
         return None
-    bull = np.zeros(len(bars), bool)
-    bear = np.zeros(len(bars), bool)
+    bull = np.zeros(len(bars), dtype=bool)
+    bear = np.zeros(len(bars), dtype=bool)
     built = False
     for timeframe in timeframes or (cfg.timeframe,):
         flags = _rsi_divergence_flags(raw, bars, cfg, timeframe)
         if flags is None:
             continue
         built = True
-        bull |= flags > 0
-        bear |= flags < 0
+        bull |= flags.bullish
+        bear |= flags.bearish
     if not built:
         return None
-    # A single signed flag cannot represent both directions at once. Match
-    # rsi_divergence_flags' documented tie-break: bearish takes precedence.
-    return np.where(bear, -1, bull.astype(int)).astype(int)
+    return RSIDivergenceSignals(bull, bear)
+
+
+def build_rsi_divergence_signals(
+    raw: pd.DataFrame | None, bars: pd.DataFrame, cfg: Config
+) -> RSIDivergenceSignals | None:
+    """Divergencias RSI direccionales usadas por el filtro de entrada."""
+    return _build_rsi_divergence_signals(
+        raw, bars, cfg, cfg.entry_rsi_divergence_timeframes
+    )
 
 
 def build_rsi_divergence_flags(
     raw: pd.DataFrame | None, bars: pd.DataFrame, cfg: Config
 ) -> np.ndarray | None:
-    """Divergencias RSI usadas por el filtro de entrada."""
-    return _build_rsi_divergence_flags(
-        raw, bars, cfg, cfg.entry_rsi_divergence_timeframes
+    """Compatibilidad: devuelve flags firmados para el filtro de entrada."""
+    signals = build_rsi_divergence_signals(raw, bars, cfg)
+    return None if signals is None else signals.signed
+
+
+def build_rsi_divergence_exit_signals(
+    raw: pd.DataFrame, bars: pd.DataFrame, cfg: Config
+) -> RSIDivergenceSignals | None:
+    """Salida por divergencia RSI combinando con OR todos los timeframes.
+
+    Devuelve ``None`` si no se pudo calcular ninguna (deshabilitado, sin datos
+    suficientes o timeframes incompatibles); si al menos una es válida, devuelve
+    señales ``bullish``/``bearish`` alineadas a ``bars``. Ambas direcciones
+    pueden estar activas simultáneamente en una vela.
+    """
+    if not cfg.exit_rsi_divergence_enabled or bars.empty:
+        return None
+    return _build_rsi_divergence_signals(
+        raw, bars, cfg, cfg.exit_rsi_divergence_timeframes
     )
 
 
 def build_rsi_divergence_exit(
     raw: pd.DataFrame, bars: pd.DataFrame, cfg: Config
 ) -> np.ndarray | None:
-    """Salida por divergencia RSI combinando con OR todos los timeframes.
-
-    Devuelve ``None`` si no se pudo calcular ninguna (deshabilitado, sin datos
-    suficientes o timeframes incompatibles); si al menos una es válida, devuelve
-    un array entero alineado a ``bars`` con ``+1`` (divergencia alcista),
-    ``-1`` (bajista) y ``0`` (sin señal). Al coincidir ambas direcciones gana
-    la bajista.
-    """
-    if not cfg.exit_rsi_divergence_enabled or bars.empty:
-        return None
-    return _build_rsi_divergence_flags(
-        raw, bars, cfg, cfg.exit_rsi_divergence_timeframes
-    )
+    """Compatibilidad: devuelve flags de salida firmados por vela."""
+    signals = build_rsi_divergence_exit_signals(raw, bars, cfg)
+    return None if signals is None else signals.signed

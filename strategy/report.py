@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 
 from strategy.config import Config
-from strategy.indicators import gaussian_filter_trend
+from strategy.indicators import RSIDivergenceSignals, gaussian_filter_trend
 from strategy.models import DEFAULT_OUTPUT_DIR
 
 # ---------------------------------------------------------------------------
@@ -417,7 +417,7 @@ def build_backtest_figure(
     equity: pd.DataFrame | None = None,
     adx_exit: np.ndarray | None = None,
     weak_exit: np.ndarray | None = None,
-    rsi_div_exit: np.ndarray | None = None,
+    rsi_div_exit: np.ndarray | RSIDivergenceSignals | None = None,
     raw: pd.DataFrame | None = None,
     source: str = "",
     title: str | None = None,
@@ -529,7 +529,11 @@ def build_backtest_figure(
         if weak_exit is not None:
             weak_exit = np.asarray(weak_exit, bool)[keep]
         if rsi_div_exit is not None:
-            rsi_div_exit = np.asarray(rsi_div_exit, int)[keep]
+            rsi_div_exit = (
+                rsi_div_exit[keep]
+                if isinstance(rsi_div_exit, RSIDivergenceSignals)
+                else np.asarray(rsi_div_exit, int)[keep]
+            )
         if trades is not None and not trades.empty:
             summary_trades = trades[
                 (trades["exit_time"] >= win_start) & (trades["exit_time"] < win_end)
@@ -552,14 +556,24 @@ def build_backtest_figure(
     n = len(bars)
     adx_flags = np.asarray(adx_exit, bool) if adx_exit is not None else np.zeros(n, bool)
     weak_flags = np.asarray(weak_exit, bool) if weak_exit is not None else np.zeros(n, bool)
-    div_flags = np.asarray(rsi_div_exit, int) if rsi_div_exit is not None else np.zeros(n, int)
+    if isinstance(rsi_div_exit, RSIDivergenceSignals):
+        div_bull = rsi_div_exit.bullish
+        div_bear = rsi_div_exit.bearish
+    else:
+        div_flags = (
+            np.asarray(rsi_div_exit, int)
+            if rsi_div_exit is not None
+            else np.zeros(n, int)
+        )
+        if len(div_flags) != n:
+            div_flags = np.zeros(n, int)
+        div_bull, div_bear = div_flags > 0, div_flags < 0
     if len(adx_flags) != n:
         adx_flags = np.zeros(n, bool)
     if len(weak_flags) != n:
         weak_flags = np.zeros(n, bool)
-    if len(div_flags) != n:
-        div_flags = np.zeros(n, int)
-    div_bull, div_bear = div_flags > 0, div_flags < 0
+    if len(div_bull) != n or len(div_bear) != n:
+        div_bull = div_bear = np.zeros(n, dtype=bool)
     adx_tfs, weak_tfs = _higher_timeframes(raw, cfg)
     if window is not None:
         adx_tfs = [frame for frame in
@@ -1348,7 +1362,7 @@ def build_monthly_backtest_htmls(
     equity: pd.DataFrame | None = None,
     adx_exit: np.ndarray | None = None,
     weak_exit: np.ndarray | None = None,
-    rsi_div_exit: np.ndarray | None = None,
+    rsi_div_exit: np.ndarray | RSIDivergenceSignals | None = None,
     raw: pd.DataFrame | None = None,
     source: str = "",
     output_dir: str | Path = DEFAULT_OUTPUT_DIR,
@@ -1417,7 +1431,7 @@ def generate_report(trades: pd.DataFrame, equity: pd.DataFrame, cfg: Config, dat
                     plot_dpi: int = 150, raw: pd.DataFrame | None = None,
                     signals: pd.DataFrame | None = None, adx_exit: np.ndarray | None = None,
                     weak_exit: np.ndarray | None = None,
-                    rsi_div_exit: np.ndarray | None = None,
+                    rsi_div_exit: np.ndarray | RSIDivergenceSignals | None = None,
                     plotly_path: str | Path | None = None) -> dict:
     """Calcula métricas, imprime el informe, guarda outputs y genera los gráficos.
 

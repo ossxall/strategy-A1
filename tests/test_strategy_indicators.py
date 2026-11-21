@@ -5,6 +5,7 @@ from strategy.indicators import (
     confirmed_crosses,
     ema_weakening_flags,
     rsi_divergence_flags,
+    rsi_divergence_signals,
 )
 
 
@@ -32,6 +33,20 @@ def test_bullish_rsi_divergence_and_lookback_boundary():
 
     assert flags.tolist() == [0, 0, 0, 0, 0, 1]
     assert not outside_lookback.any()
+
+
+def test_bullish_and_bearish_divergences_can_coincide():
+    high = np.array([3.0, 5.0, 4.0, 3.0, 5.0, 7.0, 6.0])
+    low = np.array([4.0, 5.0, 4.0, 3.0, 4.0, 2.0, 3.0])
+    rsi = np.array([50.0, 70.0, 50.0, 40.0, 50.0, 60.0, 50.0])
+
+    signals = rsi_divergence_signals(high, low, rsi, pivot=1, lookback=10)
+
+    assert signals.bullish.tolist() == [False, False, False, False, False, False, True]
+    assert signals.bearish.tolist() == [False, False, False, False, False, False, True]
+    # La API firmada antigua sigue priorizando la bajista.
+    signed = rsi_divergence_flags(high, low, rsi, pivot=1, lookback=10)
+    assert signed.tolist() == [0, 0, 0, 0, 0, 0, -1]
 
 
 def test_confirmed_cross_waits_for_all_configured_bars_and_rejects_failed_cross():
