@@ -362,6 +362,10 @@ class Config:
             raise ValueError("risk_pct must be in (0, 0.2].")
         if min(self.commission_bps, self.slippage_bps, self.stop_loss_pct) < 0:
             raise ValueError("Commissions, slippage and stop cannot be negative.")
+        if self.allow_long and self.stop_loss_pct >= 1:
+            raise ValueError(
+                "stop_loss_pct must be < 1 when LONG positions are enabled."
+            )
         if self.confirm_bars < 0:
             raise ValueError("confirm_bars cannot be negative.")
         if self.entry_adx_enabled and (self.entry_adx_len <= 0 or self.entry_adx_min < 0):

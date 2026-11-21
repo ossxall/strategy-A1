@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pytest
 
 from strategy.config import Config
 from strategy.indicators import build_rsi_divergence_exit
@@ -81,6 +82,61 @@ def test_losing_reversal_obeys_streak_trend_filter():
     assert equity.position_side.tolist() == ["LONG", "FLAT"]
     assert "filtro de tendencia" in equity.execution_rejection.iloc[1]
     assert equity.execution_rejection_time.iloc[1] == bars.index[0]
+
+
+def test_streak_filter_does_not_block_closing_open_position_on_reversal():
+    bars = _bars(2, "30min")
+    bars.iloc[1, bars.columns.get_loc("open")] = 90.0
+    bars.iloc[1, bars.columns.get_loc("high")] = 90.1
+    bars.iloc[1, bars.columns.get_loc("low")] = 89.9
+    bars.iloc[1, bars.columns.get_loc("close")] = 90.0
+    signals = pd.DataFrame(
+        {
+            "valid": [True, False],
+            "target": [-1, 0],
+            "trend_bias": [1, 1],
+        },
+        index=bars.index,
+    )
+    engine = Backtester(
+        bars,
+        _quiet_config(streak_trend_only=True),
+        signals=signals,
+    )
+    engine.position = Position(
+        position_id=1,
+        side=1,
+        quantity=1.0,
+        initial_quantity=1.0,
+        entry_price=100.0,
+        entry_time=bars.index[0],
+        entry_fee=0.0,
+        stop_pct=0.0,
+        risk_amount=0.0,
+    )
+    engine.streak_in_loss = True
+
+    trades, equity = engine.run()
+
+    assert trades.pnl_net.tolist() == [-10.0]
+    assert engine.position is None
+    assert engine.streak_in_loss
+    assert "filtro de tendencia" in equity.execution_rejection.iloc[1]
+    assert equity.execution_rejection_time.iloc[1] == bars.index[0]
+
+
+@pytest.mark.parametrize("stop_loss_pct", [1.0, 1.5])
+def test_stop_loss_at_or_above_100_percent_is_rejected_when_longs_enabled(
+    stop_loss_pct,
+):
+    with pytest.raises(ValueError, match="stop_loss_pct"):
+        _quiet_config(stop_loss_pct=stop_loss_pct)
+
+
+def test_stop_loss_at_or_above_100_percent_is_valid_for_short_only_config():
+    config = _quiet_config(stop_loss_pct=1.0, allow_long=False)
+
+    assert config.stop_loss_pct == 1.0
 
 
 def test_higher_timeframe_rsi_exit_is_aligned_as_a_single_event(monkeypatch):

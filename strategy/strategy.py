@@ -1503,7 +1503,8 @@ class Backtester:
                     rejection_target = signal_target
                 elif target and target != current:
                     bias_val = int(self.signals["trend_bias"].iloc[i])
-                    if cfg.streak_trend_only and self.streak_in_loss and bias_val != target:
+                    if (current == 0 and cfg.streak_trend_only
+                            and self.streak_in_loss and bias_val != target):
                         # Tras una pérdida sólo se entra con la tendencia mayor.
                         execution_reasons.append(
                             f"filtro de tendencia (sesgo {bias_val:+d})"
