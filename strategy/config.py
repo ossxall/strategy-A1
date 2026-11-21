@@ -186,75 +186,43 @@ class Config:
     partial_tp_enabled: bool = True
     partial_tp_r: float = 0.5
     partial_tp_pct: float = 5.0
-    #
-    # Second partial take-profit (optional). If enabled (>0), it triggers at
-    # partial_tp2_r (R-multiple of initial risk) closing partial_tp2_pct of the
-    # position. Partial 2 is intended to be at a larger distance than TP1.
-    #
     partial_tp2_r: float = 1.0
     partial_tp2_pct: float = 5.0
-    #
-    # Third partial take-profit, at a larger distance than TP2.
-    #
-    partial_tp3_r: float = 1.5
+    partial_tp3_r: float = 2.0
     partial_tp3_pct: float = 5.0
-    #
-    # Fourth partial take-profit, at a larger distance than TP3.
-    #
-    partial_tp4_r: float = 2.0
+    partial_tp4_r: float = 3.0
     partial_tp4_pct: float = 5.0
-    #
-    # Fifth partial take-profit, at a larger distance than TP4.
-    #
-    partial_tp5_r: float = 3.0
+    partial_tp5_r: float = 4.0
     partial_tp5_pct: float = 5.0
-    #
-    # Sixth partial take-profit, at a larger distance than TP5.
-    #
-    partial_tp6_r: float = 4.0
+    partial_tp6_r: float = 5.0
     partial_tp6_pct: float = 5.0
-    #
-    # Seventh partial take-profit, at a larger distance than TP6.
-    #
-    partial_tp7_r: float = 5.0
+    partial_tp7_r: float = 6.0
     partial_tp7_pct: float = 5.0
-    #
-    # Eighth partial take-profit, at a larger distance than TP7.
-    #
-    partial_tp8_r: float = 6.0
+    partial_tp8_r: float = 7.0
     partial_tp8_pct: float = 5.0
-    #
-    # Ninth partial take-profit, at a larger distance than TP8.
-    #
-    partial_tp9_r: float = 7.0
+    partial_tp9_r: float = 8.0
     partial_tp9_pct: float = 5.0
-    #
-    # Tenth partial take-profit, at a larger distance than TP9.
-    #
-    partial_tp10_r: float = 8.0
+    partial_tp10_r: float = 9.0
     partial_tp10_pct: float = 5.0
-    #
-    # Additional partial take-profits, each at a larger distance than the last.
-    #
-    partial_tp11_r: float = 9.0
+    partial_tp11_r: float = 10.0
     partial_tp11_pct: float = 5.0
-    partial_tp12_r: float = 10.0
+    partial_tp12_r: float = 11.0
     partial_tp12_pct: float = 5.0
-    partial_tp13_r: float = 11.0
+    partial_tp13_r: float = 12.0
     partial_tp13_pct: float = 5.0
-    partial_tp14_r: float = 12.0
+    partial_tp14_r: float = 13.0
     partial_tp14_pct: float = 5.0
-    partial_tp15_r: float = 13.0
+    partial_tp15_r: float = 14.0
     partial_tp15_pct: float = 5.0
-    partial_tp16_r: float = 14.0
+    partial_tp16_r: float = 15.0
     partial_tp16_pct: float = 5.0
-    partial_tp17_r: float = 15.0
+    partial_tp17_r: float = 16.0
     partial_tp17_pct: float = 5.0
-    partial_tp18_r: float = 16.0
+    partial_tp18_r: float = 17.0
     partial_tp18_pct: float = 5.0
-    partial_tp19_r: float = 17.0
+    partial_tp19_r: float = 18.0
     partial_tp19_pct: float = 5.0
-    partial_tp20_r: float = 18.0
+    partial_tp20_r: float = 19.0
     partial_tp20_pct: float = 5.0
     #
     # After TP3, the remaining SHORT exits if price exceeds the slow EMA by
