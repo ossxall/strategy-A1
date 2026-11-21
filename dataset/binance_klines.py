@@ -68,7 +68,6 @@ COLUMNS = [
 FLOAT_COLS = {"open", "high", "low", "close", "volume", "quote_volume",
               "taker_buy_volume", "taker_buy_quote_volume"}
 INT_COLS = {"open_time", "close_time", "count", "ignore"}
-TIMESTAMP_COLS = ("open_time", "close_time")
 MICROSECOND_TIMESTAMP_THRESHOLD = 100_000_000_000_000
 
 MARKETS = {"um": "data/futures/um", "cm": "data/futures/cm", "spot": "data/spot"}
@@ -310,6 +309,7 @@ def merge_csv(csvs: Sequence[Path], out: Path, add_timestamps: bool) -> int:
 
 
 def merge_parquet(csvs: Sequence[Path], out: Path) -> int:
+    """Combina klines al formato canónico timestamp + OHLCV de estrategia."""
     try:
         import pyarrow as pa
         import pyarrow.csv as pacsv
@@ -318,15 +318,12 @@ def merge_parquet(csvs: Sequence[Path], out: Path) -> int:
     except ImportError:
         raise SystemExit("Parquet requiere 'pyarrow'. Instálalo con: pip install pyarrow")
 
-    fields: list = []
-    for col in COLUMNS:
-        if col in ("open_time", "close_time"):
-            fields.append(pa.field(col, pa.timestamp("ms", tz="UTC")))
-        elif col in INT_COLS:
-            fields.append(pa.field(col, pa.int64()))
-        else:
-            fields.append(pa.field(col, pa.float64()))
-    schema = pa.schema(fields)
+    schema = pa.schema(
+        [
+            pa.field("timestamp", pa.timestamp("ms", tz="UTC")),
+            *(pa.field(col, pa.float64()) for col in OHLCV_COLUMNS),
+        ]
+    )
     read_types = {c: ("int64" if c in INT_COLS else "float64") for c in COLUMNS}
     conv = pacsv.ConvertOptions(column_types=read_types)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -341,19 +338,15 @@ def merge_parquet(csvs: Sequence[Path], out: Path) -> int:
                                      skip_rows=1 if header else 0)
             table = pacsv.read_csv(path, read_options=read, convert_options=conv)
             table = table.rename_columns(COLUMNS)
-            for col in TIMESTAMP_COLS:
-                values = table[col]
-                is_microseconds = pc.greater_equal(
-                    pc.abs(values), MICROSECOND_TIMESTAMP_THRESHOLD
-                )
-                normalized = pc.if_else(
-                    is_microseconds,
-                    pc.divide_checked(values, 1000),
-                    values,
-                )
-                table = table.set_column(
-                    table.schema.get_field_index(col), col, normalized
-                )
+            open_time = table["open_time"]
+            is_microseconds = pc.greater_equal(
+                pc.abs(open_time), MICROSECOND_TIMESTAMP_THRESHOLD
+            )
+            normalized_open_time = pc.if_else(
+                is_microseconds,
+                pc.divide_checked(open_time, 1000),
+                open_time,
+            )
             normalized_ohlcv = normalize_ohlcv_values(
                 *(
                     table[column].to_numpy(zero_copy_only=False)
@@ -366,6 +359,9 @@ def merge_parquet(csvs: Sequence[Path], out: Path) -> int:
                     column,
                     pa.array(values, type=pa.float64()),
                 )
+            table = table.select(["open_time", *OHLCV_COLUMNS])
+            table = table.set_column(0, "timestamp", normalized_open_time)
+            table = table.rename_columns(["timestamp", *OHLCV_COLUMNS])
             table = table.cast(schema)
             writer.write_table(table, row_group_size=250_000)
             rows += table.num_rows

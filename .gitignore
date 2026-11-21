@@ -22,3 +22,4 @@ research
 .pytest_cache
 permutation/results
 live/deploy/.setup.sh
+**.zip
