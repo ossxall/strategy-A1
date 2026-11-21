@@ -125,6 +125,83 @@ def test_streak_filter_does_not_block_closing_open_position_on_reversal():
     assert equity.execution_rejection_time.iloc[1] == bars.index[0]
 
 
+@pytest.mark.parametrize(
+    "position_side,signal_target,disabled_side",
+    [(-1, 1, "allow_long"), (1, -1, "allow_short")],
+)
+def test_disallowed_reversal_does_not_close_existing_position(
+    position_side, signal_target, disabled_side
+):
+    bars = _bars(2, "30min")
+    signals = pd.DataFrame(
+        {
+            "valid": [True, False],
+            "target": [signal_target, 0],
+            "trend_bias": [0, 0],
+        },
+        index=bars.index,
+    )
+    engine = Backtester(
+        bars,
+        _quiet_config(**{disabled_side: False}),
+        signals=signals,
+    )
+    engine.position = Position(
+        position_id=1,
+        side=position_side,
+        quantity=1.0,
+        initial_quantity=1.0,
+        entry_price=100.0,
+        entry_time=bars.index[0],
+        entry_fee=0.0,
+        stop_pct=0.0,
+        risk_amount=0.0,
+    )
+
+    trades, _ = engine.run()
+
+    assert trades.empty
+    assert engine.position is not None
+    assert engine.position.side == position_side
+    assert engine.opened == []
+
+
+def test_entry_filter_rejection_does_not_close_opposite_position():
+    bars = _bars(2, "30min")
+    signals = pd.DataFrame(
+        {
+            "valid": [True, True],
+            "target": [0, 0],  # The entry filter rejected the new LONG.
+            "trend_bias": [0, 0],
+            "cross_up_candidate": [True, False],
+        },
+        index=bars.index,
+    )
+    engine = Backtester(
+        bars,
+        _quiet_config(),
+        signals=signals,
+    )
+    engine.position = Position(
+        position_id=1,
+        side=-1,
+        quantity=1.0,
+        initial_quantity=1.0,
+        entry_price=100.0,
+        entry_time=bars.index[0],
+        entry_fee=0.0,
+        stop_pct=0.0,
+        risk_amount=0.0,
+    )
+
+    trades, _ = engine.run()
+
+    assert trades.empty
+    assert engine.position is not None
+    assert engine.position.side == -1
+    assert engine.opened == []
+
+
 @pytest.mark.parametrize("stop_loss_pct", [1.0, 1.5])
 def test_stop_loss_at_or_above_100_percent_is_rejected_when_longs_enabled(
     stop_loss_pct,
@@ -163,3 +240,25 @@ def test_higher_timeframe_rsi_exit_is_aligned_as_a_single_event(monkeypatch):
 
     assert exit_flags is not None
     assert np.flatnonzero(exit_flags).tolist() == [2 * 48 - 1]
+
+
+def test_bearish_rsi_divergence_wins_when_timeframes_conflict(monkeypatch):
+    bars = _bars(4, "30min")
+    config = _quiet_config(
+        timeframe="30min",
+        rsi_divergence_exit_enabled=True,
+        rsi_divergence_timeframe=("1h", "2h"),
+        rsi_divergence_pivot=1,
+    )
+
+    def fake_flags(raw, bars, cfg, timeframe):
+        flags = np.zeros(len(bars), dtype=int)
+        flags[1] = 1 if timeframe == "1h" else -1
+        return flags
+
+    monkeypatch.setattr("strategy.indicators._rsi_divergence_flags", fake_flags)
+
+    exit_flags = build_rsi_divergence_exit(bars, bars, config)
+
+    assert exit_flags is not None
+    assert exit_flags.tolist() == [0, -1, 0, 0]

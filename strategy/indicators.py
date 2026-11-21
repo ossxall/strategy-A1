@@ -678,7 +678,9 @@ def build_rsi_divergence_flags(
         bear |= flags < 0
     if not built:
         return None
-    return bull.astype(int) - bear.astype(int)
+    # A single signed flag cannot represent both directions at once. Match
+    # rsi_divergence_flags' documented tie-break: bearish takes precedence.
+    return np.where(bear, -1, bull.astype(int)).astype(int)
 
 
 def build_rsi_divergence_exit(
