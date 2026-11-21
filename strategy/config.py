@@ -184,6 +184,7 @@ class Config:
     # stop-loss streaks) at the cost of trimming part of the return.
     #
     partial_tp_enabled: bool = True
+    
     partial_tp_r: float = 0.5
     partial_tp_pct: float = 5.0
     partial_tp2_r: float = 1.0
