@@ -4,7 +4,7 @@ import pytest
 
 import strategy.strategy as strategy_module
 from strategy.config import Config
-from strategy.indicators import spread_flags
+from strategy.indicators import RSIDivergenceSignals, spread_flags
 from strategy.strategy import Backtester, EMACrossStrategy
 
 
@@ -46,7 +46,7 @@ def test_entries_are_filtered_by_recent_divergence_in_the_same_direction(monkeyp
     )
     monkeypatch.setattr(
         strategy_module,
-        "build_rsi_divergence_flags",
+        "build_rsi_divergence_signals",
         lambda raw, source_bars, cfg: np.array([1, 0, -1, 0]),
     )
     cfg = Config(
@@ -69,7 +69,7 @@ def test_entries_are_filtered_by_recent_divergence_in_the_same_direction(monkeyp
 
     monkeypatch.setattr(
         strategy_module,
-        "build_rsi_divergence_flags",
+        "build_rsi_divergence_signals",
         lambda raw, source_bars, cfg: np.array([-1, 0, 1, 0]),
     )
     rejected = EMACrossStrategy(cfg).generate_signals(bars)
@@ -84,7 +84,7 @@ def test_entry_divergence_remains_active_at_exact_lookback_age(monkeypatch):
     divergence = np.zeros(len(bars), dtype=int)
     divergence[0] = 1
     monkeypatch.setattr(
-        strategy_module, "build_rsi_divergence_flags", lambda raw, source_bars, cfg: divergence
+        strategy_module, "build_rsi_divergence_signals", lambda raw, source_bars, cfg: divergence
     )
     cfg = Config(
         timeframe="30min",
@@ -104,6 +104,47 @@ def test_entry_divergence_remains_active_at_exact_lookback_age(monkeypatch):
 
     assert signals.entry_rsi_bull_divergence_blocked.iloc[48]
     assert not signals.entry_rsi_bull_divergence_blocked.iloc[49]
+
+
+def test_simultaneous_entry_divergences_block_both_directions(monkeypatch):
+    bars = make_bars(4)
+    fast = np.full(4, 2.0)
+    slow = np.full(4, 1.0)
+    monkeypatch.setattr(
+        strategy_module,
+        "ema",
+        lambda values, period: pd.Series(fast if period == 55 else slow, index=values.index),
+    )
+    monkeypatch.setattr(
+        strategy_module.talib,
+        "MACD",
+        lambda *args, **kwargs: (
+            np.zeros(4), np.zeros(4), np.zeros(4)
+        ),
+    )
+    bullish = np.array([False, True, False, False])
+    bearish = np.array([False, True, False, False])
+    monkeypatch.setattr(
+        strategy_module,
+        "build_rsi_divergence_signals",
+        lambda raw, source_bars, cfg: RSIDivergenceSignals(bullish, bearish),
+    )
+    config = Config(
+        timeframe="30min",
+        macd_timeframe=None,
+        confirm_bars=0,
+        entry_adx_enabled=False,
+        entry_atr_enabled=False,
+        entry_gaussian_trend_enabled=False,
+        entry_price_ema_filter_enabled=False,
+        entry_rsi_divergence_lookback=2,
+        streak_trend_only=False,
+    )
+
+    signals = EMACrossStrategy(config).generate_signals(bars)
+
+    assert signals.entry_rsi_bull_divergence_blocked.tolist() == [False, True, True, True]
+    assert signals.entry_rsi_bear_divergence_blocked.tolist() == [False, True, True, True]
 
 
 def test_backtester_applies_recent_divergence_to_custom_long_signals_only():

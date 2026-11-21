@@ -60,6 +60,15 @@ def _simulation_cache_key(
 ) -> tuple:
     """Identifica el baseline cerrado que puede reutilizarse entre polls 1m."""
     last = bars.iloc[-1]
+    if rsi_div_exit is None:
+        rsi_div_state = None
+    elif hasattr(rsi_div_exit, "bullish") and hasattr(rsi_div_exit, "bearish"):
+        rsi_div_state = (
+            bool(rsi_div_exit.bullish[-1]),
+            bool(rsi_div_exit.bearish[-1]),
+        )
+    else:
+        rsi_div_state = int(np.asarray(rsi_div_exit)[-1])
     return (
         repr(cfg),
         history_revision,
@@ -72,7 +81,7 @@ def _simulation_cache_key(
         int(signals["trend_bias"].iloc[-1]),
         None if adx_exit is None else bool(np.asarray(adx_exit)[-1]),
         None if weak_exit is None else bool(np.asarray(weak_exit)[-1]),
-        None if rsi_div_exit is None else int(np.asarray(rsi_div_exit)[-1]),
+        rsi_div_state,
     )
 
 

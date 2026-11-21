@@ -4,6 +4,7 @@ import pytest
 
 import strategy.indicators as indicators
 from strategy.config import Config
+from strategy.indicators import RSIDivergenceSignals
 from strategy.utils import resample_ohlcv
 
 
@@ -31,11 +32,12 @@ def test_lower_rsi_divergence_timeframe_uses_raw_bars_at_requested_resolution(
 
     def fake_divergences(high, low, rsi_values, pivot, lookback):
         observed_lengths.append(len(high))
-        flags = np.zeros(len(high), dtype=int)
-        flags[5] = 1
-        return flags
+        bullish = np.zeros(len(high), dtype=bool)
+        bearish = np.zeros(len(high), dtype=bool)
+        bullish[5] = True
+        return RSIDivergenceSignals(bullish, bearish)
 
-    monkeypatch.setattr(indicators, "rsi_divergence_flags", fake_divergences)
+    monkeypatch.setattr(indicators, "rsi_divergence_signals", fake_divergences)
     config = Config(
         timeframe="30min",
         exit_rsi_divergence_timeframe="5min",
@@ -63,9 +65,10 @@ def test_entry_and_exit_divergence_use_independent_timeframes(monkeypatch):
 
     def fake_divergences(high, low, rsi_values, pivot, lookback):
         observed_lengths.append(len(high))
-        return np.zeros(len(high), dtype=int)
+        zeros = np.zeros(len(high), dtype=bool)
+        return RSIDivergenceSignals(zeros, zeros)
 
-    monkeypatch.setattr(indicators, "rsi_divergence_flags", fake_divergences)
+    monkeypatch.setattr(indicators, "rsi_divergence_signals", fake_divergences)
     config = Config(
         timeframe="30min",
         entry_rsi_divergence_timeframe="5min",

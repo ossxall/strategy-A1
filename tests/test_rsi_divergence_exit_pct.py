@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 
 from strategy.config import Config
+from strategy.indicators import RSIDivergenceSignals
 from strategy.models import Position
 from strategy.strategy import Backtester
 
@@ -57,6 +58,63 @@ def test_rsi_divergence_exit_closes_configured_percent():
     assert trades.quantity.iloc[0] == 0.5
     assert engine.position is not None
     assert engine.position.quantity == 0.5
+
+
+def test_simultaneous_exit_divergences_close_against_the_open_position():
+    index = pd.date_range("2026-01-01", periods=2, freq="30min", tz="UTC")
+    prices = np.array([100.0, 101.0])
+    bars = pd.DataFrame(
+        {
+            "open": prices,
+            "high": prices + 0.5,
+            "low": prices - 0.5,
+            "close": prices,
+            "volume": 1.0,
+        },
+        index=index,
+    )
+    signals = pd.DataFrame(
+        {"valid": True, "target": 0, "trend_bias": 0}, index=index
+    )
+    divergence = RSIDivergenceSignals(
+        bullish=np.array([True, False]),
+        bearish=np.array([True, False]),
+    )
+    for side, expected_reason in (
+        (1, "RSI_DIVERGENCE_BEAR_50%"),
+        (-1, "RSI_DIVERGENCE_BULL_50%"),
+    ):
+        config = Config(
+            exit_rsi_divergence_enabled=True,
+            exit_rsi_divergence_pct=50.0,
+            partial_tp_enabled=False,
+            partial_tp2_r=0,
+            partial_tp2_pct=0,
+            stop_loss_pct=0,
+            monthly_loss_limit_pct=0,
+            streak_trend_only=False,
+            force_close_at_end=False,
+        )
+        engine = Backtester(
+            bars, config, signals=signals, rsi_div_exit=divergence
+        )
+        engine.position = Position(
+            position_id=1,
+            side=side,
+            quantity=1.0,
+            initial_quantity=1.0,
+            entry_price=100.0,
+            entry_time=index[0],
+            entry_fee=0.0,
+            stop_pct=0.0,
+            risk_amount=0.0,
+        )
+
+        trades, _ = engine.run()
+
+        assert trades.reason.tolist() == [expected_reason]
+        assert engine.position is not None
+        assert engine.position.quantity == 0.5
 
 
 def test_rsi_divergence_exit_percent_must_be_between_zero_and_100():
