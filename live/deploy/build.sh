@@ -33,6 +33,7 @@ sed -i -E \
   authelia/configuration.yml
 
 APP_ENV=prod docker-compose \
+  --profile production \
   --env-file .env.prod \
   -f docker-compose.yml \
   -f docker-compose.runtime.yml \
@@ -40,6 +41,7 @@ APP_ENV=prod docker-compose \
   build --no-cache --pull --force-rm
 
 APP_ENV=prod docker-compose \
+  --profile production \
   --env-file .env.prod \
   -f docker-compose.yml \
   -f docker-compose.runtime.yml \
@@ -48,6 +50,7 @@ APP_ENV=prod docker-compose \
 
 # Nginx config is bind-mounted; recreate it so updated host files are loaded.
 APP_ENV=prod docker-compose \
+  --profile production \
   --env-file .env.prod \
   -f docker-compose.yml \
   -f docker-compose.runtime.yml \

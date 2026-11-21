@@ -12,7 +12,9 @@ el build. `--remote-dir` es el directorio padre del checkout
 
 ## Preparación del VPS
 
-Instala Docker Engine y Docker Compose 1.29.2 en el VPS. `live/config.dev.yaml`
+Instala Docker Engine y Docker Compose 1.29.2 en el VPS; esta versión soporta
+perfiles de servicio. Usa siempre `-p blacker-bot1` para conservar el nombre
+estable del proyecto. `live/config.dev.yaml`
 contiene la configuración no secreta común; `live/config.prod.yaml` solo define
 los overrides de producción, que se aplican con `APP_ENV=prod`. En tu PC, crea
 `live/.env.prod` a partir de `.env.example` y completa solo secretos y
@@ -37,6 +39,10 @@ usuario y contraseña (sin segundo factor). La cookie dura 24 horas, también
 caduca tras 24 horas de inactividad, y no tiene una extensión «recordarme».
 Redis conserva la sesión entre reinicios de Authelia; Redis no publica ningún
 puerto al host.
+
+Estos servicios de acceso externo y operación se inician con el perfil Compose
+`production`; el perfil por defecto es para desarrollo local y no requiere
+certificado, Authelia ni credenciales del monitor.
 
 SQLite Web tiene acceso de lectura/escritura a las bases de `live/data/`.
 `SQLITE_WEB_PASSWORD` queda vacía por ahora; Nginx protege

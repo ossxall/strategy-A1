@@ -21,6 +21,35 @@ def test_compose_passes_app_env_to_each_profiled_service():
         )
 
 
+def test_dev_compose_does_not_enable_production_integrations_by_default():
+    compose_path = Path(__file__).resolve().parents[1] / "live/docker-compose.yml"
+    compose = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
+
+    for service in ("feed", "bot", "executor"):
+        assert "profiles" not in compose["services"][service]
+
+    production_services = (
+        "authelia",
+        "dozzle",
+        "glances",
+        "nginx",
+        "redis",
+        "sqlweb",
+        "webssh",
+    )
+    for service in production_services:
+        assert "production" in compose["services"][service]["profiles"]
+    assert "production" in compose["services"]["monitor"]["profiles"]
+    assert "monitor" in compose["services"]["monitor"]["profiles"]
+
+
+def test_dev_profile_keeps_binance_trading_disabled():
+    config_path = Path(__file__).resolve().parents[1] / "live/config.dev.yaml"
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+
+    assert config["BOT_BINANCE_TRADING_ENABLED"] == "false"
+
+
 def test_prod_bot_does_not_require_strategy_environment_variables(monkeypatch):
     monkeypatch.setenv("APP_ENV", "prod")
     monkeypatch.setenv("BOT_SYMBOL", "BTCUSDT")

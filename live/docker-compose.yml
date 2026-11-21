@@ -10,25 +10,25 @@
 #   esté vacío y reintenta cada POLL_SECONDS, así que nunca queda bloqueado si
 #   el feed tarda o queda unhealthy.
 #
-# Uso (desde ./live):
-#   cp .env.example .env.dev  # rellena secretos de desarrollo solo en la copia
-#   APP_ENV=dev docker-compose --env-file .env.dev -f docker-compose.yml -f docker-compose.runtime.yml -p blacker-bot1 up -d --build
-#   APP_ENV=dev docker-compose --env-file .env.dev -f docker-compose.yml -f docker-compose.runtime.yml -p blacker-bot1 ps
-#   APP_ENV=dev docker-compose --env-file .env.dev -f docker-compose.yml -f docker-compose.runtime.yml -p blacker-bot1 logs -f bot
-#   docker-compose -f docker-compose.yml -p blacker-bot1 down  # sin perfiles ni secretos
+# Desarrollo (solo feed, bot y executor):
+#   APP_ENV=dev docker compose --env-file .env.dev -p blacker-bot1 up -d --build
+# Producción (incluye proxy, Authelia y servicios auxiliares):
+#   APP_ENV=prod docker compose --profile production --env-file .env.prod -p blacker-bot1 up -d --build
+# Monitor opcional en desarrollo (requiere credenciales Telegram en .env.dev):
+#   APP_ENV=dev docker compose --profile monitor --env-file .env.dev -p blacker-bot1 up -d monitor
+# Para detener el stack sin eliminar volúmenes:
+#   docker compose -p blacker-bot1 down
 #
 # config.dev.yaml es la base; APP_ENV=prod aplica config.prod.yaml encima.
 # Compose solo pasa los secretos privados requeridos por cada servicio.
 # Los datos persistentes se guardan en live/data y no se incluyen en la imagen.
-
-version: "2.4"
 
 x-common: &common
   build:
     context: ..
     dockerfile: live/Dockerfile
   image: blacker-bot1:latest
-  working_dir: /app/legacy/bot1
+  working_dir: /app
   volumes:
     - ./data:/data
   environment:
@@ -69,7 +69,7 @@ services:
     command: ["python", "-m", "bot"]
     volumes:
       - ./data:/data
-      - bot_reports:/app/legacy/bot1/bot/data
+      - bot_reports:/app/bot/data
     ports:
       - "127.0.0.1:8080:8080"
     depends_on:
@@ -80,7 +80,7 @@ services:
       APP_ENV: ${APP_ENV:-dev}
       BOT_DB_PATH: /data/feed.db
       BOT_SIGNAL_DB: /data/signal.db
-      BOT_BACKTEST_REPORT_DIR: /app/legacy/bot1/bot/data/backtest_out
+      BOT_BACKTEST_REPORT_DIR: /app/bot/data/backtest_out
       BOT_HEARTBEAT: /data/bot1.heartbeat
       BOT_HTTP_HOST: 0.0.0.0
       BOT_HTTP_PORT: "8080"
@@ -122,6 +122,7 @@ services:
 
   webssh:
     <<: *common
+    profiles: ["production"]
     command: ["python", "ssh/start_webssh.py"]
     volumes:
       - ./ssh/known_hosts:/root/.ssh/known_hosts:ro
@@ -134,6 +135,7 @@ services:
 
   sqlweb:
     <<: *common
+    profiles: ["production"]
     command:
       - python
       - sqlweb/start.py
@@ -157,9 +159,10 @@ services:
 
   monitor:
     <<: *common
+    profiles: ["production", "monitor"]
     command: ["python", "-m", "monitor"]
     volumes:
-      - ./monitor/config.yaml:/app/legacy/bot1/monitor/config.yaml:ro
+      - ./monitor/config.yaml:/app/monitor/config.yaml:ro
     environment:
       APP_ENV: ${APP_ENV:-dev}
       # El teardown no debe exigir secretos; monitor/config.py los valida al arrancar.
@@ -184,6 +187,7 @@ services:
 
   glances:
     <<: *common
+    profiles: ["production"]
     command:
       - python
       - glances/start_web.py
@@ -200,6 +204,7 @@ services:
     pid: host
 
   dozzle:
+    profiles: ["production"]
     image: amir20/dozzle:v11.4.3-alpine
     restart: unless-stopped
     volumes:
@@ -210,6 +215,7 @@ services:
       DOZZLE_BASE: /logs
 
   authelia:
+    profiles: ["production"]
     image: authelia/authelia:4.39.28
     user: "${AUTHELIA_UID:-1000}:${AUTHELIA_GID:-1000}"
     restart: unless-stopped
@@ -257,6 +263,7 @@ services:
       - lovelacers.com
 
   redis:
+    profiles: ["production"]
     image: redis:7.4.12-alpine
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes", "--save", "60", "1"]
@@ -279,6 +286,7 @@ services:
         max-file: "5"
 
   nginx:
+    profiles: ["production"]
     image: nginx:1.30.6-alpine
     networks:
       - default

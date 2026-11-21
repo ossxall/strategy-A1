@@ -5,6 +5,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 export APP_ENV=prod
 compose=(
   docker-compose
+  --profile production
   --env-file .env.prod
   -f docker-compose.yml
   -f docker-compose.runtime.yml

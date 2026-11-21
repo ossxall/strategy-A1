@@ -101,13 +101,20 @@ def normalize_ohlcv(
     try:
         # Binance open times have millisecond precision. Fixing the index unit
         # also makes Parquet datetimes and SQLite epochs byte-for-byte
-        # comparable at the pandas dtype level.
-        index = pd.DatetimeIndex(timestamps).as_unit("ms", round_ok=False)
+        # comparable at the pandas dtype level. Pandas 3.x truncates when
+        # converting units, so compare before/after to reject sub-ms values.
+        source_index = pd.DatetimeIndex(timestamps)
+        index = source_index.as_unit("ms")
     except (OverflowError, ValueError) as exc:
         raise ValueError(
             "timestamp debe tener precisión de milisegundos y poder "
             "representarse en ese formato."
         ) from exc
+    if not source_index.equals(index):
+        raise ValueError(
+            "timestamp debe tener precisión de milisegundos y poder "
+            "representarse en ese formato."
+        )
     out = pd.DataFrame(numeric, index=index)
     out.index.name = "timestamp"
     out = out.sort_index(kind="stable")
