@@ -1141,6 +1141,10 @@ class ExecutionWorker:
         stop_id = self._protective_stop(
             signal, snapshot, breakeven=breakeven
         )
+        if not stop_id:
+            # stop_loss_pct=0 es una configuración válida: no hay una orden
+            # protectora que consultar ni confirmar.
+            return ""
         self._verify_protective_stop(stop_id)
         return stop_id
 
