@@ -147,7 +147,7 @@ class Config:
     # the open position. Entry and exit can use independent timeframes.
     #
     exit_rsi_divergence_enabled: bool = True
-    exit_rsi_divergence_pct: float = 50.0
+    exit_rsi_divergence_pct: float = 100.0
     exit_rsi_divergence_timeframe: str | list[str] | tuple[str, ...] = ("1D")
     #
     # Shared RSI divergence calculation parameters for entry and exit.
