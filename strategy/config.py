@@ -202,39 +202,39 @@ class Config:
     # stop-loss streaks) at the cost of trimming part of the return.
     #
     partial_tp_enabled: bool = True
-    partial_tp_r: float = 1.0
+    partial_tp_r: float = 0.5
     partial_tp_pct: float = 5.0
     #
     # Second partial take-profit (optional). If enabled (>0), it triggers at
     # partial_tp2_r (R-multiple of initial risk) closing partial_tp2_pct of the
     # position. Partial 2 is intended to be at a larger distance than TP1.
     #
-    partial_tp2_r: float = 1.5
+    partial_tp2_r: float = 1.0
     partial_tp2_pct: float = 5.0
     #
     # Third partial take-profit, at a larger distance than TP2.
     #
-    partial_tp3_r: float = 2.0
+    partial_tp3_r: float = 1.5
     partial_tp3_pct: float = 5.0
     #
     # Fourth partial take-profit, at a larger distance than TP3.
     #
-    partial_tp4_r: float = 2.5
+    partial_tp4_r: float = 2.0
     partial_tp4_pct: float = 5.0
     #
     # Fifth partial take-profit, at a larger distance than TP4.
     #
-    partial_tp5_r: float = 3.0
+    partial_tp5_r: float = 2.5
     partial_tp5_pct: float = 5.0
     #
     # Sixth partial take-profit, at a larger distance than TP5.
     #
-    partial_tp6_r: float = 3.5
+    partial_tp6_r: float = 3.0
     partial_tp6_pct: float = 5.0
     #
     # Seventh partial take-profit, at a larger distance than TP6.
     #
-    partial_tp7_r: float = 4.0
+    partial_tp7_r: float = 3.5
     partial_tp7_pct: float = 5.0
     #
     # After TP3, the remaining SHORT exits if price exceeds the slow EMA by
