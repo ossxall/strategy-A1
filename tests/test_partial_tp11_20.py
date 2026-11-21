@@ -19,7 +19,7 @@ def test_tp11_to_tp20_execute_for_long_and_short(level, side):
         streak_trend_only=False,
     )
     index = pd.date_range("2026-01-01", periods=2, freq="30min", tz="UTC")
-    target_r = float(level - 2)
+    target_r = float(level - 1)
     target_price = 1000.0 + side * target_r * 10.0
     bars = pd.DataFrame(
         {
@@ -62,7 +62,7 @@ def test_tp11_to_tp20_execute_for_long_and_short(level, side):
 @pytest.mark.parametrize("level", range(11, 21))
 def test_tp11_to_tp20_defaults_and_validation(level):
     config = Config()
-    assert getattr(config, f"partial_tp{level}_r") == float(level - 2)
+    assert getattr(config, f"partial_tp{level}_r") == float(level - 1)
     assert getattr(config, f"partial_tp{level}_pct") == 5.0
     disabled = Config(**{
         f"partial_tp{level}_r": 0.0,
@@ -87,6 +87,6 @@ def test_tp_validation_skips_disabled_levels_when_checking_order():
     config = Config(
         partial_tp10_r=0.0,
         partial_tp10_pct=0.0,
-        partial_tp11_r=8.0,
+        partial_tp11_r=9.0,
     )
-    assert config.partial_tp11_r == 8.0
+    assert config.partial_tp11_r == 9.0

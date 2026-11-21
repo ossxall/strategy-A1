@@ -3,10 +3,10 @@
 Strategy 2 — EMA Cross + MACD + ADX
 ============================================
 
-Gestión de salida por defecto: take-profit parcial a 1R por el porcentaje
-configurado en `partial_tp_pct` (10% por defecto) y stop a breakeven del resto
-(`partial_tp_enabled`). Sube el win rate y recorta la
-racha de pérdidas en whipsaw; puede desactivarse con `partial_tp_enabled=False`.
+Gestión de salida por defecto: una escalera de 20 take-profits parciales
+(TP1–TP20), desde 0,5R hasta 19R. Cada porcentaje se aplica sobre la cantidad
+que queda abierta; TP1 puede mover el stop restante a breakeven. La escalera
+puede desactivarse con `partial_tp_enabled=False`.
 
 Y, por último, una **divergencia RSI en contra cierra el porcentaje configurado**
 (`exit_rsi_divergence_pct`, 100 % por defecto): la divergencia bajista (precio

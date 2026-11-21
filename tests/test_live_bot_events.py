@@ -406,6 +406,7 @@ def test_ema_slow_touch_exit_is_published_as_close_confirmed_not_intrabar():
         partial_tp7_pct=0.0,
         partial_tp8_r=0.0,
         partial_tp8_pct=0.0,
+        tp3_ema_slow_exit_enabled=True,
         tp3_ema_slow_penetration_pct=0.0,
     )
 

@@ -177,11 +177,10 @@ class Config:
     adx_adxlen: int = 14
     adx_key_level: float = 23.0
     adx_exit_pct: float = 100.0
-    # Exit management aimed at reducing whipsaw loss streaks: when price reaches
-    # `partial_tp_r` times the initial risk, profit is locked by closing
-    # `partial_tp_pct` of the position and, optionally, moving the stop of the
-    # remainder to breakeven. Raises the real win rate (breaks consecutive
-    # stop-loss streaks) at the cost of trimming part of the return.
+    # Escalonar salidas parciales TP1-TP20 en múltiplos del riesgo inicial.
+    # Cada `partial_tpN_pct` es un porcentaje de la cantidad que queda abierta
+    # al ejecutarse ese nivel. TP1 puede mover el stop restante a breakeven.
+    # El orden de los niveles activos debe ser estrictamente creciente.
     #
     partial_tp_enabled: bool = True
     

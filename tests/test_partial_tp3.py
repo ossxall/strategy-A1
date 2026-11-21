@@ -63,8 +63,8 @@ def test_tp3_closes_configured_percent_at_2r_for_both_sides(side):
     engine._manage(1)
 
     trade = engine.trades[0]
-    assert trade.reason == "PARTIAL_TP3_1.5R"
-    assert trade.exit_price == (115.0 if side == 1 else 85.0)
+    assert trade.reason == "PARTIAL_TP3_2R"
+    assert trade.exit_price == (120.0 if side == 1 else 80.0)
     assert trade.quantity == pytest.approx(0.05)
     assert engine.position is not None
     assert engine.position.partial3_done
@@ -73,9 +73,9 @@ def test_tp3_closes_configured_percent_at_2r_for_both_sides(side):
 
 def test_tp3_defaults_and_ordering_validation():
     config = Config()
-    assert config.partial_tp3_r == 1.5
+    assert config.partial_tp3_r == 2.0
     assert config.partial_tp3_pct == 5.0
-    assert Config(partial_tp2_r=0, partial_tp2_pct=0).partial_tp3_r == 1.5
+    assert Config(partial_tp2_r=0, partial_tp2_pct=0).partial_tp3_r == 2.0
 
     with pytest.raises(ValueError, match="partial take-profit 3"):
         Config(partial_tp3_r=0, partial_tp3_pct=5.0)
