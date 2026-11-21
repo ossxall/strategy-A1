@@ -53,6 +53,7 @@ def test_entries_are_filtered_by_recent_divergence_in_the_same_direction(monkeyp
         timeframe="30min",
         macd_timeframe=None,
         confirm_bars=0,
+        ema_cross_min_gap_atr=0,
         entry_adx_enabled=False,
         entry_atr_enabled=False,
         entry_gaussian_trend_enabled=False,

@@ -754,13 +754,39 @@ def build_backtest_figure(
                         signals[reasons_column].fillna("").astype(str)
                         if reasons_column in signals else pd.Series("", index=signals.index)
                     )
-                    texts = [
-                        f"{label}<br>Motivo: {reasons.iloc[i] or 'filtro de entrada'}"
-                        for i in np.flatnonzero(mask)
-                    ]
-                    fig.add_trace(_marker_trace(
-                        sig_x[mask], y[mask], label, "x", color, 10, text=texts,
-                    ), row=r, col=1)
+                    gap_rejected = mask & reasons.str.contains(
+                        "separación EMA insuficiente", regex=False
+                    ).to_numpy()
+                    gap_values = (
+                        signals["ema_cross_gap_atr"].to_numpy(float)
+                        if "ema_cross_gap_atr" in signals
+                        else np.full(len(signals), np.nan)
+                    )
+                    for selected, marker_label, marker_color in (
+                        (mask & ~gap_rejected, label, color),
+                        (
+                            gap_rejected,
+                            f"{label} · separación EMA insuficiente",
+                            "#ffd54f",
+                        ),
+                    ):
+                        if not selected.any():
+                            continue
+                        texts = []
+                        for i in np.flatnonzero(selected):
+                            reason = reasons.iloc[i] or "filtro de entrada"
+                            text = f"{marker_label}<br>Motivo: {reason}"
+                            if gap_rejected[i] and np.isfinite(gap_values[i]):
+                                text += (
+                                    f"<br>Brecha: {gap_values[i]:.3f} ATR"
+                                    f"<br>Mínimo: {cfg.ema_cross_min_gap_atr:.2f} ATR"
+                                )
+                            texts.append(text)
+                        fig.add_trace(_marker_trace(
+                            sig_x[selected], y[selected], marker_label, "x",
+                            marker_color, 11 if gap_rejected[selected].any() else 10,
+                            text=texts,
+                        ), row=r, col=1)
 
     if (not execution_events.empty
             and {"execution_rejection_time", "execution_rejection_target",

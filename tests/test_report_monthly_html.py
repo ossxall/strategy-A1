@@ -228,6 +228,9 @@ def test_backtest_figure_shows_rejections_position_risk_and_drawdown():
             "trend_bias": [1, 1, -1],
             "cross_up_rejected": [False, True, False],
             "entry_rejection_reasons_long": ["", "divergencia RSI; ATR fuera de rango", ""],
+            "cross_down_rejected": [False, False, True],
+            "entry_rejection_reasons_short": ["", "", "separación EMA insuficiente"],
+            "ema_cross_gap_atr": [np.nan, np.nan, 0.08],
             "adx_entry": [np.nan, np.nan, np.nan],
         },
         index=index,
@@ -270,14 +273,15 @@ def test_backtest_figure_shows_rejections_position_risk_and_drawdown():
         }
     )
     no_flags = np.zeros(len(index), dtype=bool)
+    cfg = Config(
+        entry_atr_enabled=False,
+        entry_adx_enabled=False,
+        adx_exit_enabled=False,
+        streak_trend_only=True,
+    )
     figure = report.build_backtest_figure(
         bars,
-        Config(
-            entry_atr_enabled=False,
-            entry_adx_enabled=False,
-            adx_exit_enabled=False,
-            streak_trend_only=True,
-        ),
+        cfg,
         signals=signals,
         trades=trades,
         equity=equity,
@@ -287,6 +291,7 @@ def test_backtest_figure_shows_rejections_position_risk_and_drawdown():
 
     trace_names = {trace.name for trace in figure.data}
     assert "cruce LONG rechazado" in trace_names
+    assert "cruce SHORT rechazado · separación EMA insuficiente" in trace_names
     assert "entrada bloqueada" in trace_names
     assert "sesgo tendencia (tras pérdida)" not in trace_names
     assert "posición real" not in trace_names
@@ -299,6 +304,13 @@ def test_backtest_figure_shows_rejections_position_risk_and_drawdown():
     assert figure.to_json()
     rejected = next(trace for trace in figure.data if trace.name == "cruce LONG rechazado")
     assert "divergencia RSI; ATR fuera de rango" in rejected.text[0]
+    gap_rejected = next(
+        trace for trace in figure.data
+        if trace.name == "cruce SHORT rechazado · separación EMA insuficiente"
+    )
+    assert "separación EMA insuficiente" in gap_rejected.text[0]
+    assert "Brecha: 0.080 ATR" in gap_rejected.text[0]
+    assert f"Mínimo: {cfg.ema_cross_min_gap_atr:.2f} ATR" in gap_rejected.text[0]
     runtime_rejected = next(trace for trace in figure.data if trace.name == "entrada bloqueada")
     assert "filtro de tendencia" in runtime_rejected.text[0]
     summary = next(trace for trace in figure.data if trace.name == "PnL neto")

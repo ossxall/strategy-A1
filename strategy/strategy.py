@@ -75,6 +75,7 @@ from strategy.models import (
 )
 from strategy.indicators import (
     ema,
+    atr,
     adx,
     atr_volatility_filter,
     gaussian_filter_trend,
@@ -262,6 +263,21 @@ class EMACrossStrategy:
         cfg = self.cfg
         fast = ema(bars.close, cfg.ema_fast).to_numpy(float)
         slow = ema(bars.close, cfg.ema_slow).to_numpy(float)
+        ema_cross_gap_atr = np.full(len(bars), np.nan, dtype=float)
+        ema_cross_gap_allowed = np.ones(len(bars), dtype=bool)
+        if cfg.ema_cross_min_gap_atr > 0:
+            cross_atr = atr(bars, cfg.ema_cross_atr_len).to_numpy(float)
+            valid_atr = np.isfinite(cross_atr) & (cross_atr > 0)
+            np.divide(
+                np.abs(fast - slow),
+                cross_atr,
+                out=ema_cross_gap_atr,
+                where=valid_atr,
+            )
+            ema_cross_gap_allowed = (
+                np.isfinite(ema_cross_gap_atr)
+                & (ema_cross_gap_atr >= cfg.ema_cross_min_gap_atr)
+            )
         # Usar la línea principal MACD, no la línea de señal ni el histograma.
         macd_line = self._macd_line(bars, raw)
         prev_fast, prev_slow = np.r_[np.nan, fast[:-1]], np.r_[np.nan, slow[:-1]]
@@ -296,6 +312,14 @@ class EMACrossStrategy:
         record_rejection(
             unconfirmed_up, unconfirmed_down, "confirmación EMA no completada"
         )
+        if cfg.ema_cross_min_gap_atr > 0:
+            record_rejection(
+                candidate_up & ~ema_cross_gap_allowed,
+                candidate_down & ~ema_cross_gap_allowed,
+                "separación EMA insuficiente",
+            )
+            up &= ema_cross_gap_allowed
+            down &= ema_cross_gap_allowed
         entry_adx_by_timeframe: dict[str, np.ndarray] = {}
         entry_adx_reversals_by_timeframe: dict[str, np.ndarray] = {}
         entry_adx_reversal_by_timeframe: dict[str, np.ndarray] = {}
@@ -521,6 +545,7 @@ class EMACrossStrategy:
         short_rejected = (candidate_down & ~down) | unconfirmed_down
         output = {
             "ema_fast": fast, "ema_slow": slow, "macd_line": macd_line,
+            "ema_cross_gap_atr": ema_cross_gap_atr,
             "adx_entry": entry_adx,
             "entry_adx_reversal_blocked": entry_adx_reversal_blocked,
             "atr": entry_atr,

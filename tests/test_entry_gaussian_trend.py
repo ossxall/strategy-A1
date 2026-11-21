@@ -31,6 +31,7 @@ def make_config(**overrides):
         "gaussian_trend_reversal_exit_timeframe": "30min",
         "macd_timeframe": None,
         "confirm_bars": 0,
+        "ema_cross_min_gap_atr": 0,
         "entry_adx_enabled": False,
         "entry_atr_enabled": False,
         "entry_rsi_divergence_enabled": False,

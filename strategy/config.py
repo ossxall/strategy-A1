@@ -81,6 +81,12 @@ class Config:
     #
     confirm_bars: int = 4
     #
+    # Minimum distance between the entry EMAs at confirmation, in ATR units.
+    # Set to 0 to disable this filter.
+    #
+    ema_cross_min_gap_atr: float = 0.1
+    ema_cross_atr_len: int = 14
+    #
     # Block EMA crossovers when the entry ADX is below the minimum.
     #
     entry_adx_enabled: bool = True
@@ -363,6 +369,10 @@ class Config:
             )
         if self.confirm_bars < 0:
             raise ValueError("confirm_bars cannot be negative.")
+        if self.ema_cross_min_gap_atr < 0 or self.ema_cross_atr_len <= 0:
+            raise ValueError(
+                "ema_cross_min_gap_atr must be >= 0 and ema_cross_atr_len > 0."
+            )
         if self.entry_adx_enabled and (self.entry_adx_len <= 0 or self.entry_adx_min < 0):
             raise ValueError("Invalid entry ADX configuration.")
         if self.entry_adx_enabled and self.entry_adx_reversal_lookback < 0:

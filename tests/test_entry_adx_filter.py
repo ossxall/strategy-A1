@@ -59,6 +59,7 @@ def make_config(adx_min=20.0, adx_timeframe="30min", reversal_lookback=0):
         timeframe="30min",
         macd_timeframe=None,
         confirm_bars=0,
+        ema_cross_min_gap_atr=0,
         entry_adx_enabled=True,
         entry_adx_len=14,
         entry_adx_min=adx_min,
