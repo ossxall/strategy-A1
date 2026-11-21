@@ -952,6 +952,114 @@ def test_worker_restores_last_confirmed_breakeven_stop_variant(tmp_path):
         store.close()
 
 
+@pytest.mark.parametrize(
+    ("mark_price", "fail_breakeven", "expected_placements"),
+    [
+        (99.5, False, ["sl"]),
+        (101.0, True, ["sl", "sl"]),
+    ],
+)
+def test_worker_recovers_tp1_without_leaving_position_unprotected(
+    tmp_path, mark_price, fail_breakeven, expected_placements
+):
+    store = SignalStore(tmp_path / "signal.db")
+    store.connect()
+    gateway = FakeFuturesGateway(position_amt=0.5)
+    gateway.mark_price_value = mark_price
+    gateway.fail_next_breakeven = fail_breakeven
+    try:
+        entry_event = _entry_event()
+        entry_payload = json.loads(entry_event["payload"])
+        entry_payload["sizing"]["move_stop_to_breakeven"] = True
+        entry_event["payload"] = json.dumps(entry_payload)
+        store.insert([entry_event])
+        entry = store.claim_next_signal(
+            "test-account", "seed-entry", now_ms=1_000_000, lease_ms=100
+        )
+        store.update_execution(
+            "test-account",
+            entry["signal_id"],
+            "FILLED",
+            order_status="FILLED",
+            filled_qty=1.0,
+            average_fill_price=100.0,
+        )
+
+        worker = ExecutionWorker(
+            _settings(
+                tmp_path,
+                enabled=True,
+                api_key="test-key",
+                api_secret="test-secret",
+            ),
+            store,
+            gateway=gateway,
+            clock_ms=lambda: 1_000_000,
+        )
+        worker._initialize()
+        snapshot = worker._account_snapshot(force=True)
+        worker._ensure_protective_stop(entry, snapshot)
+
+        exit_event = {
+            **entry_event,
+            "event": "EXIT",
+            "action": "PARTIAL_CLOSE",
+            "reason": "PARTIAL_TP_1R",
+            "payload": json.dumps(
+                {
+                    "action": "PARTIAL_CLOSE",
+                    "position_id": 1,
+                    "close_pct": 50.0,
+                    "sizing": entry_payload["sizing"],
+                }
+            ),
+        }
+        store.insert([exit_event])
+        exit_signal = store.claim_next_signal(
+            "test-account", "seed-exit", now_ms=1_000_000, lease_ms=100
+        )
+        client_order_id = worker._client_order_id(exit_signal["signal_id"])
+        gateway.order_results[client_order_id] = {
+            "status": "FILLED",
+            "orderId": 77,
+            "executedQty": "0.5",
+            "avgPrice": "100",
+        }
+        intent = {
+            "symbol": "BTCUSDT",
+            "side": "SELL",
+            "quantity": "0.5",
+            "reduce_only": True,
+        }
+        store.record_order_intent(
+            "test-account",
+            exit_signal["signal_id"],
+            client_order_id,
+            "SUBMITTING",
+            intent,
+        )
+        store.update_execution(
+            "test-account",
+            exit_signal["signal_id"],
+            "SUBMITTED",
+            order_status="SUBMITTING",
+            client_order_id=client_order_id,
+        )
+
+        assert worker._reconcile_inflight() is False
+
+        execution = store.get_execution_state(
+            "test-account", exit_signal["signal_id"]
+        )
+        assert execution["status"] == "FILLED"
+        assert [client_id[2:4] for client_id, _ in gateway.stop_placements] \
+            == expected_placements
+        assert len(gateway.stops) == 1
+        assert next(iter(gateway.stops)).startswith("b1sl_")
+    finally:
+        store.close()
+
+
 def test_worker_retries_transient_failure_before_order_intent(tmp_path):
     store = SignalStore(tmp_path / "signal.db")
     store.connect()

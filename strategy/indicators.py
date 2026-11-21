@@ -469,18 +469,32 @@ def spread_flags(flags: np.ndarray, window: int) -> np.ndarray:
 
 
 def _adx_exit_flags(
-    raw: pd.DataFrame, bars: pd.DataFrame, cfg: Config, timeframe: str
+    raw: pd.DataFrame | None, bars: pd.DataFrame, cfg: Config, timeframe: str
 ) -> np.ndarray | None:
     """Flags de reversión ADX para un único timeframe, alineadas a ``bars``."""
-    if pd.Timedelta(minutes=source_minutes(raw)) >= pd.Timedelta(timeframe):
-        return None
-    low = resample_ohlcv(raw, timeframe)
+    timeframe_delta = pd.Timedelta(timeframe)
+    strategy_delta = pd.Timedelta(cfg.timeframe)
+    if timeframe_delta == strategy_delta:
+        low, source_tf = bars, cfg.timeframe
+    elif timeframe_delta > strategy_delta:
+        low, source_tf = resample_ohlcv(bars, timeframe), timeframe
+    else:
+        if raw is None or raw.empty:
+            return None
+        raw_delta = pd.Timedelta(minutes=source_minutes(raw))
+        if raw_delta > timeframe_delta:
+            return None
+        low = raw if raw_delta == timeframe_delta else resample_ohlcv(raw, timeframe)
+        source_tf = timeframe
+
     if len(low) < cfg.adx_dilen + cfg.adx_adxlen + 2:
         return None
     flags = adx_reversal_flags(
         adx(low, cfg.adx_dilen, cfg.adx_adxlen)["adx"].to_numpy(), cfg.adx_key_level
     )
-    return align_closed_events(low.index, flags, bars.index, timeframe, cfg.timeframe)
+    if low.index.equals(bars.index):
+        return flags
+    return align_closed_events(low.index, flags, bars.index, source_tf, cfg.timeframe)
 
 
 def build_adx_exit(

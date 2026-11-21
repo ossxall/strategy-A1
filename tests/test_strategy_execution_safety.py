@@ -42,6 +42,20 @@ def manual_signals(bars, targets):
 
 
 @pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("stop_loss_pct", np.nan),
+        ("initial_capital", np.nan),
+        ("commission_bps", np.inf),
+        ("monthly_loss_limit_pct", -np.inf),
+    ],
+)
+def test_config_rejects_non_finite_numeric_parameters(field, value):
+    with pytest.raises(ValueError, match=field):
+        Config(**{field: value})
+
+
+@pytest.mark.parametrize(
     "side,open_price,high,low,expected_fill",
     [
         (1, 80.0, 82.0, 70.0, 80.0),
@@ -121,6 +135,56 @@ def test_stop_takes_priority_when_stop_and_take_profit_are_in_same_candle(side):
 
     assert trades.reason.tolist() == ["STOP_LOSS_10.00%"]
     assert trades.quantity.tolist() == [1.0]
+
+
+@pytest.mark.parametrize("side", [1, -1])
+def test_ohlc_fallback_checks_new_breakeven_stop_in_same_candle(side):
+    bars = make_bars(
+        [
+            {
+                "open": 100.0,
+                "high": 100.0,
+                "low": 100.0,
+                "close": 100.0,
+                "volume": 1.0,
+            },
+            {
+                "open": 100.0,
+                "high": 111.0 if side == 1 else 101.0,
+                "low": 99.0 if side == 1 else 89.0,
+                "close": 100.0,
+                "volume": 1.0,
+            },
+        ]
+    )
+    config = quiet_config(
+        stop_loss_pct=0.1,
+        partial_tp_enabled=True,
+        partial_tp_r=1.0,
+        partial_tp_pct=50.0,
+        move_stop_to_breakeven=True,
+    )
+    engine = Backtester(bars, config, signals=manual_signals(bars, [0, 0]))
+    engine.position = Position(
+        position_id=1,
+        side=side,
+        quantity=1.0,
+        initial_quantity=1.0,
+        entry_price=100.0,
+        entry_time=bars.index[0],
+        entry_fee=0.0,
+        stop_pct=0.1,
+        risk_amount=10.0,
+    )
+
+    trades, _ = engine.run()
+
+    assert trades.reason.tolist() == ["PARTIAL_TP_1R", "BREAKEVEN"]
+    assert trades.quantity.tolist() == pytest.approx([0.5, 0.5])
+    assert trades.exit_price.tolist() == pytest.approx(
+        [110.0 if side == 1 else 90.0, 100.0]
+    )
+    assert engine.position is None
 
 
 def test_partial_closes_reconcile_cash_and_allocate_entry_fee_once():

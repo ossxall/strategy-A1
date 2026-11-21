@@ -3,8 +3,9 @@
 Strategy 2 — EMA Cross + MACD + ADX / EMA Weakening
 ============================================
 
-Gestión de salida por defecto: take-profit parcial a 1R (50%) y stop a
-breakeven del resto (`partial_tp_enabled`). Sube el win rate y recorta la
+Gestión de salida por defecto: take-profit parcial a 1R por el porcentaje
+configurado en `partial_tp_pct` (10% por defecto) y stop a breakeven del resto
+(`partial_tp_enabled`). Sube el win rate y recorta la
 racha de pérdidas en whipsaw; puede desactivarse con `partial_tp_enabled=False`.
 
 La salida por debilitamiento de las EMAs (`ema_weakening_exit_enabled`) cierra
@@ -1597,6 +1598,12 @@ class Backtester:
                     slow_ema_touch_exit = self._tp3_slow_ema_touch_exit(i)
                 if not stop_hit and not slow_ema_touch_exit:
                     self._manage(i)
+                    # Sin datos intrabar no se conoce el orden exacto del
+                    # recorrido OHLC. Si TP1 acaba de activar breakeven y la
+                    # misma vela también lo atravesó, se prioriza el stop para
+                    # no inflar el resultado del backtest.
+                    if self._breakeven_activated_this_bar:
+                        stop_hit = self._stop(i)
 
             # Equity mark-to-market para el límite de pérdida mensual.
             equity_now = self._equity_value(self.c[i])

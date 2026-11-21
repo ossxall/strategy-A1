@@ -1,5 +1,8 @@
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
+from decimal import Decimal
+import math
+from numbers import Real
 import pandas as pd
 
 
@@ -337,6 +340,11 @@ class Config:
 
     def __post_init__(self):
         """Validate ranges and internal consistency of the configuration."""
+        for config_field in fields(self):
+            value = getattr(self, config_field.name)
+            if isinstance(value, (Real, Decimal)) and not math.isfinite(float(value)):
+                raise ValueError(f"{config_field.name} must be finite.")
+
         if min(self.ema_fast, self.ema_slow) <= 0 or self.ema_fast >= self.ema_slow:
             raise ValueError("Requires 0 < ema_fast < ema_slow.")
         if min(self.macd_fast, self.macd_slow, self.macd_signal) <= 0 or self.macd_fast >= self.macd_slow:

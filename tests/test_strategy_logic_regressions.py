@@ -5,6 +5,7 @@ import pytest
 from strategy.config import Config
 from strategy.indicators import (
     RSIDivergenceSignals,
+    build_adx_exit,
     build_rsi_divergence_exit,
     build_rsi_divergence_exit_signals,
 )
@@ -127,6 +128,20 @@ def test_streak_filter_does_not_block_closing_open_position_on_reversal():
     assert engine.streak_in_loss
     assert "filtro de tendencia" in equity.execution_rejection.iloc[1]
     assert equity.execution_rejection_time.iloc[1] == bars.index[0]
+
+
+def test_adx_exit_uses_strategy_bars_when_timeframe_matches():
+    bars = _bars(100, "30min")
+    config = _quiet_config(
+        timeframe="30min",
+        adx_exit_enabled=True,
+        adx_timeframe="30min",
+    )
+
+    flags = build_adx_exit(bars, bars, config)
+
+    assert flags is not None
+    assert len(flags) == len(bars)
 
 
 @pytest.mark.parametrize(
