@@ -1628,7 +1628,12 @@ class Backtester:
             if cfg.monthly_loss_limit_pct > 0 and self.halt_until is None:
                 if equity_now <= month_start_equity * (1 - cfg.monthly_loss_limit_pct / 100):
                     if cfg.monthly_loss_limit_days > 0:
-                        self.halt_until = self.times[i] + pd.Timedelta(days=cfg.monthly_loss_limit_days)
+                        # La equity se evalúa al cierre de la vela; contar el
+                        # cooldown desde su apertura lo acortaría un timeframe.
+                        detected_at = self.times[i] + pd.Timedelta(cfg.timeframe)
+                        self.halt_until = detected_at + pd.Timedelta(
+                            days=cfg.monthly_loss_limit_days
+                        )
                         scope = f"{cfg.monthly_loss_limit_days} días"
                     else:
                         self.halt_until = pd.Timestamp.max.tz_localize(self.times[i].tz) if self.times[i].tz else pd.Timestamp.max

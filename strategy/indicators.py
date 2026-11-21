@@ -528,10 +528,20 @@ def _weakening_exit_flags(
     raw: pd.DataFrame, bars: pd.DataFrame, cfg: Config, timeframe: str
 ) -> np.ndarray | None:
     """Flags de weakening para un único timeframe, alineadas a ``bars``."""
-    if pd.Timedelta(timeframe) == pd.Timedelta(cfg.timeframe) or pd.Timedelta(
-        minutes=source_minutes(raw)
-    ) >= pd.Timedelta(timeframe):
+    timeframe_delta = pd.Timedelta(timeframe)
+    strategy_delta = pd.Timedelta(cfg.timeframe)
+    if timeframe_delta == strategy_delta:
         source_bars, source_tf = bars, cfg.timeframe
+    elif timeframe_delta < strategy_delta:
+        if raw is None or raw.empty:
+            return None
+        raw_delta = pd.Timedelta(minutes=source_minutes(raw))
+        if raw_delta > timeframe_delta:
+            return None
+        source_bars = (
+            raw if raw_delta == timeframe_delta else resample_ohlcv(raw, timeframe)
+        )
+        source_tf = timeframe
     else:
         source_bars, source_tf = resample_ohlcv(raw, timeframe), timeframe
     fast_len, slow_len = cfg.ema_weakening_lengths

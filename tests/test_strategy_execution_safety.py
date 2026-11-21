@@ -335,7 +335,9 @@ def test_monthly_loss_cooldown_is_not_cleared_at_month_boundary():
     assert len(engine.opened) == 1
     assert engine.position is None
     assert "protección mensual" in equity.execution_rejection.iloc[2]
-    assert engine.halt_until == bars.index[1] + pd.Timedelta(days=5)
+    assert engine.halt_until == (
+        bars.index[1] + pd.Timedelta("30min") + pd.Timedelta(days=5)
+    )
 
 
 def test_equity_records_effective_stop_and_breakeven_activation():
