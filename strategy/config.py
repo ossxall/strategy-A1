@@ -140,7 +140,7 @@ class Config:
     # divergence, for `entry_rsi_divergence_lookback` strategy-timeframe bars.
     #
     entry_rsi_divergence_enabled: bool = True
-    entry_rsi_divergence_timeframe: str | list[str] | tuple[str, ...] = ("1D", "4h")
+    entry_rsi_divergence_timeframe: str | list[str] | tuple[str, ...] = ("1D")
     entry_rsi_divergence_lookback: int = 48
     #
     # Exit: close the configured percentage when a divergence appears against
