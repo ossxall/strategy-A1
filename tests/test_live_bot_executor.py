@@ -760,6 +760,42 @@ def test_worker_executes_entry_with_risk_sized_quantity_and_protective_stop(tmp_
         store.close()
 
 
+def test_worker_accepts_entry_without_a_configured_stop_loss(tmp_path):
+    store = SignalStore(tmp_path / "signal.db")
+    store.connect()
+    gateway = FakeFuturesGateway()
+    try:
+        event = _entry_event()
+        payload = json.loads(event["payload"])
+        payload["sizing"]["stop_loss_pct"] = 0.0
+        event["payload"] = json.dumps(payload)
+        store.insert([event])
+        worker = ExecutionWorker(
+            _settings(
+                tmp_path,
+                enabled=True,
+                api_key="test-key",
+                api_secret="test-secret",
+            ),
+            store,
+            gateway=gateway,
+            clock_ms=lambda: 1_000_000,
+        )
+
+        worker.run_once()
+        worker.run_once()
+
+        assert len(gateway.orders) == 1
+        assert gateway.stops == {}
+        assert store.conn.execute(
+            "SELECT status FROM signal_execution"
+        ).fetchone() == ("FILLED",)
+        health = worker.health.build_payload("127.0.0.1", 8081, 1.0)
+        assert health["executor"]["account_consistency_error"] is None
+    finally:
+        store.close()
+
+
 @pytest.mark.parametrize("order_kind", ["market", "conditional"])
 def test_worker_blocks_entry_when_symbol_has_unreconciled_open_orders(
     tmp_path, order_kind

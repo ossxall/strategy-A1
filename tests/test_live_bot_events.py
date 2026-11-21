@@ -100,7 +100,7 @@ def test_strategy_parameters_ignore_environment_overrides(monkeypatch):
     assert config.ema_fast == 55
     assert config.ema_slow == 200
     assert config.initial_capital == defaults.initial_capital
-    assert config.partial_tp3_pct == 5.0
+    assert config.partial_tp3_pct == 10.0
 
 
 def test_backtest_mode_generates_report_without_publishing_signals(

@@ -32,8 +32,9 @@ Protecciones de riesgo (ver `Config`):
 * `entry_gaussian_trend_enabled` (default True): exige que la línea principal del
   Gaussian Filter Trend esté alcista para LONG y bajista para SHORT.
 * `gaussian_trend_reversal_exit_enabled` (default True): cierra parcialmente
-  cuando la línea Gaussian gira contra la posición (`gaussian_trend_reversal_exit_pct`,
-  25 % por defecto).
+  cuando la línea Gaussian gira contra la posición en cualquiera de los
+  `gaussian_trend_reversal_exit_timeframe` configurados (None = timeframe
+  principal), con el porcentaje `gaussian_trend_reversal_exit_pct`.
 * `streak_trend_only` (default True): tras una posición cerrada en pérdida,
   la siguiente entrada sólo se abre si la señal coincide con el sesgo de
   tendencia de `trend_timeframe` (vela superior ya cerrada, sin lookahead).
@@ -202,6 +203,30 @@ class EMACrossStrategy:
 
         return source
 
+    def _gaussian_source(
+        self, bars: pd.DataFrame, raw: Optional[pd.DataFrame], timeframe: str
+    ) -> tuple[pd.DataFrame, str]:
+        """Obtiene las barras Gaussian del timeframe solicitado."""
+        target_delta = pd.Timedelta(timeframe)
+        strategy_delta = pd.Timedelta(self.cfg.timeframe)
+        if target_delta == strategy_delta:
+            return bars, self.cfg.timeframe
+        if target_delta > strategy_delta:
+            return resample_ohlcv(bars, timeframe), timeframe
+        if raw is None or raw.empty:
+            raise ValueError(
+                f"gaussian_trend_reversal_exit_timeframe={timeframe} "
+                "requiere datos raw de mayor resolución."
+            )
+        raw_delta = pd.Timedelta(minutes=source_minutes(raw))
+        if raw_delta > target_delta:
+            raise ValueError(
+                f"Los datos raw ({raw_delta}) no tienen resolución suficiente "
+                f"para gaussian_trend_reversal_exit_timeframe={timeframe}."
+            )
+        source = raw if raw_delta == target_delta else resample_ohlcv(raw, timeframe)
+        return source, timeframe
+
     def trend_bias(self, bars: pd.DataFrame) -> np.ndarray:
         """Sesgo de tendencia (+1 alcista, -1 bajista, 0 sin información).
 
@@ -367,6 +392,55 @@ class EMACrossStrategy:
         else:
             gaussian_trend_line = np.full(len(bars), np.nan)
             gaussian_trend_dir = np.zeros(len(bars), dtype=int)
+        gaussian_exit_dirs: list[np.ndarray] = []
+        if cfg.gaussian_trend_reversal_exit_enabled:
+            for exit_timeframe in cfg.gaussian_trend_reversal_exit_timeframes:
+                if pd.Timedelta(exit_timeframe) == pd.Timedelta(cfg.timeframe):
+                    gaussian_exit_dirs.append(gaussian_trend_dir)
+                    continue
+                gaussian_exit_bars, gaussian_exit_source_tf = self._gaussian_source(
+                    bars, raw, exit_timeframe
+                )
+                gaussian_exit_trend = gaussian_filter_trend(
+                    gaussian_exit_bars,
+                    cfg.entry_gaussian_length,
+                    cfg.entry_gaussian_poles,
+                    cfg.entry_gaussian_atr_length,
+                    cfg.entry_gaussian_fixed_multiplier,
+                    cfg.entry_gaussian_adaptive_width,
+                    cfg.entry_gaussian_efficiency_length,
+                    cfg.entry_gaussian_trend_multiplier,
+                    cfg.entry_gaussian_chop_multiplier,
+                    cfg.entry_gaussian_efficiency_smooth,
+                    cfg.entry_gaussian_source,
+                )
+                gaussian_exit_dirs.append(
+                    align_closed_values(
+                        gaussian_exit_bars.index,
+                        gaussian_exit_trend["trend_dir"].to_numpy(int),
+                        bars.index,
+                        gaussian_exit_source_tf,
+                        cfg.timeframe,
+                        fill=0,
+                    ).astype(int)
+                )
+        gaussian_exit_dir = (
+            gaussian_exit_dirs[0]
+            if gaussian_exit_dirs
+            else np.zeros(len(bars), dtype=int)
+        )
+        gaussian_exit_turned_bullish = np.zeros(len(bars), dtype=bool)
+        gaussian_exit_turned_bearish = np.zeros(len(bars), dtype=bool)
+        for exit_dir in gaussian_exit_dirs:
+            previous_exit_dir = np.zeros(len(exit_dir), dtype=int)
+            if len(previous_exit_dir) > 1:
+                previous_exit_dir[1:] = exit_dir[:-1]
+            gaussian_exit_turned_bullish |= (
+                (exit_dir == 1) & (previous_exit_dir == -1)
+            )
+            gaussian_exit_turned_bearish |= (
+                (exit_dir == -1) & (previous_exit_dir == 1)
+            )
         gaussian_long_allowed = (
             (gaussian_trend_dir == 1) if cfg.entry_gaussian_trend_enabled
             else np.ones(len(bars), dtype=bool)
@@ -442,6 +516,9 @@ class EMACrossStrategy:
             "entry_rsi_divergence_blocked": entry_rsi_bear_divergence_blocked,
             "entry_gaussian_trend_line": gaussian_trend_line,
             "entry_gaussian_trend_dir": gaussian_trend_dir,
+            "gaussian_trend_reversal_exit_dir": gaussian_exit_dir,
+            "gaussian_trend_reversal_exit_bullish": gaussian_exit_turned_bullish,
+            "gaussian_trend_reversal_exit_bearish": gaussian_exit_turned_bearish,
             "entry_gaussian_long_allowed": gaussian_long_allowed,
             "entry_gaussian_short_allowed": gaussian_short_allowed,
             "cross_up_candidate": candidate_up | unconfirmed_up,
@@ -585,6 +662,48 @@ class Backtester:
         self.gaussian_trend_turned_bearish = (
             (self.entry_gaussian_trend_dir == -1) & (previous_gaussian_dir == 1)
         )
+        if {
+            "gaussian_trend_reversal_exit_bullish",
+            "gaussian_trend_reversal_exit_bearish",
+        }.issubset(self.signals.columns):
+            self.gaussian_exit_turned_bullish = self.signals[
+                "gaussian_trend_reversal_exit_bullish"
+            ].to_numpy(bool)
+            self.gaussian_exit_turned_bearish = self.signals[
+                "gaussian_trend_reversal_exit_bearish"
+            ].to_numpy(bool)
+        elif "gaussian_trend_reversal_exit_dir" in self.signals:
+            self.gaussian_trend_reversal_exit_dir = self.signals[
+                "gaussian_trend_reversal_exit_dir"
+            ].to_numpy(int)
+            previous_exit_gaussian_dir = np.zeros(
+                len(self.gaussian_trend_reversal_exit_dir), dtype=int
+            )
+            if len(previous_exit_gaussian_dir) > 1:
+                previous_exit_gaussian_dir[1:] = self.gaussian_trend_reversal_exit_dir[:-1]
+            self.gaussian_exit_turned_bullish = (
+                (self.gaussian_trend_reversal_exit_dir == 1)
+                & (previous_exit_gaussian_dir == -1)
+            )
+            self.gaussian_exit_turned_bearish = (
+                (self.gaussian_trend_reversal_exit_dir == -1)
+                & (previous_exit_gaussian_dir == 1)
+            )
+        else:
+            # Compatibilidad con señales personalizadas anteriores a esta columna.
+            previous_exit_gaussian_dir = np.zeros(
+                len(self.entry_gaussian_trend_dir), dtype=int
+            )
+            if len(previous_exit_gaussian_dir) > 1:
+                previous_exit_gaussian_dir[1:] = self.entry_gaussian_trend_dir[:-1]
+            self.gaussian_exit_turned_bullish = (
+                (self.entry_gaussian_trend_dir == 1)
+                & (previous_exit_gaussian_dir == -1)
+            )
+            self.gaussian_exit_turned_bearish = (
+                (self.entry_gaussian_trend_dir == -1)
+                & (previous_exit_gaussian_dir == 1)
+            )
         self.adx_exit = np.asarray(adx_exit, bool) if adx_exit is not None else np.zeros(len(bars), bool)
         self.weak_exit = np.asarray(weak_exit, bool) if weak_exit is not None else np.zeros(len(bars), bool)
         # Divergencia RSI: +1 alcista (cierra SHORT), -1 bajista (cierra LONG), 0 sin señal.
@@ -1503,7 +1622,8 @@ class Backtester:
                     rejection_target = signal_target
                 elif target and target != current:
                     bias_val = int(self.signals["trend_bias"].iloc[i])
-                    if cfg.streak_trend_only and self.streak_in_loss and bias_val != target:
+                    if (current == 0 and cfg.streak_trend_only
+                            and self.streak_in_loss and bias_val != target):
                         # Tras una pérdida sólo se entra con la tendencia mayor.
                         execution_reasons.append(
                             f"filtro de tendencia (sesgo {bias_val:+d})"
@@ -1529,8 +1649,8 @@ class Backtester:
                     else:
                         if (cfg.gaussian_trend_reversal_exit_enabled
                               and self.position.side == 1
-                              and i < len(self.gaussian_trend_turned_bearish)
-                              and self.gaussian_trend_turned_bearish[i]):
+                              and i < len(self.gaussian_exit_turned_bearish)
+                              and self.gaussian_exit_turned_bearish[i]):
                             reason = GAUSSIAN_TREND_BEAR_REASON
                             if cfg.gaussian_trend_reversal_exit_pct < 100:
                                 reason += f"_{cfg.gaussian_trend_reversal_exit_pct:g}%"
@@ -1539,8 +1659,8 @@ class Backtester:
                             )
                         elif (cfg.gaussian_trend_reversal_exit_enabled
                               and self.position.side == -1
-                              and i < len(self.gaussian_trend_turned_bullish)
-                              and self.gaussian_trend_turned_bullish[i]):
+                              and i < len(self.gaussian_exit_turned_bullish)
+                              and self.gaussian_exit_turned_bullish[i]):
                             reason = GAUSSIAN_TREND_BULL_REASON
                             if cfg.gaussian_trend_reversal_exit_pct < 100:
                                 reason += f"_{cfg.gaussian_trend_reversal_exit_pct:g}%"

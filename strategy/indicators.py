@@ -13,6 +13,59 @@ def ema(values: pd.Series, period: int) -> pd.Series:
     return values.ewm(alpha=2 / (period + 1), adjust=False).mean()
 
 
+def _wilder_rma(values: np.ndarray, length: int) -> np.ndarray:
+    """RMA de Wilder, sembrado con la primera SMA completa."""
+    if length <= 0:
+        raise ValueError("La longitud RMA debe ser positiva.")
+    values = np.asarray(values, dtype=float)
+    out = np.full(len(values), np.nan, dtype=float)
+    seed: list[float] = []
+    previous = np.nan
+    for i, value in enumerate(values):
+        if not np.isfinite(value):
+            seed.clear()
+            previous = np.nan
+            continue
+        if np.isfinite(previous):
+            previous = (previous * (length - 1) + value) / length
+        else:
+            seed.append(float(value))
+            if len(seed) < length:
+                continue
+            previous = float(np.mean(seed))
+            seed.clear()
+        out[i] = previous
+    return out
+
+
+def _wilder_dm_sum(values: np.ndarray, length: int) -> np.ndarray:
+    """Suma direccional suavizada como en Wilder, antes de calcular el DI."""
+    if length <= 0:
+        raise ValueError("La longitud DMI debe ser positiva.")
+    values = np.asarray(values, dtype=float)
+    out = np.full(len(values), np.nan, dtype=float)
+    seed: list[float] = []
+    previous = np.nan
+    for i, value in enumerate(values):
+        if not np.isfinite(value):
+            seed.clear()
+            previous = np.nan
+            continue
+        if not np.isfinite(previous):
+            if length == 1:
+                previous = 0.0
+            else:
+                seed.append(float(value))
+                if len(seed) < length - 1:
+                    continue
+                previous = float(np.sum(seed))
+                seed.clear()
+                continue
+        previous = previous - previous / length + value
+        out[i] = previous
+    return out
+
+
 def rsi(values: pd.Series, length: int = 14) -> pd.Series:
     """RSI (suavizado Wilder) alineado con el índice de entrada.
 
@@ -25,13 +78,15 @@ def rsi(values: pd.Series, length: int = 14) -> pd.Series:
     delta = values.diff()
     gain = delta.clip(lower=0.0)
     loss = (-delta).clip(lower=0.0)
-    avg_gain = gain.ewm(alpha=1 / length, adjust=False).mean()
-    avg_loss = loss.ewm(alpha=1 / length, adjust=False).mean()
+    avg_gain = _wilder_rma(gain.to_numpy(float), length)
+    avg_loss = _wilder_rma(loss.to_numpy(float), length)
+    out = np.full(len(values), np.nan, dtype=float)
+    valid = np.isfinite(avg_gain) & np.isfinite(avg_loss) & (avg_loss != 0)
     with np.errstate(divide="ignore", invalid="ignore"):
-        out = 100.0 - 100.0 / (1.0 + avg_gain / avg_loss)
-    out[avg_loss == 0] = 100.0
+        out[valid] = 100.0 - 100.0 / (1.0 + avg_gain[valid] / avg_loss[valid])
+    out[(avg_loss == 0) & (avg_gain > 0)] = 100.0
     out[(avg_gain == 0) & (avg_loss == 0)] = 50.0
-    return out
+    return pd.Series(out, index=values.index)
 
 
 def true_range(high: np.ndarray, low: np.ndarray, close: np.ndarray) -> np.ndarray:
@@ -52,7 +107,7 @@ def atr(bars: pd.DataFrame, length: int = 14) -> pd.Series:
         raise ValueError("La longitud ATR debe ser positiva.")
     h, l, c = (bars[k].to_numpy(float) for k in ("high", "low", "close"))
     tr = true_range(h, l, c)
-    return pd.Series(tr, index=bars.index).ewm(alpha=1 / length, adjust=False).mean()
+    return pd.Series(_wilder_rma(tr, length), index=bars.index)
 
 
 def gaussian_filter_trend(
@@ -230,22 +285,54 @@ def adx(bars: pd.DataFrame, dilen: int = 14, adxlen: int = 14) -> pd.DataFrame:
     if not n:
         return out
     h, l, c = (bars[k].to_numpy(float) for k in ("high", "low", "close"))
-    up = np.r_[0.0, np.diff(h)]
-    down = np.r_[0.0, -np.diff(l)]
+    up = np.full(n, np.nan, dtype=float)
+    down = np.full(n, np.nan, dtype=float)
+    if n > 1:
+        up[1:] = np.diff(h)
+        down[1:] = -np.diff(l)
+    tr = true_range(h, l, c)
+    valid_ohlc = np.isfinite(h) & np.isfinite(l) & np.isfinite(c)
+    tr[~valid_ohlc] = np.nan
+    # ADX/DI debe reiniciar todas las series si cualquiera de sus componentes
+    # no puede calcularse; de lo contrario TR y DM se suavizan sobre ventanas
+    # distintas tras una vela incompleta.
+    valid_movement = (
+        np.isfinite(up)
+        & np.isfinite(down)
+        & np.isfinite(tr)
+        & valid_ohlc
+    )
+    tr[~valid_movement] = np.nan
     plus_dm = np.where((up > down) & (up > 0), up, 0.0)
     minus_dm = np.where((down > up) & (down > 0), down, 0.0)
-    smooth = lambda x, a: pd.Series(x).ewm(alpha=a, adjust=False).mean().to_numpy()
-    tr_rma = smooth(true_range(h, l, c), 1 / dilen)
-    p_rma, m_rma = smooth(plus_dm, 1 / dilen), smooth(minus_dm, 1 / dilen)
-    safe = np.where(tr_rma != 0, tr_rma, 1.0)
-    pdi = np.where(tr_rma != 0, 100 * p_rma / safe, 0.0)
-    mdi = np.where(tr_rma != 0, 100 * m_rma / safe, 0.0)
-    denom = np.where(pdi + mdi != 0, pdi + mdi, 1.0)
-    dx = 100 * np.abs(pdi - mdi) / denom
-    av = smooth(dx, 1 / adxlen)
-    first = dilen + adxlen - 2
-    if first < n:
-        out.iloc[first:, :] = np.column_stack([av[first:], pdi[first:], mdi[first:]])
+    plus_dm[~valid_movement] = np.nan
+    minus_dm[~valid_movement] = np.nan
+    # DMI/ADX no dispone de movimiento direccional para la primera barra.
+    plus_dm[0] = minus_dm[0] = np.nan
+    tr[0] = np.nan
+    tr_rma = _wilder_dm_sum(tr, dilen)
+    p_rma = _wilder_dm_sum(plus_dm, dilen)
+    m_rma = _wilder_dm_sum(minus_dm, dilen)
+
+    valid = np.isfinite(tr_rma)
+    pdi = np.full(n, np.nan, dtype=float)
+    mdi = np.full(n, np.nan, dtype=float)
+    nonzero_tr = valid & (tr_rma != 0)
+    pdi[nonzero_tr] = 100 * p_rma[nonzero_tr] / tr_rma[nonzero_tr]
+    mdi[nonzero_tr] = 100 * m_rma[nonzero_tr] / tr_rma[nonzero_tr]
+    pdi[valid & (tr_rma == 0)] = 0.0
+    mdi[valid & (tr_rma == 0)] = 0.0
+
+    dx = np.full(n, np.nan, dtype=float)
+    valid_di = np.isfinite(pdi) & np.isfinite(mdi)
+    denom = pdi + mdi
+    nonzero_denom = valid_di & (denom != 0)
+    dx[nonzero_denom] = 100 * np.abs(pdi[nonzero_denom] - mdi[nonzero_denom]) / denom[nonzero_denom]
+    dx[valid_di & (denom == 0)] = 0.0
+    av = _wilder_rma(dx, adxlen)
+    out["adx"] = av
+    out["plus_di"] = pdi
+    out["minus_di"] = mdi
     return out
 
 
@@ -528,7 +615,24 @@ def _rsi_divergence_flags(
 ) -> np.ndarray | None:
     """Flags de divergencia RSI para un único timeframe, alineadas a ``bars``."""
     timeframe_delta = pd.Timedelta(timeframe)
-    if raw is None or raw.empty:
+    strategy_delta = pd.Timedelta(cfg.timeframe)
+    if timeframe_delta < strategy_delta:
+        if raw is None or raw.empty:
+            raise ValueError(
+                f"rsi_divergence_timeframe={timeframe} requiere datos raw "
+                "de mayor resolución que el timeframe de estrategia."
+            )
+        raw_delta = pd.Timedelta(minutes=source_minutes(raw))
+        if raw_delta > timeframe_delta:
+            raise ValueError(
+                f"Los datos raw ({raw_delta}) no tienen resolución suficiente "
+                f"para rsi_divergence_timeframe={timeframe}."
+            )
+        source_bars = raw if raw_delta == timeframe_delta else resample_ohlcv(
+            raw, timeframe
+        )
+        source_tf = timeframe
+    elif raw is None or raw.empty:
         if timeframe_delta <= pd.Timedelta(cfg.timeframe):
             source_bars, source_tf = bars, cfg.timeframe
         else:
