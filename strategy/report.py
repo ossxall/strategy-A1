@@ -212,10 +212,6 @@ FAST_COLOR, SLOW_COLOR, NEUTRAL_COLOR = "#ff9800", "#2962ff", "#7e57c2"
 ADX_EXIT_COLOR = "#ffeb3b"
 RSI_DIV_COLOR = "#00bcd4"
 STOP_COLOR, TARGET_COLOR, BREAKEVEN_COLOR = "#ff5252", "#00e676", "#b0bec5"
-EMA_SLOW_TOUCH_COLOR = "#00e5ff"
-
-#: Prefijo del motivo de salida cuando el precio toca la EMA slow.
-EMA_SLOW_TOUCH_REASON = "EMA_SLOW_TOUCH"
 
 
 def _position_spans(trades: pd.DataFrame) -> list[dict]:
@@ -431,8 +427,7 @@ def build_backtest_figure(
       detectados durante la ejecución;
     * trades con detalle de cantidad, costes, riesgo, múltiplos R y escalado
       de tamaño;
-    * stop efectivo y activación del breakeven, take-profits y salidas por toque
-      a la EMA slow (motivo ``EMA_SLOW_TOUCH_*``);
+    * stop efectivo y activación del breakeven, take-profits;
     * paneles de indicadores, equity, drawdown y PnL por lado/motivo de salida;
     * series e indicadores de los timeframes de salida ADX cuando se dispone
       del dataset original `raw`.
@@ -879,22 +874,6 @@ def build_backtest_figure(
                 fig.add_trace(_marker_trace(_x_ms(sub["exit_time"]), sub["exit_price"],
                                             label, "square", color, 11, text=texts),
                               row=r, col=1)
-
-        # Salidas por toque a la EMA slow (motivo EMA_SLOW_TOUCH_*), resaltadas
-        # con un marcador propio para identificarlas en el gráfico.
-        touch = trades[trades["reason"].astype(str).str.startswith(EMA_SLOW_TOUCH_REASON)]
-        if win_start is not None:
-            touch = touch[(touch["exit_time"] >= win_start) & (touch["exit_time"] < win_end)]
-        if not touch.empty:
-            touch_texts = [
-                f"SALIDA {t.side} · {t.reason}<br>{t.exit_time:%Y-%m-%d %H:%M}<br>"
-                f"precio {t.exit_price:,.4f}{_trade_detail_text(t)}"
-                for t in touch.itertuples()
-            ]
-            fig.add_trace(_marker_trace(_x_ms(touch["exit_time"]), touch["exit_price"],
-                                        "salida toque EMA slow", "circle-x",
-                                        EMA_SLOW_TOUCH_COLOR, 12, text=touch_texts),
-                          row=r, col=1)
 
         def _level_trace(name, color, dash, level_of):
             xs, ys = [], []

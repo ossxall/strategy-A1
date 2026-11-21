@@ -63,12 +63,6 @@ def _exit_event(reason, *, action="PARTIAL_CLOSE", sizing=None, payload=None):
         ("STOP_LOSS_1.00%", "CLOSE", "STOP_LOSS", "CANCEL"),
         ("BREAKEVEN", "CLOSE", "BREAKEVEN", "CANCEL"),
         ("EMA_CROSS_EXIT", "CLOSE", "EMA_CROSS_EXIT", "CANCEL"),
-        (
-            "EMA_SLOW_TOUCH_SHORT_AFTER_TP3",
-            "CLOSE",
-            "EMA_SLOW_TOUCH",
-            "CANCEL",
-        ),
         ("MONTHLY_LOSS_LIMIT_5%", "CLOSE", "MONTHLY_LOSS_LIMIT", "CANCEL"),
         ("EXECUTOR_TEST_PARTIAL", "PARTIAL_CLOSE", "TEST_PARTIAL", "KEEP"),
     ],

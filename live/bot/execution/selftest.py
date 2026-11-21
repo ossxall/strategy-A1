@@ -516,8 +516,6 @@ def _self_test_signal_reason_matrix(root: Path, now_ms: int) -> int:
         ("BREAKEVEN", "LONG", "CLOSE", "BREAKEVEN", STOP_ACTION_CANCEL),
         ("EMA_CROSS_EXIT", "LONG", "CLOSE", "EMA_CROSS_EXIT",
          STOP_ACTION_CANCEL),
-        ("EMA_SLOW_TOUCH_SHORT_AFTER_TP3", "SHORT", "CLOSE",
-         "EMA_SLOW_TOUCH", STOP_ACTION_CANCEL),
         ("MONTHLY_LOSS_LIMIT_5%", "LONG", "CLOSE", "MONTHLY_LOSS_LIMIT",
          STOP_ACTION_CANCEL),
     )

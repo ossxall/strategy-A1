@@ -382,54 +382,6 @@ def test_pending_reversal_publishes_exit_before_entry_at_next_open():
     assert json.loads(pending[1]["payload"])["reason_code"] == "ENTRY_CROSS"
 
 
-def test_ema_slow_touch_exit_is_published_as_close_confirmed_not_intrabar():
-    bars = make_bars(3)
-    bars.loc[bars.index[1], ["low", "close"]] = [74.0, 75.0]
-    bars.loc[bars.index[2], ["low", "close"]] = [79.0, 81.0]
-    signals = make_signals(bars, [-1, 0, 0])
-    signals["ema_slow"] = 80.0
-    config = make_config(
-        partial_tp_enabled=True,
-        partial_tp_r=1.0,
-        partial_tp_pct=10.0,
-        partial_tp2_r=0.0,
-        partial_tp2_pct=0.0,
-        partial_tp3_r=2.5,
-        partial_tp3_pct=10.0,
-        partial_tp4_r=0.0,
-        partial_tp4_pct=0.0,
-        partial_tp5_r=0.0,
-        partial_tp5_pct=0.0,
-        partial_tp6_r=0.0,
-        partial_tp6_pct=0.0,
-        partial_tp7_r=0.0,
-        partial_tp7_pct=0.0,
-        partial_tp8_r=0.0,
-        partial_tp8_pct=0.0,
-        tp3_ema_slow_exit_enabled=True,
-        tp3_ema_slow_penetration_pct=0.0,
-    )
-
-    events = build_events(
-        bars, signals, None, None, config, "BTCUSDT", "1m"
-    )
-    slow_exit = next(
-        event for event in events
-        if event["event"] == "EXIT"
-        and event["reason"] == "EMA_SLOW_TOUCH_SHORT_AFTER_TP3"
-    )
-    payload = json.loads(slow_exit["payload"])
-
-    assert slow_exit["bar_time"] == ts_ms(bars.index[2])
-    assert slow_exit["signal_time"] == ts_ms(
-        bars.index[2] + pd.Timedelta("30min")
-    )
-    assert slow_exit["price"] == bars.close.iloc[2]
-    assert "fill_price_is_simulated" not in payload
-    assert "simulated_exit_price" not in payload
-    assert "pnl_is_simulated" not in payload
-
-
 @pytest.mark.parametrize(
     ("take_profit_pct", "expected_action", "expected_stop_action"),
     [

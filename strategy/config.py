@@ -225,12 +225,6 @@ class Config:
     partial_tp20_r: float = 19.0
     partial_tp20_pct: float = 5.0
     #
-    # After TP3, the remaining SHORT exits if price exceeds the slow EMA by
-    # this %. 0 = touching it is enough.
-    #
-    tp3_ema_slow_exit_enabled: bool = False
-    tp3_ema_slow_penetration_pct: float = 1.75
-    #
     # Whether to move the stop to breakeven after a partial take-profit.
     #
     move_stop_to_breakeven: bool = True
@@ -416,8 +410,6 @@ class Config:
             0 < self.gaussian_trend_reversal_exit_pct <= 100
         ):
             raise ValueError("gaussian_trend_reversal_exit_pct must be in (0, 100].")
-        if self.tp3_ema_slow_penetration_pct < 0:
-            raise ValueError("tp3_ema_slow_penetration_pct cannot be negative.")
         if self.partial_tp_enabled:
             if self.partial_tp_r <= 0 or not 0 < self.partial_tp_pct <= 100:
                 raise ValueError("Invalid partial take-profit configuration.")

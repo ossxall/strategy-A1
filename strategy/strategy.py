@@ -1173,31 +1173,6 @@ class Backtester:
             return RSI_DIVERGENCE_BULL_REASON
         return None
 
-    def _tp3_slow_ema_touch_exit(self, i: int) -> bool:
-        """Cierra el SHORT restante si la vela cierra sobre la EMA lenta tras TP3."""
-        pos = self.position
-        if (
-            not self.cfg.tp3_ema_slow_exit_enabled
-            or pos is None
-            or pos.side != -1
-            or not pos.partial3_done
-            or i >= len(self.ema_slow_line)
-        ):
-            return False
-        line = self.ema_slow_line[i]
-        if not np.isfinite(line):
-            return False
-        trigger = line * (1.0 + self.cfg.tp3_ema_slow_penetration_pct / 100.0)
-        if self.c[i] < trigger:
-            return False
-        self.close_position(
-            100,
-            self.c[i],
-            self.times[i] + pd.Timedelta(self.cfg.timeframe),
-            "EMA_SLOW_TOUCH_SHORT_AFTER_TP3",
-        )
-        return True
-
     def _manage(
         self,
         i: int,
@@ -1520,12 +1495,6 @@ class Backtester:
                 else (0, 0, False)
             )
             if self._intrabar_bars is not None and intrabar_slice[2]:
-                # La salida EMA tras TP3 sigue siendo de cierre de vela de
-                # estrategia y no debe activarse en la misma vela que confirma
-                # TP3, aunque el TP3 se alcance en uno de sus minutos.
-                tp3_previously_done = (
-                    self.position is not None and self.position.partial3_done
-                )
                 stop_hit = False
                 left, right, _ = intrabar_slice
                 intrabar_times = self._intrabar_bars.index
@@ -1550,19 +1519,11 @@ class Backtester:
                         timestamp=minute_time,
                     )
                     self._remember_intrabar_exits(first_trade)
-                slow_ema_touch_exit = False
-                if not stop_hit and tp3_previously_done:
-                    slow_ema_touch_exit = self._tp3_slow_ema_touch_exit(i)
             else:
                 # Compatibilidad/fallback: sin una ventana completa de 1m se
                 # conserva la ejecución OHLC original de la vela estrategia.
                 stop_hit = self._stop(i)
-                slow_ema_touch_exit = False
                 if not stop_hit:
-                    # Si TP3 se activa ahora, el toque a EMA lenta sólo cuenta
-                    # desde la vela de estrategia siguiente.
-                    slow_ema_touch_exit = self._tp3_slow_ema_touch_exit(i)
-                if not stop_hit and not slow_ema_touch_exit:
                     self._manage(i)
                     # Sin datos intrabar no se conoce el orden exacto del
                     # recorrido OHLC. Si TP1 acaba de activar breakeven y la

@@ -43,8 +43,6 @@ def reason_code_for(event: str, reason: str) -> str:
         return "GAUSSIAN_TREND_BEAR"
     if reason.startswith("GAUSSIAN_TREND_BULL"):
         return "GAUSSIAN_TREND_BULL"
-    if reason.startswith("EMA_SLOW_TOUCH_"):
-        return "EMA_SLOW_TOUCH"
     if reason.startswith("MONTHLY_LOSS_LIMIT"):
         return "MONTHLY_LOSS_LIMIT"
     if reason == "EXECUTOR_TEST_PARTIAL":
