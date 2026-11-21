@@ -129,7 +129,7 @@ class Config:
     # against them. The transition is evaluated once on the closed signal bar.
     #
     gaussian_trend_reversal_exit_enabled: bool = True
-    gaussian_trend_reversal_exit_pct: float = 25.0
+    gaussian_trend_reversal_exit_pct: float = 10.0
     # One or several timeframes (combined with OR); None = main timeframe.
     gaussian_trend_reversal_exit_timeframe: (
         str | list[str] | tuple[str, ...] | None
