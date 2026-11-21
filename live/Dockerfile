@@ -4,7 +4,8 @@ FROM python:3.12.12-slim
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONPATH=/app/legacy
 
 # Dependencias del bot y del colector.
 COPY live/requirements.txt /tmp/requirements.txt
