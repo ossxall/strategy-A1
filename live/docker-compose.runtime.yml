@@ -1,3 +1,5 @@
+version: "3.9"
+
 # Compatibilidad con comandos y scripts de despliegue existentes.
 # La configuración no secreta usa config.dev.yaml como base y aplica
 # config.prod.yaml si APP_ENV=prod; los secretos se interpolan explícitamente en
