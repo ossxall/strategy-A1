@@ -28,6 +28,7 @@ def make_bars(periods=4, close=None):
 def make_config(**overrides):
     values = {
         "timeframe": "30min",
+        "gaussian_trend_reversal_exit_timeframe": "30min",
         "macd_timeframe": None,
         "confirm_bars": 0,
         "entry_adx_enabled": False,
@@ -163,7 +164,8 @@ def test_gaussian_reversal_partially_closes_position_once_per_flip(
             "valid": True,
             "target": 0,
             "trend_bias": 0,
-            "entry_gaussian_trend_dir": directions,
+            "entry_gaussian_trend_dir": [directions[0]] * 4,
+            "gaussian_trend_reversal_exit_dir": directions,
         },
         index=bars.index,
     )
@@ -213,6 +215,80 @@ def test_gaussian_reversal_exit_calculates_trend_when_entry_filter_is_disabled(
 
     assert signals.entry_gaussian_trend_dir.tolist() == directions.tolist()
     assert signals.target.tolist() == [0, 1, 0, -1]
+
+
+def test_gaussian_reversal_exit_uses_selected_higher_timeframe_without_lookahead(
+    monkeypatch,
+):
+    configure_crosses(monkeypatch)
+    observed_lengths = []
+
+    def fake_gaussian(bars, *args):
+        observed_lengths.append(len(bars))
+        direction = [-1, 1] if len(bars) == 2 else [0, 0, 0, 0]
+        return pd.DataFrame(
+            {"trend_line": np.arange(len(bars)), "trend_dir": direction},
+            index=bars.index,
+        )
+
+    monkeypatch.setattr(strategy_module, "gaussian_filter_trend", fake_gaussian)
+
+    signals = EMACrossStrategy(
+        make_config(
+            entry_gaussian_trend_enabled=False,
+            gaussian_trend_reversal_exit_timeframe="1h",
+        )
+    ).generate_signals(make_bars())
+
+    assert observed_lengths == [4, 2]
+    assert signals.gaussian_trend_reversal_exit_dir.tolist() == [0, -1, -1, 1]
+
+
+def test_gaussian_reversal_exit_combines_multiple_timeframes_with_or(monkeypatch):
+    bars = make_bars(8)
+
+    def fake_gaussian(frame, *args):
+        directions = {
+            8: np.zeros(8, dtype=int),
+            4: np.array([1, 1, -1, -1]),
+            2: np.array([-1, 1]),
+        }[len(frame)]
+        return pd.DataFrame(
+            {"trend_line": np.arange(len(frame)), "trend_dir": directions},
+            index=frame.index,
+        )
+
+    monkeypatch.setattr(strategy_module, "gaussian_filter_trend", fake_gaussian)
+    config = make_config(
+        entry_gaussian_trend_enabled=False,
+        gaussian_trend_reversal_exit_timeframe=("1h", "2h"),
+        gaussian_trend_reversal_exit_pct=40.0,
+    )
+    signals = EMACrossStrategy(config).generate_signals(bars)
+
+    assert signals.gaussian_trend_reversal_exit_bearish.tolist() == [
+        False, False, False, False, False, True, False, False,
+    ]
+    assert signals.gaussian_trend_reversal_exit_bullish.tolist() == [
+        False, False, False, False, False, False, False, True,
+    ]
+
+    engine = Backtester(bars, config, signals=signals)
+    engine.position = Position(
+        position_id=1,
+        side=1,
+        quantity=1.0,
+        initial_quantity=1.0,
+        entry_price=100.0,
+        entry_time=bars.index[0],
+        entry_fee=0.0,
+        stop_pct=0.0,
+        risk_amount=0.0,
+    )
+    trades, _ = engine.run()
+
+    assert trades.reason.tolist() == ["GAUSSIAN_TREND_BEAR_40%"]
+    assert trades.quantity.tolist() == pytest.approx([0.4])
 
 
 def test_gaussian_reversal_exit_does_not_trigger_from_neutral_warmup():
@@ -269,6 +345,11 @@ def test_gaussian_filter_config_defaults_and_validation():
     assert config.entry_gaussian_adaptive_width
     assert config.gaussian_trend_reversal_exit_enabled
     assert config.gaussian_trend_reversal_exit_pct == 10.0
+    assert config.gaussian_trend_reversal_exit_timeframe == "4h"
+    assert config.gaussian_trend_reversal_exit_timeframes == ("4h",)
+    assert Config(
+        gaussian_trend_reversal_exit_timeframe=("1h", "4h")
+    ).gaussian_trend_reversal_exit_timeframes == ("1h", "4h")
 
     with pytest.raises(ValueError, match="Gaussian"):
         Config(entry_gaussian_source="volume")
@@ -276,6 +357,8 @@ def test_gaussian_filter_config_defaults_and_validation():
         Config(entry_gaussian_poles=5)
     with pytest.raises(ValueError, match="gaussian_trend_reversal_exit_pct"):
         Config(gaussian_trend_reversal_exit_pct=0)
+    with pytest.raises(ValueError, match="gaussian_trend_reversal_exit_timeframe"):
+        Config(gaussian_trend_reversal_exit_timeframe="0min")
 
 
 def test_live_config_ignores_gaussian_environment_overrides(monkeypatch):

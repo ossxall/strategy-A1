@@ -130,6 +130,10 @@ class Config:
     #
     gaussian_trend_reversal_exit_enabled: bool = True
     gaussian_trend_reversal_exit_pct: float = 10.0
+    # One or several timeframes (combined with OR); None = main timeframe.
+    gaussian_trend_reversal_exit_timeframe: (
+        str | list[str] | tuple[str, ...] | None
+    ) = "4h"
     #
     # Block LONG entries after a bullish RSI divergence and SHORT entries after a
     # bearish one, within the last N bars of the strategy timeframe.
@@ -325,6 +329,13 @@ class Config:
         """RSI divergence timeframes normalized; exit uses OR across them."""
         return timeframe_tuple(self.rsi_divergence_timeframe)
 
+    @property
+    def gaussian_trend_reversal_exit_timeframes(self) -> tuple[str, ...]:
+        """Gaussian reversal exit timeframes normalized; exit uses OR."""
+        if self.gaussian_trend_reversal_exit_timeframe is None:
+            return (self.timeframe,)
+        return timeframe_tuple(self.gaussian_trend_reversal_exit_timeframe)
+
     def __post_init__(self):
         """Validate ranges and internal consistency of the configuration."""
         if min(self.ema_fast, self.ema_slow) <= 0 or self.ema_fast >= self.ema_slow:
@@ -335,6 +346,16 @@ class Config:
             raise ValueError("macd_timeframe must be positive or None to use timeframe.")
         if pd.Timedelta(self.timeframe) <= pd.Timedelta(0):
             raise ValueError("timeframe must be positive.")
+        for timeframe in self.gaussian_trend_reversal_exit_timeframes:
+            if pd.Timedelta(timeframe) <= pd.Timedelta(0):
+                raise ValueError(
+                    f"invalid gaussian_trend_reversal_exit_timeframe: {timeframe!r}."
+                )
+        if (
+            self.gaussian_trend_reversal_exit_enabled
+            and not self.gaussian_trend_reversal_exit_timeframes
+        ):
+            raise ValueError("gaussian_trend_reversal_exit_timeframe cannot be empty.")
         for timeframe in self.adx_timeframes:
             if pd.Timedelta(timeframe) <= pd.Timedelta(0):
                 raise ValueError(f"invalid adx_timeframe: {timeframe!r}.")
