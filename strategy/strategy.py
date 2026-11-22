@@ -1186,6 +1186,7 @@ class Backtester:
                 open_price=self._intrabar_o[minute],
                 high=self._intrabar_h[minute],
                 low=self._intrabar_l[minute],
+                close_price=self._intrabar_c[minute],
                 timestamp=minute_time,
             )
             self._remember_intrabar_exits(first_trade)
@@ -1215,6 +1216,7 @@ class Backtester:
         open_price: float | None = None,
         high: float | None = None,
         low: float | None = None,
+        close_price: float | None = None,
         timestamp: pd.Timestamp | None = None,
     ) -> None:
         """Gestiona take-profits parciales y el stop a breakeven."""
@@ -1226,6 +1228,7 @@ class Backtester:
         open_price = self.o[i] if open_price is None else open_price
         high = self.h[i] if high is None else high
         low = self.l[i] if low is None else low
+        close_price = self.c[i] if close_price is None else close_price
         timestamp = self.times[i] if timestamp is None else timestamp
         risk_unit = self._risk_unit(pos)
         if risk_unit <= 0:
@@ -1268,7 +1271,12 @@ class Backtester:
                 return
             setattr(pos_after, done_attr, True)
             if level == 1 and cfg.move_stop_to_breakeven:
-                if not pos_after.breakeven:
+                breakeven_reached = (
+                    close_price > pos_after.entry_price
+                    if pos_after.side == 1
+                    else close_price < pos_after.entry_price
+                )
+                if not pos_after.breakeven and breakeven_reached:
                     pos_after.breakeven = True
                     self._breakeven_activated_this_bar = True
                     self._breakeven_activation_price = pos_after.entry_price
@@ -1395,6 +1403,7 @@ class Backtester:
                 open_price=self._intrabar_o[minute],
                 high=self._intrabar_h[minute],
                 low=self._intrabar_l[minute],
+                close_price=self._intrabar_c[minute],
                 timestamp=minute_time,
             )
             self._remember_intrabar_exits(first_trade)
@@ -1558,6 +1567,7 @@ class Backtester:
                         open_price=self._intrabar_o[minute],
                         high=self._intrabar_h[minute],
                         low=self._intrabar_l[minute],
+                        close_price=self._intrabar_c[minute],
                         timestamp=minute_time,
                     )
                     self._remember_intrabar_exits(first_trade)
@@ -1566,13 +1576,10 @@ class Backtester:
                 # conserva la ejecución OHLC original de la vela estrategia.
                 stop_hit = self._stop(i)
                 if not stop_hit:
-                    self._manage(i)
-                    # Sin datos intrabar no se conoce el orden exacto del
-                    # recorrido OHLC. Si TP1 acaba de activar breakeven y la
-                    # misma vela también lo atravesó, se prioriza el stop para
-                    # no inflar el resultado del backtest.
-                    if self._breakeven_activated_this_bar:
-                        stop_hit = self._stop(i)
+                    # El BE se instala después del cierre de esta vela; sus
+                    # extremos no disparan retroactivamente un stop que aún no
+                    # estaba activo.
+                    self._manage(i, close_price=self.c[i])
 
             # Equity mark-to-market para el límite de pérdida mensual.
             equity_now = self._equity_value(self.c[i])

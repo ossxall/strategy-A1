@@ -86,10 +86,10 @@ def make_signals(bars):
     )
 
 
-def add_open_position(engine, timestamp):
+def add_open_position(engine, timestamp, side=1):
     engine.position = Position(
         position_id=1,
-        side=1,
+        side=side,
         quantity=1.0,
         initial_quantity=1.0,
         entry_price=100.0,
@@ -176,6 +176,37 @@ def test_intrabar_executes_all_reached_tps_per_minute_from_nearest_to_farthest()
     assert trades.exit_time.tolist() == [one_minute.index[5], one_minute.index[5]]
     assert trades.exit_price.tolist() == pytest.approx([110.0, 115.0])
     assert trades.quantity.tolist() == pytest.approx([0.2, 0.24])
+
+
+@pytest.mark.parametrize(
+    "side,minute_ohlc,expected_tp_price",
+    [
+        (1, [100.0, 111.0, 99.0, 99.0], 110.0),
+        (-1, [100.0, 101.0, 89.0, 101.0], 90.0),
+    ],
+)
+def test_intrabar_does_not_activate_breakeven_if_tp_minute_closes_past_entry(
+    side, minute_ohlc, expected_tp_price
+):
+    bars = make_strategy_bars()
+    one_minute = make_one_minute_bars()
+    one_minute.loc[one_minute.index[5], ["open", "high", "low", "close"]] = (
+        minute_ohlc
+    )
+    engine = Backtester(
+        bars,
+        make_config(),
+        signals=make_signals(bars),
+        intrabar_bars=one_minute,
+    )
+    add_open_position(engine, bars.index[0], side=side)
+
+    trades, _ = engine.run()
+
+    assert trades.reason.tolist() == ["PARTIAL_TP_1R"]
+    assert trades.exit_price.tolist() == pytest.approx([expected_tp_price])
+    assert engine.position is not None
+    assert engine.position.breakeven is False
 
 
 def test_intrabar_take_profit_and_breakeven_stop_are_symmetric_for_short():

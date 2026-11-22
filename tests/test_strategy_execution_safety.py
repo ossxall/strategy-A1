@@ -138,8 +138,18 @@ def test_stop_takes_priority_when_stop_and_take_profit_are_in_same_candle(side):
     assert trades.quantity.tolist() == [1.0]
 
 
-@pytest.mark.parametrize("side", [1, -1])
-def test_ohlc_fallback_checks_new_breakeven_stop_in_same_candle(side):
+@pytest.mark.parametrize(
+    "side,close_price,expected_breakeven",
+    [
+        (1, 101.0, True),
+        (1, 99.0, False),
+        (-1, 99.0, True),
+        (-1, 101.0, False),
+    ],
+)
+def test_ohlc_fallback_activates_breakeven_only_if_close_is_favorable(
+    side, close_price, expected_breakeven
+):
     bars = make_bars(
         [
             {
@@ -153,7 +163,7 @@ def test_ohlc_fallback_checks_new_breakeven_stop_in_same_candle(side):
                 "open": 100.0,
                 "high": 111.0 if side == 1 else 101.0,
                 "low": 99.0 if side == 1 else 89.0,
-                "close": 100.0,
+                "close": close_price,
                 "volume": 1.0,
             },
         ]
@@ -180,12 +190,13 @@ def test_ohlc_fallback_checks_new_breakeven_stop_in_same_candle(side):
 
     trades, _ = engine.run()
 
-    assert trades.reason.tolist() == ["PARTIAL_TP_1R", "BREAKEVEN"]
-    assert trades.quantity.tolist() == pytest.approx([0.5, 0.5])
+    assert trades.reason.tolist() == ["PARTIAL_TP_1R"]
+    assert trades.quantity.tolist() == pytest.approx([0.5])
     assert trades.exit_price.tolist() == pytest.approx(
-        [110.0 if side == 1 else 90.0, 100.0]
+        [110.0 if side == 1 else 90.0]
     )
-    assert engine.position is None
+    assert engine.position is not None
+    assert engine.position.breakeven is expected_breakeven
 
 
 def test_partial_closes_reconcile_cash_and_allocate_entry_fee_once():
