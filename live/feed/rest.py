@@ -156,6 +156,100 @@ def fetch_and_save_range(session, start_ms, end_ms, progress_callback=None):
     return total
 
 
+def _fetch_backfill_range(session, start_ms, end_ms):
+    """Descarga un rango inicial y publica progreso acotado a ese rango."""
+    expected_candles = max(1, (end_ms - start_ms) // INTERVAL_MS + 1)
+    expected_pages = (expected_candles + REST_PAGE_LIMIT - 1) // REST_PAGE_LIMIT
+    progress_started = time.monotonic()
+    update_diagnostics(
+        "backfill",
+        candles_saved=0,
+        candles_expected=expected_candles,
+        pages_completed=0,
+        pages_expected=expected_pages,
+        progress_percent=0.0,
+        candles_per_second=0.0,
+        eta_seconds=None,
+        last_candle_at=None,
+    )
+    logger.info(
+        "Backfill planificado: %s velas (~%s páginas REST)",
+        expected_candles,
+        expected_pages,
+    )
+
+    def log_backfill_progress(saved, expected, last_open_time, page):
+        elapsed = max(time.monotonic() - progress_started, 0.001)
+        rate = saved / elapsed
+        percent = min(100.0, saved * 100.0 / expected)
+        remaining = max(0, expected - saved)
+        eta_seconds = remaining / rate if rate > 0 else None
+        last_candle_at = datetime.fromtimestamp(
+            last_open_time / 1000,
+            timezone.utc,
+        ).isoformat()
+
+        update_diagnostics(
+            "backfill",
+            candles_saved=saved,
+            pages_completed=page,
+            progress_percent=round(percent, 2),
+            candles_per_second=round(rate, 2),
+            eta_seconds=(
+                round(eta_seconds, 1) if eta_seconds is not None else None
+            ),
+            last_candle_at=last_candle_at,
+        )
+        eta_text = "n/a" if eta_seconds is None else f"{eta_seconds / 60:.1f} min"
+        logger.info(
+            "Backfill progreso: %s/%s velas (%.1f%%), "
+            "página %s/%s, última=%s, velocidad=%.1f velas/s, ETA=%s",
+            saved,
+            expected,
+            percent,
+            page,
+            expected_pages,
+            last_candle_at,
+            rate,
+            eta_text,
+        )
+
+    return fetch_and_save_range(
+        session,
+        start_ms,
+        end_ms,
+        progress_callback=log_backfill_progress,
+    )
+
+
+def _backfill_historical_gaps(session):
+    """Repara todos los huecos internos y de prefijo, no solo el primero."""
+    total = 0
+    missing_range = get_first_missing_candle_range(START_TIME_MS)
+    while missing_range is not None and not STATE.stop_event.is_set():
+        start_ms, end_ms = missing_range
+        logger.info(
+            "Hueco histórico; backfill desde %s UTC hasta %s UTC",
+            datetime.fromtimestamp(start_ms / 1000, timezone.utc).isoformat(),
+            datetime.fromtimestamp(end_ms / 1000, timezone.utc).isoformat(),
+        )
+        total += _fetch_backfill_range(session, start_ms, end_ms)
+        if STATE.stop_event.is_set():
+            break
+
+        next_missing_range = get_first_missing_candle_range(START_TIME_MS)
+        if (
+            next_missing_range is not None
+            and next_missing_range[0] <= start_ms
+        ):
+            raise RuntimeError(
+                "El backfill no avanzó en el primer hueco histórico "
+                f"({start_ms}, {end_ms})"
+            )
+        missing_range = next_missing_range
+    return total
+
+
 def initial_backfill_worker():
     session = create_session()
     started_at = utc_iso()
@@ -174,91 +268,20 @@ def initial_backfill_worker():
             start_ms = START_TIME_MS
             end_ms = int(time.time() * 1000)
             logger.info("Base de datos vacía; backfill desde %s UTC", START_DATE)
+            total = _fetch_backfill_range(session, start_ms, end_ms)
         else:
-            missing_range = get_first_missing_candle_range(START_TIME_MS)
-            if missing_range is not None:
-                start_ms, end_ms = missing_range
-                logger.info(
-                    "Hueco histórico; backfill desde %s UTC hasta %s UTC",
-                    datetime.fromtimestamp(
-                        start_ms / 1000,
-                        timezone.utc,
-                    ).isoformat(),
-                    datetime.fromtimestamp(
-                        end_ms / 1000,
-                        timezone.utc,
-                    ).isoformat(),
-                )
-            else:
-                start_ms = max(START_TIME_MS, latest - 10 * INTERVAL_MS)
-                end_ms = int(time.time() * 1000)
-                logger.info(
-                    "Backfill desde la última vela guardada "
-                    "(con solapamiento de 10 velas)."
-                )
+            total = _backfill_historical_gaps(session)
+            if not STATE.stop_event.is_set():
+                latest = get_latest_open_time()
+                if latest is not None:
+                    start_ms = max(START_TIME_MS, latest - 10 * INTERVAL_MS)
+                    end_ms = int(time.time() * 1000)
+                    logger.info(
+                        "Backfill desde la última vela guardada "
+                        "(con solapamiento de 10 velas)."
+                    )
+                    total += _fetch_backfill_range(session, start_ms, end_ms)
 
-        expected_candles = max(1, (end_ms - start_ms) // INTERVAL_MS + 1)
-        expected_pages = (expected_candles + REST_PAGE_LIMIT - 1) // REST_PAGE_LIMIT
-        progress_started = time.monotonic()
-        update_diagnostics(
-            "backfill",
-            candles_saved=0,
-            candles_expected=expected_candles,
-            pages_completed=0,
-            pages_expected=expected_pages,
-            progress_percent=0.0,
-            candles_per_second=0.0,
-            eta_seconds=None,
-            last_candle_at=None,
-        )
-        logger.info(
-            "Backfill planificado: %s velas (~%s páginas REST)",
-            expected_candles,
-            expected_pages,
-        )
-
-        def log_backfill_progress(saved, expected, last_open_time, page):
-            elapsed = max(time.monotonic() - progress_started, 0.001)
-            rate = saved / elapsed
-            percent = min(100.0, saved * 100.0 / expected)
-            remaining = max(0, expected - saved)
-            eta_seconds = remaining / rate if rate > 0 else None
-            last_candle_at = datetime.fromtimestamp(
-                last_open_time / 1000,
-                timezone.utc,
-            ).isoformat()
-
-            update_diagnostics(
-                "backfill",
-                candles_saved=saved,
-                pages_completed=page,
-                progress_percent=round(percent, 2),
-                candles_per_second=round(rate, 2),
-                eta_seconds=(
-                    round(eta_seconds, 1) if eta_seconds is not None else None
-                ),
-                last_candle_at=last_candle_at,
-            )
-            eta_text = "n/a" if eta_seconds is None else f"{eta_seconds / 60:.1f} min"
-            logger.info(
-                "Backfill progreso: %s/%s velas (%.1f%%), "
-                "página %s/%s, última=%s, velocidad=%.1f velas/s, ETA=%s",
-                saved,
-                expected,
-                percent,
-                page,
-                expected_pages,
-                last_candle_at,
-                rate,
-                eta_text,
-            )
-
-        total = fetch_and_save_range(
-            session,
-            start_ms,
-            end_ms,
-            progress_callback=log_backfill_progress,
-        )
         logger.info("Backfill terminado: %s velas", total)
         update_diagnostics(
             "backfill",

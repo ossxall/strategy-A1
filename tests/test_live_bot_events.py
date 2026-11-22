@@ -84,6 +84,82 @@ def test_bot_rejects_terminal_arguments_instead_of_parsing_cli():
     assert "no acepta argumentos" in result.stderr
 
 
+def test_main_does_not_require_feed_database_before_starting_bot(
+    tmp_path, monkeypatch
+):
+    calls = []
+    paths = {
+        "DB_PATH": str(tmp_path / "feed.db"),
+        "SIGNAL_DB": str(tmp_path / "signal.db"),
+        "BACKTEST_REPORT_DIR": str(tmp_path / "reports"),
+        "MODE": "live",
+        "SYMBOL": "BTCUSDT",
+        "INTERVAL": "1m",
+        "LIVE_SINCE": "",
+    }
+
+    class Feed:
+        def __init__(self, *_args):
+            pass
+
+        def connect(self):
+            raise AssertionError("feed.db todavía no está listo")
+
+        def close(self):
+            calls.append("feed closed")
+
+    class Store:
+        def __init__(self, *_args):
+            pass
+
+        def connect(self):
+            calls.append("signal db connected")
+
+        def close(self):
+            calls.append("signal db closed")
+
+    class Health:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def stop(self):
+            calls.append("health stopped")
+
+    class Bot:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def run(self, **_kwargs):
+            calls.append("bot running")
+
+    monkeypatch.setattr(bot_app, "validate_prod_environment", lambda _service: None)
+    monkeypatch.setattr(bot_app, "build_strategy_config", make_config)
+    monkeypatch.setattr(
+        bot_app,
+        "env_str",
+        lambda name, default="": paths.get(name, default),
+    )
+    monkeypatch.setattr(bot_app, "env_bool", lambda _name, default=False: default)
+    monkeypatch.setattr(
+        bot_app,
+        "env_int",
+        lambda name, default=0: 0 if name == "HTTP_PORT" else default,
+    )
+    monkeypatch.setattr(
+        bot_app, "env_float", lambda _name, default=0.0: default
+    )
+    monkeypatch.setattr(bot_app, "resolve_path", lambda path: Path(path))
+    monkeypatch.setattr(bot_app, "FeedReader", Feed)
+    monkeypatch.setattr(bot_app, "SignalStore", Store)
+    monkeypatch.setattr(bot_app, "BotHealth", Health)
+    monkeypatch.setattr(bot_app, "SignalBot", Bot)
+
+    assert bot_app.main() == 0
+    assert "signal db connected" in calls
+    assert "bot running" in calls
+    assert "feed closed" in calls
+
+
 def test_strategy_parameters_ignore_environment_overrides(monkeypatch):
     defaults = Config()
     monkeypatch.setenv("BOT_STRATEGY_TIMEFRAME", "15min")
@@ -226,6 +302,38 @@ def test_live_process_passes_closed_one_minute_feed_to_intrabar_replay(monkeypat
     bot.process_once()
 
     assert calls[0][-2] is raw
+
+
+def test_live_since_restore_updates_health_state():
+    marker = 1_767_225_600_000
+
+    class Store:
+        def get_state(self, key):
+            assert key == "live_since_ms"
+            return str(marker)
+
+        def set_state(self, *_args):
+            raise AssertionError("la marca restaurada no debe sobrescribirse")
+
+    class Health:
+        live_since_ms = None
+
+    health = Health()
+    bot = SignalBot(
+        make_config(),
+        feed=None,
+        store=Store(),
+        symbol="BTCUSDT",
+        interval="1m",
+        live_only=True,
+        health=health,
+        mode="live",
+    )
+
+    bot._resolve_live_since()
+
+    assert bot.live_since_ms == marker
+    assert health.live_since_ms == marker
 
 
 def test_live_tail_uses_only_closed_feed_db_minutes(tmp_path, monkeypatch):

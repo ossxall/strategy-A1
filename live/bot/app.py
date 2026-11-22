@@ -117,6 +117,7 @@ class SignalBot:
         if not self.live_only:
             return
 
+        persist_marker = self.live_since_ms is not None
         if self.live_since_ms is None:
             stored = self.store.get_state("live_since_ms")
             if stored is not None:
@@ -125,10 +126,14 @@ class SignalBot:
                     "Modo live-only: reanudando desde %s.",
                     ms_to_iso(self.live_since_ms),
                 )
-                return
-            self.live_since_ms = ts_ms(utc_now())
+            else:
+                self.live_since_ms = ts_ms(utc_now())
+                persist_marker = True
 
-        self.store.set_state("live_since_ms", str(self.live_since_ms))
+        if persist_marker:
+            self.store.set_state("live_since_ms", str(self.live_since_ms))
+        if self.health is not None:
+            self.health.live_since_ms = self.live_since_ms
         logger.info(
             "Modo live-only: solo señales desde %s (se ignora el histórico).",
             ms_to_iso(self.live_since_ms),
@@ -460,8 +465,9 @@ def main() -> int:
     http_thread = None
     probe_thread = None
     try:
-        # Validar las bases antes de publicar health/status o procesar señales.
-        feed.connect()
+        # Validar signal.db antes de publicar health/status. feed.db se abre
+        # de forma perezosa en cada ciclo para tolerar la carrera de arranque
+        # con el colector, que puede estar creándola todavía.
         if mode == "live":
             store.connect()
 

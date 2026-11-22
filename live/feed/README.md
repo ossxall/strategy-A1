@@ -32,6 +32,14 @@ tablas encima de una base parcial ni borra datos automáticamente.
 Al borrar y recrear `feed.db`, el colector vuelve a aplicar esta política al
 iniciar. El archivo eliminado también contenía las velas persistidas.
 
+## Recuperación tras reinicio
+
+Con una base existente, el backfill inicial repara todos los huecos históricos
+detectados, vuelve a comprobar el primero pendiente después de cada descarga y
+termina solapando las últimas diez velas para recuperar el tramo reciente. Si
+una descarga no reduce el primer hueco, el backfill queda en estado de error en
+vez de declararse completo o repetir indefinidamente el mismo rango.
+
 ## Ejecución
 
 Desde el directorio `live/`:

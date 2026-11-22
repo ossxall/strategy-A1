@@ -1,11 +1,15 @@
 import csv
 import sqlite3
+import threading
+from types import SimpleNamespace
 
 import pandas as pd
+import pytest
 from pandas.testing import assert_frame_equal
 
 from dataset.binance_klines import COLUMNS, merge_parquet
 from live.feed import database
+from live.feed import rest as feed_rest
 from live.bot.storage import FeedReader
 from strategy.utils import load_parquet
 
@@ -334,3 +338,51 @@ def test_feed_returns_no_gap_when_history_is_contiguous(tmp_path, monkeypatch):
     )
 
     assert database.get_first_missing_candle_range(start) is None
+
+
+def test_backfill_rechecks_and_repairs_multiple_historical_gaps(monkeypatch):
+    first = (1_000, 1_999)
+    second = (3_000, 3_999)
+    missing_ranges = iter([first, second, None])
+    fetched_ranges = []
+    monkeypatch.setattr(
+        feed_rest,
+        "STATE",
+        SimpleNamespace(stop_event=threading.Event()),
+    )
+    monkeypatch.setattr(feed_rest, "START_TIME_MS", 0)
+    monkeypatch.setattr(
+        feed_rest,
+        "get_first_missing_candle_range",
+        lambda _start: next(missing_ranges),
+    )
+
+    def fetch(_session, start, end):
+        fetched_ranges.append((start, end))
+        return 2
+
+    monkeypatch.setattr(feed_rest, "_fetch_backfill_range", fetch)
+
+    assert feed_rest._backfill_historical_gaps(object()) == 4
+    assert fetched_ranges == [first, second]
+
+
+def test_backfill_fails_instead_of_looping_when_a_gap_does_not_shrink(
+    monkeypatch,
+):
+    missing = (1_000, 1_999)
+    monkeypatch.setattr(
+        feed_rest,
+        "STATE",
+        SimpleNamespace(stop_event=threading.Event()),
+    )
+    monkeypatch.setattr(feed_rest, "START_TIME_MS", 0)
+    monkeypatch.setattr(
+        feed_rest,
+        "get_first_missing_candle_range",
+        lambda _start: missing,
+    )
+    monkeypatch.setattr(feed_rest, "_fetch_backfill_range", lambda *_args: 0)
+
+    with pytest.raises(RuntimeError, match="no avanzó"):
+        feed_rest._backfill_historical_gaps(object())
