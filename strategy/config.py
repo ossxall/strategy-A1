@@ -249,7 +249,7 @@ class Config:
     partial_tp29_r: float = 28.0
     partial_tp29_pct: float = 5.0
     partial_tp30_r: float = 29.0
-    partial_tp30_pct: float = 5.0
+    partial_tp30_pct: float = 100.0
     #
     # Whether to move the stop to breakeven after a partial take-profit.
     #
