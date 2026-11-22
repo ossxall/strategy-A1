@@ -168,7 +168,7 @@ class Config:
     #
     # ADX-based exit (reversal) configuration.
     #
-    adx_exit_enabled: bool = True
+    adx_exit_enabled: bool = False
     #
     # One or several timeframes (combined with OR). Accepts "1D", "1D,30min" or
     # ["1D", "30min"]; the ADX exit triggers if a reversal occurs in any of them.

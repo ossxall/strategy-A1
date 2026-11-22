@@ -19,6 +19,12 @@ class ReportHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(REPORT_DIR), **kwargs)
 
+    def end_headers(self) -> None:
+        # Los reportes se sobrescriben con frecuencia en la misma URL; evita
+        # que el navegador muestre una copia anterior desde su caché.
+        self.send_header("Cache-Control", "no-store")
+        super().end_headers()
+
     def translate_path(self, path: str) -> str:
         requested = unquote(urlsplit(path).path)
         if requested in {"/report", "/report/"}:
