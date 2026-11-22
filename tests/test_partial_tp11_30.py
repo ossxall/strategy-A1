@@ -6,9 +6,44 @@ from strategy.models import Position
 from strategy.strategy import Backtester
 
 
+def assert_tps_through_level_execute_in_order(engine, level, side):
+    pos = engine.position
+    assert pos is not None
+    risk_unit = engine._risk_unit(pos)
+    remaining = pos.initial_quantity
+    assert len(engine.trades) == level
+
+    for tp_level, trade in enumerate(engine.trades, start=1):
+        tp_r = (
+            engine.cfg.partial_tp_r
+            if tp_level == 1
+            else getattr(engine.cfg, f"partial_tp{tp_level}_r")
+        )
+        reason = (
+            f"PARTIAL_TP_{tp_r:g}R"
+            if tp_level == 1
+            else f"PARTIAL_TP{tp_level}_{tp_r:g}R"
+        )
+        tp_pct = (
+            engine.cfg.partial_tp_pct
+            if tp_level == 1
+            else getattr(engine.cfg, f"partial_tp{tp_level}_pct")
+        )
+        assert trade.reason == reason
+        assert trade.exit_price == pytest.approx(
+            pos.entry_price + side * tp_r * risk_unit
+        )
+        assert trade.quantity == pytest.approx(remaining * tp_pct / 100)
+        remaining -= trade.quantity
+        done_attr = "partial_done" if tp_level == 1 else f"partial{tp_level}_done"
+        assert getattr(pos, done_attr)
+
+    assert pos.quantity == pytest.approx(remaining)
+
+
 @pytest.mark.parametrize("level", range(11, 31))
 @pytest.mark.parametrize("side", [1, -1])
-def test_tp11_to_tp20_execute_for_long_and_short(level, side):
+def test_tp11_to_tp30_execute_in_order_for_long_and_short(level, side):
     config = Config(
         timeframe="30min",
         entry_adx_enabled=False,
@@ -50,13 +85,9 @@ def test_tp11_to_tp20_execute_for_long_and_short(level, side):
 
     engine._manage(1)
 
-    assert len(engine.trades) == 1
-    trade = engine.trades[0]
-    assert trade.reason == f"PARTIAL_TP{level}_{target_r:g}R"
-    assert trade.exit_price == pytest.approx(target_price)
-    assert trade.quantity == pytest.approx(0.05)
-    assert engine.position is not None
-    assert getattr(engine.position, f"partial{level}_done")
+    assert_tps_through_level_execute_in_order(engine, level, side)
+    assert engine.trades[-1].reason == f"PARTIAL_TP{level}_{target_r:g}R"
+    assert engine.trades[-1].exit_price == pytest.approx(target_price)
 
 
 @pytest.mark.parametrize("level", range(11, 31))

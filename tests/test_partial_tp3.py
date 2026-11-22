@@ -57,18 +57,27 @@ def make_engine(side):
 
 
 @pytest.mark.parametrize("side", [1, -1])
-def test_tp3_closes_configured_percent_at_2r_for_both_sides(side):
+def test_tps_through_tp3_execute_in_order_for_both_sides(side):
     engine = make_engine(side)
 
     engine._manage(1)
 
-    trade = engine.trades[0]
-    assert trade.reason == "PARTIAL_TP3_2R"
-    assert trade.exit_price == (120.0 if side == 1 else 80.0)
-    assert trade.quantity == pytest.approx(0.05)
+    assert [trade.reason for trade in engine.trades] == [
+        "PARTIAL_TP_0.5R",
+        "PARTIAL_TP2_1R",
+        "PARTIAL_TP3_2R",
+    ]
+    assert [trade.exit_price for trade in engine.trades] == pytest.approx(
+        [100.0 + side * price for price in (5.0, 10.0, 20.0)]
+    )
+    assert [trade.quantity for trade in engine.trades] == pytest.approx(
+        [0.05, 0.0475, 0.045125]
+    )
     assert engine.position is not None
     assert engine.position.partial3_done
-    assert not engine.position.partial2_done
+    assert engine.position.partial2_done
+    assert engine.position.partial_done
+    assert engine.position.quantity == pytest.approx(0.857375)
 
 
 def test_tp3_defaults_and_ordering_validation():

@@ -73,9 +73,9 @@ def test_partial_tp_percent_is_applied_to_remaining_quantity():
     engine._manage(1, high=105.0)
 
     assert [trade.reason for trade in engine.trades] == [
-        "PARTIAL_TP2_1R",
         "PARTIAL_TP_0.5R",
+        "PARTIAL_TP2_1R",
     ]
-    assert [trade.quantity for trade in engine.trades] == pytest.approx([0.2, 0.08])
+    assert [trade.quantity for trade in engine.trades] == pytest.approx([0.1, 0.18])
     assert engine.position is not None
     assert engine.position.quantity == pytest.approx(0.72)

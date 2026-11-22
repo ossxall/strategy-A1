@@ -138,7 +138,7 @@ def test_stop_has_priority_when_tp_and_stop_are_both_touched_in_one_minute():
     assert trades.exit_price.tolist() == pytest.approx([90.0])
 
 
-def test_intrabar_executes_at_most_one_tp_per_minute_and_checks_farther_level_first():
+def test_intrabar_executes_all_reached_tps_per_minute_from_nearest_to_farthest():
     bars = make_strategy_bars()
     one_minute = make_one_minute_bars()
     bars.loc[bars.index[1], "high"] = 121.0
@@ -172,11 +172,10 @@ def test_intrabar_executes_at_most_one_tp_per_minute_and_checks_farther_level_fi
 
     trades, _ = engine.run()
 
-    # Aunque el primer minuto alcanza TP1 y TP2, solo se cierra TP2 en ese
-    # minuto; TP1 queda para el siguiente minuto que también toca ambos.
-    assert trades.reason.tolist() == ["PARTIAL_TP2_1.5R", "PARTIAL_TP_1R"]
-    assert trades.exit_time.tolist() == [one_minute.index[5], one_minute.index[6]]
-    assert trades.exit_price.tolist() == pytest.approx([115.0, 110.0])
+    assert trades.reason.tolist() == ["PARTIAL_TP_1R", "PARTIAL_TP2_1.5R"]
+    assert trades.exit_time.tolist() == [one_minute.index[5], one_minute.index[5]]
+    assert trades.exit_price.tolist() == pytest.approx([110.0, 115.0])
+    assert trades.quantity.tolist() == pytest.approx([0.2, 0.24])
 
 
 def test_intrabar_take_profit_and_breakeven_stop_are_symmetric_for_short():

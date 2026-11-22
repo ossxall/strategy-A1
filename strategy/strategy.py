@@ -1230,42 +1230,49 @@ class Backtester:
         risk_unit = self._risk_unit(pos)
         if risk_unit <= 0:
             return
-        pos_after = pos
-        # Objetivos de mayor distancia primero para conservar un solo parcial
-        # por vela cuando el rango alcanza varios niveles.
-        for level in range(30, 1, -1):
-            tp_r = getattr(cfg, f"partial_tp{level}_r")
-            if tp_r <= 0 or getattr(pos, f"partial{level}_done"):
+        # Ejecutar todos los objetivos alcanzados en orden de cercanía:
+        # TP1, TP2, ... TP30. Cada porcentaje se aplica a la cantidad restante.
+        for level in range(1, 31):
+            tp_r = (
+                cfg.partial_tp_r
+                if level == 1
+                else getattr(cfg, f"partial_tp{level}_r")
+            )
+            done_attr = (
+                "partial_done" if level == 1 else f"partial{level}_done"
+            )
+            if tp_r <= 0 or getattr(pos, done_attr):
                 continue
             trigger = pos.entry_price + pos.side * tp_r * risk_unit
             hit = high >= trigger if pos.side == 1 else low <= trigger
-            if hit:
-                fill = max(trigger, open_price) if pos.side == 1 else min(trigger, open_price)
-                self.close_position(
-                    getattr(cfg, f"partial_tp{level}_pct"),
-                    fill,
-                    timestamp,
-                    f"PARTIAL_TP{level}_{tp_r:g}R",
-                )
-                pos_after = self.position
-                if pos_after is not None:
-                    setattr(pos_after, f"partial{level}_done", True)
+            if not hit:
+                continue
+            fill = (
+                max(trigger, open_price)
+                if pos.side == 1
+                else min(trigger, open_price)
+            )
+            tp_pct = (
+                cfg.partial_tp_pct
+                if level == 1
+                else getattr(cfg, f"partial_tp{level}_pct")
+            )
+            reason = (
+                f"PARTIAL_TP_{tp_r:g}R"
+                if level == 1
+                else f"PARTIAL_TP{level}_{tp_r:g}R"
+            )
+            self.close_position(tp_pct, fill, timestamp, reason)
+            pos_after = self.position
+            if pos_after is None:
                 return
-        # TP1
-        if not pos.partial_done:
-            trigger = pos.entry_price + pos.side * cfg.partial_tp_r * risk_unit
-            hit = high >= trigger if pos.side == 1 else low <= trigger
-            if hit:
-                fill = max(trigger, open_price) if pos.side == 1 else min(trigger, open_price)
-                self.close_position(cfg.partial_tp_pct, fill, timestamp, f"PARTIAL_TP_{cfg.partial_tp_r:g}R")
-                pos_after = self.position
-                if pos_after is not None:
-                    pos_after.partial_done = True
-                    if cfg.move_stop_to_breakeven:
-                        if not pos_after.breakeven:
-                            pos_after.breakeven = True
-                            self._breakeven_activated_this_bar = True
-                            self._breakeven_activation_price = pos_after.entry_price
+            setattr(pos_after, done_attr, True)
+            if level == 1 and cfg.move_stop_to_breakeven:
+                if not pos_after.breakeven:
+                    pos_after.breakeven = True
+                    self._breakeven_activated_this_bar = True
+                    self._breakeven_activation_price = pos_after.entry_price
+
     def _stop(
         self,
         i: int,
