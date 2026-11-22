@@ -3,8 +3,8 @@
 Strategy 2 — EMA Cross + MACD + ADX
 ============================================
 
-Gestión de salida por defecto: una escalera de 20 take-profits parciales
-(TP1–TP20), desde 0,5R hasta 19R. Cada porcentaje se aplica sobre la cantidad
+Gestión de salida por defecto: una escalera de 30 take-profits parciales
+(TP1–TP30), desde 0,5R hasta 29R. Cada porcentaje se aplica sobre la cantidad
 que queda abierta; TP1 puede mover el stop restante a breakeven. La escalera
 puede desactivarse con `partial_tp_enabled=False`.
 
@@ -1021,6 +1021,16 @@ class Backtester:
             partial18_done=False,
             partial19_done=False,
             partial20_done=False,
+            partial21_done=False,
+            partial22_done=False,
+            partial23_done=False,
+            partial24_done=False,
+            partial25_done=False,
+            partial26_done=False,
+            partial27_done=False,
+            partial28_done=False,
+            partial29_done=False,
+            partial30_done=False,
         )
         self.opened.append({
             "position_id": self.position_id, "time": ts, "price": price, "side": side,
@@ -1223,7 +1233,7 @@ class Backtester:
         pos_after = pos
         # Objetivos de mayor distancia primero para conservar un solo parcial
         # por vela cuando el rango alcanza varios niveles.
-        for level in range(20, 1, -1):
+        for level in range(30, 1, -1):
             tp_r = getattr(cfg, f"partial_tp{level}_r")
             if tp_r <= 0 or getattr(pos, f"partial{level}_done"):
                 continue

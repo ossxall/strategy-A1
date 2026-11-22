@@ -84,7 +84,7 @@ def test_exit_signal_contract_assigns_stable_reason_and_stop_policy(
     assert payload["stop_action"] == expected_stop
 
 
-@pytest.mark.parametrize("level", range(1, 21))
+@pytest.mark.parametrize("level", range(1, 31))
 def test_every_partial_tp_level_maps_to_its_stable_reason_code(level):
     reason = "PARTIAL_TP_0.5R" if level == 1 else f"PARTIAL_TP{level}_1R"
     normalized = SignalStore._normalize_event(

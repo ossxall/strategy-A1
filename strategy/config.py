@@ -183,7 +183,7 @@ class Config:
     adx_adxlen: int = 14
     adx_key_level: float = 23.0
     adx_exit_pct: float = 100.0
-    # Escalonar salidas parciales TP1-TP20 en múltiplos del riesgo inicial.
+    # Escalonar salidas parciales TP1-TP30 en múltiplos del riesgo inicial.
     # Cada `partial_tpN_pct` es un porcentaje de la cantidad que queda abierta
     # al ejecutarse ese nivel. TP1 puede mover el stop restante a breakeven.
     # El orden de los niveles activos debe ser estrictamente creciente.
@@ -230,6 +230,26 @@ class Config:
     partial_tp19_pct: float = 5.0
     partial_tp20_r: float = 19.0
     partial_tp20_pct: float = 5.0
+    partial_tp21_r: float = 20.0
+    partial_tp21_pct: float = 5.0
+    partial_tp22_r: float = 21.0
+    partial_tp22_pct: float = 5.0
+    partial_tp23_r: float = 22.0
+    partial_tp23_pct: float = 5.0
+    partial_tp24_r: float = 23.0
+    partial_tp24_pct: float = 5.0
+    partial_tp25_r: float = 24.0
+    partial_tp25_pct: float = 5.0
+    partial_tp26_r: float = 25.0
+    partial_tp26_pct: float = 5.0
+    partial_tp27_r: float = 26.0
+    partial_tp27_pct: float = 5.0
+    partial_tp28_r: float = 27.0
+    partial_tp28_pct: float = 5.0
+    partial_tp29_r: float = 28.0
+    partial_tp29_pct: float = 5.0
+    partial_tp30_r: float = 29.0
+    partial_tp30_pct: float = 5.0
     #
     # Whether to move the stop to breakeven after a partial take-profit.
     #
@@ -425,7 +445,7 @@ class Config:
                 raise ValueError("Invalid partial take-profit configuration.")
         previous_tp_r = self.partial_tp_r
         previous_tp_label = "partial_tp_r"
-        for level in range(2, 21):
+        for level in range(2, 31):
             tp_r = getattr(self, f"partial_tp{level}_r")
             tp_pct = getattr(self, f"partial_tp{level}_pct")
             if tp_r > 0 or tp_pct > 0:

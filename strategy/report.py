@@ -265,6 +265,16 @@ def _configured_tp_levels(cfg: Config) -> list[tuple[str, float, str]]:
             ("TP18", cfg.partial_tp18_r, "longdashdot"),
             ("TP19", cfg.partial_tp19_r, "longdash"),
             ("TP20", cfg.partial_tp20_r, "longdashdot"),
+            ("TP21", cfg.partial_tp21_r, "longdash"),
+            ("TP22", cfg.partial_tp22_r, "longdashdot"),
+            ("TP23", cfg.partial_tp23_r, "longdash"),
+            ("TP24", cfg.partial_tp24_r, "longdashdot"),
+            ("TP25", cfg.partial_tp25_r, "longdash"),
+            ("TP26", cfg.partial_tp26_r, "longdashdot"),
+            ("TP27", cfg.partial_tp27_r, "longdash"),
+            ("TP28", cfg.partial_tp28_r, "longdashdot"),
+            ("TP29", cfg.partial_tp29_r, "longdash"),
+            ("TP30", cfg.partial_tp30_r, "longdashdot"),
         )
         if multiple > 0
     ]

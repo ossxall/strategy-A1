@@ -10,21 +10,21 @@ def test_default_tp_r_and_pct_values_are_unchanged():
     config = Config()
     risk_multiples = [
         config.partial_tp_r,
-        *(getattr(config, f"partial_tp{level}_r") for level in range(2, 21)),
+        *(getattr(config, f"partial_tp{level}_r") for level in range(2, 31)),
     ]
     percentages = [
         config.partial_tp_pct,
-        *(getattr(config, f"partial_tp{level}_pct") for level in range(2, 21)),
+        *(getattr(config, f"partial_tp{level}_pct") for level in range(2, 31)),
     ]
 
-    assert risk_multiples == [0.5, *map(float, range(1, 20))]
-    assert percentages == [5.0] * 20
+    assert risk_multiples == [0.5, *map(float, range(1, 30))]
+    assert percentages == [5.0] * 30
 
 
 def test_partial_tp_percent_is_applied_to_remaining_quantity():
     disabled_levels = {
         key: 0.0
-        for level in range(3, 21)
+        for level in range(3, 31)
         for key in (f"partial_tp{level}_r", f"partial_tp{level}_pct")
     }
     config = Config(

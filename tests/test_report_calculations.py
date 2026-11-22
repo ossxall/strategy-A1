@@ -81,8 +81,8 @@ def test_tp_chart_levels_match_position_risk_and_execution_enablement():
     assert _r_target_price(span, -1, 1.5) == 92.5
     assert _configured_tp_levels(Config(partial_tp_enabled=False)) == []
     levels = _configured_tp_levels(Config(partial_tp_enabled=True))
-    assert len(levels) == 20
-    assert levels[-1][0] == "TP20"
+    assert len(levels) == 30
+    assert levels[-1][0] == "TP30"
 
 
 def test_higher_timeframe_plot_timestamps_are_candle_close_times():

@@ -499,7 +499,7 @@ def _self_test_signal_reason_matrix(root: Path, now_ms: int) -> int:
                 f"TAKE_PROFIT_{level}",
                 STOP_ACTION_KEEP,
             )
-            for level in range(11, 21)
+            for level in range(11, 31)
         ),
         ("ADX_1D_REVERSAL_50%", "LONG", "PARTIAL_CLOSE",
          "ADX_REVERSAL", STOP_ACTION_KEEP),

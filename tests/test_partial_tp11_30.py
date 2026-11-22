@@ -6,7 +6,7 @@ from strategy.models import Position
 from strategy.strategy import Backtester
 
 
-@pytest.mark.parametrize("level", range(11, 21))
+@pytest.mark.parametrize("level", range(11, 31))
 @pytest.mark.parametrize("side", [1, -1])
 def test_tp11_to_tp20_execute_for_long_and_short(level, side):
     config = Config(
@@ -59,7 +59,7 @@ def test_tp11_to_tp20_execute_for_long_and_short(level, side):
     assert getattr(engine.position, f"partial{level}_done")
 
 
-@pytest.mark.parametrize("level", range(11, 21))
+@pytest.mark.parametrize("level", range(11, 31))
 def test_tp11_to_tp20_defaults_and_validation(level):
     config = Config()
     assert getattr(config, f"partial_tp{level}_r") == float(level - 1)
