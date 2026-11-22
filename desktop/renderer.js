@@ -3,7 +3,6 @@ const message = document.getElementById('message')
 const messageTitle = document.getElementById('message-title')
 const messageText = document.getElementById('message-text')
 const configPathElement = document.getElementById('config-path')
-const localIndicator = document.querySelector('.local-indicator')
 const themeToggle = document.getElementById('theme-toggle')
 const themeToggleLabel = document.getElementById('theme-toggle-label')
 const reloadButton = document.getElementById('reload-current')
@@ -17,7 +16,6 @@ function setTheme (theme, persist = false) {
   document.documentElement.dataset.theme = activeTheme
   themeToggle.setAttribute('aria-pressed', String(isDark))
   themeToggle.setAttribute('aria-label', `Cambiar a ${nextThemeLabel.toLowerCase()}`)
-  themeToggle.title = `Cambiar a ${nextThemeLabel.toLowerCase()}`
   themeToggleLabel.textContent = nextThemeLabel
 
   if (persist) {
@@ -91,7 +89,6 @@ async function initialize () {
     return
   }
 
-  localIndicator.title = `Archivo de configuración: ${configuration.configPath}`
   reloadButton.disabled = false
 
   const buttons = configuration.systems.map((system) => {
@@ -100,21 +97,24 @@ async function initialize () {
     button.type = 'button'
     button.setAttribute('role', 'tab')
     button.dataset.systemId = system.id
-    button.title = system.url
+    button.setAttribute('aria-label', system.name)
     button.setAttribute('aria-selected', String(system.id === configuration.selectedId))
     button.tabIndex = system.id === configuration.selectedId ? 0 : -1
 
     const icon = document.createElement('i')
     icon.setAttribute('data-lucide', system.icon || 'circle-help')
     icon.setAttribute('aria-hidden', 'true')
-    button.append(icon, document.createTextNode(system.name))
+    const label = document.createElement('span')
+    label.className = 'system-label'
+    label.textContent = system.name
+    button.append(icon, label)
     button.addEventListener('click', () => selectSystem(system.id, buttons))
     button.addEventListener('keydown', (event) => {
-      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+      if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
 
       event.preventDefault()
       const currentIndex = buttons.indexOf(button)
-      const direction = event.key === 'ArrowRight' ? 1 : -1
+      const direction = event.key === 'ArrowDown' ? 1 : -1
       const nextIndex = (currentIndex + direction + buttons.length) % buttons.length
       buttons[nextIndex].focus()
       selectSystem(buttons[nextIndex].dataset.systemId, buttons)

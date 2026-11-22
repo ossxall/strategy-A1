@@ -78,34 +78,42 @@
         -webkit-font-smoothing: antialiased;
       }
 
-      .app-header {
-        position: relative;
-        z-index: 2;
-        height: 100px;
-        background: var(--surface);
-        box-shadow: 0 1px 0 var(--border);
+      .app-layout {
+        display: flex;
+        width: 100vw;
+        height: 100vh;
       }
 
-      .brand-row {
+      .app-sidebar {
+        position: relative;
+        z-index: 2;
         display: flex;
+        width: 76px;
+        flex: 0 0 76px;
+        flex-direction: column;
         align-items: center;
-        justify-content: space-between;
-        height: 60px;
-        padding: 0 32px;
+        padding: 10px 8px;
+        border-right: 1px solid var(--border);
+        background: var(--surface);
       }
 
       .brand {
+        position: relative;
         display: flex;
         align-items: center;
-        gap: 13px;
+        justify-content: center;
+        width: 100%;
+        min-height: 54px;
+        flex-direction: column;
+        gap: 3px;
       }
 
       .brand-mark {
         display: grid;
-        width: 38px;
-        height: 38px;
+        width: 34px;
+        height: 34px;
         place-items: center;
-        border-radius: 12px;
+        border-radius: 11px;
         background: var(--brand-bg);
         color: var(--brand-text);
         font-size: 18px;
@@ -115,40 +123,124 @@
       }
 
       .brand-name {
-        margin: 0;
-        font-size: 15px;
-        font-weight: 600;
-        line-height: 22px;
-        letter-spacing: -0.009em;
-      }
-
-      .brand-caption {
-        margin: 3px 0 0;
         color: var(--muted);
-        font-size: 11px;
-        font-weight: 400;
-        line-height: 16px;
-        letter-spacing: 0.005em;
+        font-size: 8px;
+        font-weight: 600;
+        line-height: 10px;
+        white-space: nowrap;
       }
 
-      .header-actions {
+      .sidebar-divider {
+        width: 36px;
+        height: 1px;
+        flex: 0 0 auto;
+        margin: 8px 0;
+        background: var(--divider);
+      }
+
+      .sidebar-nav {
+        width: 100%;
+        min-height: 0;
+        flex: 1;
+        overflow-y: auto;
+        scrollbar-width: none;
+      }
+
+      .sidebar-nav::-webkit-scrollbar {
+        display: none;
+      }
+
+      .system-tabs {
         display: flex;
+        width: 100%;
+        flex-direction: column;
         align-items: center;
-        gap: 12px;
+        gap: 2px;
+      }
+
+      .system-tab,
+      .sidebar-action {
+        position: relative;
+        display: flex;
+        width: 56px;
+        height: 43px;
+        flex: 0 0 auto;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 1px;
+        padding: 0;
+        border: 1px solid transparent;
+        border-radius: 10px;
+        background: transparent;
+        color: var(--muted);
+        cursor: pointer;
+        font: inherit;
+        transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
+      }
+
+      .system-tab:hover,
+      .sidebar-action:hover {
+        background: var(--hover-bg);
+        color: var(--hover-text);
+      }
+
+      .system-tab:focus-visible,
+      .sidebar-action:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+
+      .system-tab[aria-selected="true"] {
+        border-color: var(--border);
+        background: var(--brand-bg);
+        color: var(--brand-text);
+      }
+
+      .tab-icon,
+      .sidebar-action svg {
+        width: 17px;
+        height: 17px;
+        fill: none;
+        stroke: currentColor;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        stroke-width: 1.8;
+      }
+
+      .system-label,
+      .action-label,
+      .local-label {
+        max-width: 52px;
+        overflow: hidden;
+        font-size: 9px;
+        font-weight: 500;
+        line-height: 11px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .sidebar-footer {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
+      }
+
+      .sidebar-action:disabled {
+        cursor: not-allowed;
+        opacity: 0.45;
       }
 
       .local-indicator {
         display: flex;
+        width: 56px;
+        height: 32px;
+        flex-direction: column;
         align-items: center;
-        gap: 8px;
-        padding: 8px 11px;
-        border: 1px solid var(--border);
-        border-radius: 999px;
-        color: var(--subtle);
-        font-size: 12px;
-        font-weight: 500;
-        line-height: 16px;
-        letter-spacing: 0;
+        justify-content: center;
+        gap: 4px;
+        color: var(--muted);
       }
 
       .local-dot {
@@ -156,166 +248,29 @@
         height: 7px;
         border-radius: 50%;
         background: #34a875;
-        box-shadow: 0 0 0 3px var(--indicator-shadow);
+        box-shadow: 0 0 0 4px var(--indicator-shadow);
       }
 
-      .theme-toggle {
-        display: inline-flex;
-        min-height: 34px;
-        align-items: center;
-        justify-content: center;
-        gap: 8px;
-        padding: 0 11px;
-        border: 1px solid var(--border);
-        border-radius: 10px;
-        background: var(--surface);
-        color: var(--text);
-        cursor: pointer;
-        font: inherit;
-        font-size: 13px;
-        font-weight: 500;
-        line-height: 20px;
-        letter-spacing: -0.003em;
-        transition: background 120ms ease, border-color 120ms ease;
-      }
-
-      .theme-toggle:hover {
-        border-color: var(--accent);
-        background: var(--hover-bg);
-      }
-
-      .theme-toggle:focus-visible,
-      .system-tab:focus-visible {
-        outline: 2px solid var(--accent);
-        outline-offset: -2px;
-      }
-
-      .theme-toggle svg {
-        width: 15px;
-        height: 15px;
-        fill: none;
-        stroke: currentColor;
-        stroke-linecap: round;
-        stroke-linejoin: round;
-        stroke-width: 1.7;
-      }
-
-      :root[data-theme="light"] .theme-icon-sun,
-      :root[data-theme="dark"] .theme-icon-moon {
+      .theme-icon-sun {
         display: none;
       }
 
-      .tab-row {
-        display: flex;
-        align-items: stretch;
-        height: 40px;
-        gap: 4px;
-        padding: 0 24px;
-        border-top: 1px solid var(--divider);
+      :root[data-theme="light"] .theme-icon-moon {
+        display: none;
       }
 
-      .system-tabs {
-        display: flex;
-        min-width: 0;
-        flex: 1;
-        align-items: stretch;
-        gap: 4px;
-        overflow-x: auto;
-        scrollbar-width: thin;
+      :root[data-theme="light"] .theme-icon-sun {
+        display: block;
       }
 
-      .system-tab {
-        position: relative;
-        display: inline-flex;
-        min-width: 96px;
-        align-items: center;
-        justify-content: center;
-        gap: 7px;
-        padding: 0 10px;
-        border: 0;
-        border-radius: 0;
-        background: transparent;
-        color: var(--muted);
-        cursor: pointer;
-        font: inherit;
-        font-size: 12px;
-        font-weight: 500;
-        line-height: 20px;
-        letter-spacing: -0.003em;
-        transition: color 120ms ease, background 120ms ease;
-      }
-
-      .system-tab:hover {
-        background: var(--hover-bg);
-        color: var(--hover-text);
-      }
-
-      .system-tab[aria-selected="true"] {
-        color: var(--accent);
-      }
-
-      .system-tab[aria-selected="true"]::after {
-        position: absolute;
-        right: 10px;
-        bottom: 0;
-        left: 10px;
-        height: 2px;
-        border-radius: 2px 2px 0 0;
-        background: var(--accent);
-        content: "";
-      }
-
-      .tab-icon {
-        width: 15px;
-        height: 15px;
-        flex: 0 0 auto;
-        stroke-width: 1.8;
-      }
-
-      .reload-button {
-        display: inline-grid;
-        width: 32px;
-        height: 32px;
-        flex: 0 0 auto;
-        align-self: center;
-        place-items: center;
-        margin-left: auto;
-        border: 1px solid var(--border);
-        border-radius: 10px;
-        background: var(--surface);
-        color: var(--subtle);
-        cursor: pointer;
-        transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
-      }
-
-      .reload-button:hover:not(:disabled) {
-        border-color: var(--accent);
-        background: var(--hover-bg);
-        color: var(--accent);
-      }
-
-      .reload-button:focus-visible {
-        outline: 2px solid var(--accent);
-        outline-offset: 2px;
-      }
-
-      .reload-button:disabled {
-        cursor: not-allowed;
-        opacity: 0.45;
-      }
-
-      .reload-button svg {
-        width: 14px;
-        height: 14px;
-        fill: none;
-        stroke: currentColor;
-        stroke-linecap: round;
-        stroke-linejoin: round;
-        stroke-width: 1.8;
+      .sidebar-footer .sidebar-divider {
+        margin: 4px 0;
       }
 
       .app-content {
-        height: calc(100vh - 124px);
+        min-width: 0;
+        flex: 1;
+        height: calc(100vh - 24px);
         margin: 12px;
         padding: 4px;
         border: 1px solid var(--border);
@@ -328,7 +283,7 @@
         display: none;
         position: absolute;
         z-index: 1;
-        inset: 100px 0 0;
+        inset: 0 0 0 76px;
         align-items: center;
         justify-content: center;
         padding: 40px;
@@ -385,23 +340,44 @@
     </style>
   </head>
   <body>
-    <header class="app-header">
-      <div class="brand-row">
+    <div class="app-layout">
+      <aside class="app-sidebar" aria-label="Menú principal">
         <div class="brand">
           <div class="brand-mark" aria-hidden="true">A1</div>
-          <div>
-            <p class="brand-name">Strategy A1</p>
-            <p class="brand-caption">Centro de sistemas</p>
-          </div>
+          <span class="brand-name">Strategy A1</span>
         </div>
-        <div class="header-actions">
+        <div class="sidebar-divider" aria-hidden="true"></div>
+        <nav class="sidebar-nav" aria-label="Sistemas">
+          <div
+            id="system-tabs"
+            class="system-tabs"
+            role="tablist"
+            aria-label="Sistemas configurados"
+            aria-orientation="vertical"
+          ></div>
+        </nav>
+        <div class="sidebar-footer">
+          <button
+            id="reload-current"
+            class="sidebar-action"
+            type="button"
+            aria-label="Recargar página actual"
+            disabled
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M20 7v5h-5"></path>
+              <path d="M5.64 5.64A9 9 0 0 1 20 12"></path>
+              <path d="M4 12a9 9 0 0 0 14.36 6.36"></path>
+              <path d="M4 17v-5h5"></path>
+            </svg>
+            <span class="action-label">Recargar</span>
+          </button>
           <button
             id="theme-toggle"
-            class="theme-toggle"
+            class="sidebar-action"
             type="button"
             aria-label="Cambiar a tema oscuro"
             aria-pressed="false"
-            title="Cambiar a tema oscuro"
           >
             <svg class="theme-icon-moon" viewBox="0 0 24 24" aria-hidden="true">
               <path d="M20.2 15.2A8.5 8.5 0 0 1 8.8 3.8 8.5 8.5 0 1 0 20.2 15.2Z"></path>
@@ -410,35 +386,21 @@
               <circle cx="12" cy="12" r="4"></circle>
               <path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42"></path>
             </svg>
-            <span id="theme-toggle-label">Tema oscuro</span>
+            <span id="theme-toggle-label" class="action-label">Tema oscuro</span>
           </button>
-          <div class="local-indicator">
+          <div class="sidebar-divider" aria-hidden="true"></div>
+          <div
+            class="local-indicator"
+            aria-label="Aplicación de escritorio"
+          >
             <span class="local-dot" aria-hidden="true"></span>
-            Aplicación de escritorio
+            <span class="local-label">Local</span>
           </div>
         </div>
-      </div>
-      <nav class="tab-row" aria-label="Sistemas">
-        <div id="system-tabs" class="system-tabs" role="tablist" aria-label="Sistemas configurados"></div>
-        <button
-          id="reload-current"
-          class="reload-button"
-          type="button"
-          aria-label="Recargar página actual"
-          title="Recargar página actual"
-          disabled
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M20 7v5h-5"></path>
-            <path d="M5.64 5.64A9 9 0 0 1 20 12"></path>
-            <path d="M4 12a9 9 0 0 0 14.36 6.36"></path>
-            <path d="M4 17v-5h5"></path>
-          </svg>
-        </button>
-      </nav>
-    </header>
+      </aside>
 
-    <main class="app-content" aria-label="Contenido del sistema seleccionado"></main>
+      <main class="app-content" aria-label="Contenido del sistema seleccionado"></main>
+    </div>
     <section id="message" class="message" aria-live="polite">
       <div class="message-card">
         <h2 id="message-title"></h2>

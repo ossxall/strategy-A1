@@ -2,7 +2,7 @@ const { app, BrowserWindow, WebContentsView, ipcMain } = require('electron/main'
 const fs = require('node:fs')
 const path = require('node:path')
 
-const HEADER_HEIGHT = 100
+const SIDEBAR_WIDTH = 76
 const CONTENT_VIEW_INSET = 17
 const PERSISTENT_PARTITION = 'persist:strategy-a1'
 const DEV_TOOLS_ENABLED = !app.isPackaged
@@ -136,10 +136,10 @@ function setViewBounds (state) {
 
   for (const { view } of state.systems.values()) {
     view.setBounds({
-      x: CONTENT_VIEW_INSET,
-      y: HEADER_HEIGHT + CONTENT_VIEW_INSET,
-      width: Math.max(0, width - CONTENT_VIEW_INSET * 2),
-      height: Math.max(0, height - HEADER_HEIGHT - CONTENT_VIEW_INSET * 2)
+      x: SIDEBAR_WIDTH + CONTENT_VIEW_INSET,
+      y: CONTENT_VIEW_INSET,
+      width: Math.max(0, width - SIDEBAR_WIDTH - CONTENT_VIEW_INSET * 2),
+      height: Math.max(0, height - CONTENT_VIEW_INSET * 2)
     })
   }
 }
