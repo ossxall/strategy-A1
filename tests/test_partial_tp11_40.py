@@ -41,9 +41,9 @@ def assert_tps_through_level_execute_in_order(engine, level, side):
     assert pos.quantity == pytest.approx(remaining)
 
 
-@pytest.mark.parametrize("level", range(11, 31))
+@pytest.mark.parametrize("level", range(11, 41))
 @pytest.mark.parametrize("side", [1, -1])
-def test_tp11_to_tp30_execute_in_order_for_long_and_short(level, side):
+def test_tp11_to_tp40_execute_in_order_for_long_and_short(level, side):
     config = Config(
         timeframe="30min",
         entry_adx_enabled=False,
@@ -90,8 +90,8 @@ def test_tp11_to_tp30_execute_in_order_for_long_and_short(level, side):
     assert engine.trades[-1].exit_price == pytest.approx(target_price)
 
 
-@pytest.mark.parametrize("level", range(11, 31))
-def test_tp11_to_tp20_defaults_and_validation(level):
+@pytest.mark.parametrize("level", range(11, 41))
+def test_tp11_to_tp40_defaults_and_validation(level):
     config = Config()
     assert getattr(config, f"partial_tp{level}_r") == float(level - 1)
     assert getattr(config, f"partial_tp{level}_pct") == 5.0
