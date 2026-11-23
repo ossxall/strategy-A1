@@ -185,7 +185,7 @@ class Config:
     partial_tp_enabled: bool = True
     
     partial_tp_r: float = 0.5
-    partial_tp_pct: float = 5.0
+    partial_tp_pct: float = 10.0
     partial_tp2_r: float = 1.0
     partial_tp2_pct: float = 5.0
     partial_tp3_r: float = 2.0
