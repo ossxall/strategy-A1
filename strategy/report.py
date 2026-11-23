@@ -583,19 +583,14 @@ def build_backtest_figure(
 
     adx_panels = [f"adx_tf_{i}" for i in range(len(adx_tfs))]
 
-    entry_adx_series: list[tuple[str | None, str, str | None]] = []
+    entry_adx_series: list[tuple[str | None, str]] = []
     if cfg.entry_adx_enabled and signals is not None:
         for idx, timeframe in enumerate(cfg.entry_adx_timeframes):
             column = f"adx_entry_{timeframe}"
             if column not in signals and idx == 0 and "adx_entry" in signals:
                 column = "adx_entry"
             if column in signals and np.isfinite(signals[column].to_numpy(float)).any():
-                reversal_column = f"entry_adx_reversal_{timeframe}"
-                entry_adx_series.append((
-                    timeframe,
-                    column,
-                    reversal_column if reversal_column in signals else None,
-                ))
+                entry_adx_series.append((timeframe, column))
     adx_entry_panels = [f"adx_entry_tf_{i}" for i in range(len(entry_adx_series))]
 
     summary_rows: list[tuple[str, float, int, int]] = []
@@ -996,7 +991,7 @@ def build_backtest_figure(
 
     # -- Paneles ADX de entrada (uno por timeframe) -------------------------
     adx_colors = (NEUTRAL_COLOR, "#ffca28", "#ab47bc", "#26a69a")
-    for panel_idx, (timeframe, column, reversal_column) in enumerate(entry_adx_series):
+    for panel_idx, (timeframe, column) in enumerate(entry_adx_series):
         panel_name = f"adx_entry_tf_{panel_idx}"
         if panel_name not in row:
             continue
@@ -1016,26 +1011,6 @@ def build_backtest_figure(
             row=rr,
             col=1,
         )
-        if reversal_column is not None:
-            reversal_flags = _flag(signals[reversal_column])
-            if reversal_flags.any():
-                reversal_label = (
-                    f"reversión ADX entrada {timeframe}"
-                    if timeframe is not None
-                    else "reversión ADX entrada"
-                )
-                fig.add_trace(
-                    _marker_trace(
-                        sig_x[reversal_flags],
-                        adx_values[reversal_flags],
-                        reversal_label,
-                        "circle",
-                        color,
-                        9,
-                    ),
-                    row=rr,
-                    col=1,
-                )
         if cfg.entry_adx_enabled and cfg.entry_adx_min:
             fig.add_hline(y=cfg.entry_adx_min, line=dict(color="#90a4ae", width=0.9, dash="dash"),
                           row=rr, col=1)

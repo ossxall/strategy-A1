@@ -89,7 +89,7 @@ def test_monthly_backtest_html_renders_isolated_panels_per_page(tmp_path, monkey
     assert first_page["figure"]["data"]
 
 
-def test_entry_adx_timeframes_have_separate_panels_with_reversal_circles():
+def test_entry_adx_timeframes_have_separate_panels_without_reversal_markers():
     index = pd.date_range("2024-01-01", periods=4, freq="30min", tz="UTC")
     bars = pd.DataFrame(
         {
@@ -104,9 +104,7 @@ def test_entry_adx_timeframes_have_separate_panels_with_reversal_circles():
     signals = pd.DataFrame(
         {
             "adx_entry_30min": [18.0, 22.0, 24.0, 23.0],
-            "entry_adx_reversal_30min": [False, False, True, False],
             "adx_entry_1h": [np.nan, 22.0, 25.0, 24.0],
-            "entry_adx_reversal_1h": [False, False, False, True],
             "entry_gaussian_trend_line": [100.0, 101.0, 102.0, 103.0],
             "entry_gaussian_trend_dir": [1, 1, -1, -1],
         },
@@ -134,15 +132,7 @@ def test_entry_adx_timeframes_have_separate_panels_with_reversal_circles():
     traces = {trace.name: trace for trace in figure.data}
     assert "ADX entrada 30min" in traces
     assert "ADX entrada 1h" in traces
-    for timeframe, reversal_index in (("30min", 2), ("1h", 3)):
-        marker = traces[f"reversión ADX entrada {timeframe}"]
-        line = traces[f"ADX entrada {timeframe}"]
-        assert marker.marker.symbol == "circle"
-        assert list(marker.x) == [
-            int(index[reversal_index].timestamp() * 1000)
-        ]
-        assert marker.xaxis == line.xaxis
-        assert marker.yaxis == line.yaxis
+    assert not any("reversión ADX entrada" in name for name in traces)
     assert traces["ADX entrada 30min"].xaxis != traces["ADX entrada 1h"].xaxis
 
 

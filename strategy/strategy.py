@@ -81,8 +81,6 @@ from strategy.indicators import (
     gaussian_filter_trend,
     confirmed_crosses,
     align_closed_values,
-    align_closed_events,
-    adx_reversal_flags,
     build_adx_exit,
     build_rsi_divergence_signals,
     build_rsi_divergence_exit_signals,
@@ -321,20 +319,14 @@ class EMACrossStrategy:
             up &= ema_cross_gap_allowed
             down &= ema_cross_gap_allowed
         entry_adx_by_timeframe: dict[str, np.ndarray] = {}
-        entry_adx_reversals_by_timeframe: dict[str, np.ndarray] = {}
-        entry_adx_reversal_by_timeframe: dict[str, np.ndarray] = {}
         if cfg.entry_adx_enabled:
             for timeframe in cfg.entry_adx_timeframes:
                 source = self._entry_adx_source(bars, raw, timeframe)
                 source_values = adx(
                     source, cfg.entry_adx_len, cfg.entry_adx_len
                 )["adx"].to_numpy(float)
-                source_reversals = adx_reversal_flags(
-                    source_values, cfg.entry_adx_min
-                )
                 if pd.Timedelta(timeframe) == pd.Timedelta(cfg.timeframe):
                     values = source_values
-                    reversals = source_reversals
                 else:
                     values = align_closed_values(
                         source.index,
@@ -344,28 +336,12 @@ class EMACrossStrategy:
                         cfg.timeframe,
                         fill=np.nan,
                     )
-                    reversals = align_closed_events(
-                        source.index,
-                        source_reversals,
-                        bars.index,
-                        timeframe,
-                        cfg.timeframe,
-                    )
                 entry_adx_by_timeframe[timeframe] = values
-                entry_adx_reversals_by_timeframe[timeframe] = reversals
-                entry_adx_reversal_by_timeframe[timeframe] = (
-                    spread_flags(reversals, cfg.entry_adx_reversal_lookback)
-                    if cfg.entry_adx_reversal_lookback > 0
-                    else np.zeros(len(bars), dtype=bool)
-                )
         # Alias histórico: conserva el ADX del primer timeframe configurado.
         entry_adx = (
             next(iter(entry_adx_by_timeframe.values()))
             if entry_adx_by_timeframe else np.full(len(bars), np.nan)
         )
-        entry_adx_reversal_blocked = np.zeros(len(bars), dtype=bool)
-        for blocked in entry_adx_reversal_by_timeframe.values():
-            entry_adx_reversal_blocked |= blocked
         if cfg.entry_atr_enabled:
             atr_filter = atr_volatility_filter(
                 bars,
@@ -503,12 +479,6 @@ class EMACrossStrategy:
             for values in entry_adx_by_timeframe.values():
                 allowed &= np.isfinite(values) & (values > cfg.entry_adx_min)
             record_rejection(candidate_up & ~allowed, candidate_down & ~allowed, "ADX")
-            record_rejection(
-                candidate_up & entry_adx_reversal_blocked,
-                candidate_down & entry_adx_reversal_blocked,
-                "reversión ADX reciente",
-            )
-            allowed &= ~entry_adx_reversal_blocked
             up, down = up & allowed, down & allowed
         if cfg.entry_atr_enabled:
             record_rejection(
@@ -547,7 +517,6 @@ class EMACrossStrategy:
             "ema_fast": fast, "ema_slow": slow, "macd_line": macd_line,
             "ema_cross_gap_atr": ema_cross_gap_atr,
             "adx_entry": entry_adx,
-            "entry_adx_reversal_blocked": entry_adx_reversal_blocked,
             "atr": entry_atr,
             "atr_mean": entry_atr_mean,
             "atr_ratio": entry_atr_ratio,
@@ -580,9 +549,6 @@ class EMACrossStrategy:
         }
         for timeframe, values in entry_adx_by_timeframe.items():
             output[f"adx_entry_{timeframe}"] = values
-            output[f"entry_adx_reversal_{timeframe}"] = (
-                entry_adx_reversals_by_timeframe[timeframe]
-            )
         return pd.DataFrame(output, index=bars.index)
 
     def prepare_exits(self, raw: pd.DataFrame, bars: pd.DataFrame) -> tuple[
