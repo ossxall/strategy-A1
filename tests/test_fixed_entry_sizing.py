@@ -6,6 +6,19 @@ from strategy.config import Config
 from strategy.strategy import Backtester
 
 
+def test_futures_defaults_to_ten_usdt_margin_at_ten_x():
+    config = Config()
+
+    assert config.initial_capital == pytest.approx(100.0)
+    assert config.risk_pct == pytest.approx(0.01)
+    # A 1% stop on a $100 position risks $1; at 10x the margin is $10.
+    risk_budget = config.initial_capital * config.risk_pct
+    notional = risk_budget / config.stop_loss_pct
+    assert risk_budget == pytest.approx(1.0)
+    assert notional == pytest.approx(100.0)
+    assert notional / 10 == pytest.approx(10.0)
+
+
 def test_entry_sizing_uses_fixed_base_risk_without_multipliers():
     index = pd.date_range("2026-01-01", periods=2, freq="30min", tz="UTC")
     bars = pd.DataFrame(

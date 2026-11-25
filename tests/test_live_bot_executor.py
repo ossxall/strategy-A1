@@ -458,11 +458,11 @@ def test_strategy_has_no_leverage_setting_and_executor_owns_binance_leverage(
     assert settings.leverage == 37
 
 
-def test_executor_leverage_defaults_to_50(monkeypatch):
+def test_executor_leverage_defaults_to_10(monkeypatch):
     monkeypatch.delenv("BOT_BINANCE_LEVERAGE", raising=False)
     monkeypatch.setenv("BOT_EXECUTOR_TEST_MODE", "false")
 
-    assert ExecutorSettings.from_env().leverage == 50
+    assert ExecutorSettings.from_env().leverage == 10
 
 
 def test_executor_database_and_heartbeat_default_to_live_data(monkeypatch):
@@ -639,7 +639,7 @@ def test_entry_size_uses_strategy_risk_and_available_leverage(tmp_path):
         store.close()
 
 
-def test_entry_size_uses_full_strategy_risk_pct_without_executor_risk_cap(tmp_path):
+def test_entry_size_uses_ten_usdt_margin_for_hundred_usdt_account(tmp_path):
     class FakeGateway:
         def symbol_configuration(self, symbol):
             assert symbol == "BTCUSDT"
@@ -664,7 +664,7 @@ def test_entry_size_uses_full_strategy_risk_pct_without_executor_risk_cap(tmp_pa
         }
         signal = _entry_event()
         signal["payload"] = json.loads(signal["payload"])
-        signal["payload"]["sizing"]["risk_pct"] = 0.10
+        signal["payload"]["sizing"]["risk_pct"] = 0.01
 
         quantity = worker._entry_quantity(
             signal,
@@ -672,9 +672,10 @@ def test_entry_size_uses_full_strategy_risk_pct_without_executor_risk_cap(tmp_pa
             mark_price=100.0,
         )
 
-        # 10% del equity son 10 USD; con stop del 1%, la entrada usa 10
-        # unidades. No existe un tope de riesgo adicional en el executor.
-        assert quantity == Decimal(10)
+        # 1% de 100 USDT arriesga 1 USDT; con stop del 1% son 100 USDT
+        # nominales (10 USDT de margen a 10x).
+        assert quantity == Decimal(1)
+        assert quantity * Decimal(100) / Decimal(10) == Decimal(10)
     finally:
         store.close()
 

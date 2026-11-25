@@ -57,9 +57,9 @@ class Config:
     #
     allow_short: bool = True
     #
-    # Initial account equity.
+    # Initial Futures account equity (USDT).
     #
-    initial_capital: float = 10_000.0
+    initial_capital: float = 100.0
     #
     # Commission cost in basis points per trade.
     #
@@ -69,9 +69,11 @@ class Config:
     #
     slippage_bps: float = 0.0
     #
-    # Fraction of equity risked per trade.
+    # Fraction of equity risked per trade. With $100 equity and a 1% stop,
+    # 1% risk targets about $100 notional ($10 margin at 10x). Binance filters
+    # are validated by the executor.
     #
-    risk_pct: float = 0.10
+    risk_pct: float = 0.01
     #
     # Stop-loss distance as a fraction of entry price.
     #

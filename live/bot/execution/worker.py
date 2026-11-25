@@ -184,7 +184,7 @@ class ExecutorSettings:
             leverage=(
                 TEST_MODE_MAX_LEVERAGE
                 if test_mode
-                else max(1, env_int("BINANCE_LEVERAGE", 50))
+                else max(1, env_int("BINANCE_LEVERAGE", 10))
             ),
             heartbeat_path=resolve_path(heartbeat) if heartbeat else None,
             signal_db=signal_db,

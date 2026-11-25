@@ -19,9 +19,9 @@ for directory in (REPO_DIR, LIVE_DIR):
 
 SYMBOL = "BTCUSDT"
 SIDE = "LONG"  # "LONG" o "SHORT"
-RISK_PCT = Decimal("0.10")
+RISK_PCT = Decimal("0.01")
 STOP_DISTANCE = Decimal("0.01")
-LEVERAGE = 50
+LEVERAGE = 10
 ENVIRONMENT = "production"
 
 
@@ -369,7 +369,7 @@ def require_isolated(client: Any) -> None:
         )
 
 
-def set_leverage_50(client: Any) -> None:
+def set_target_leverage(client: Any) -> None:
     config = symbol_configuration(client)
     current = first_value(config, "leverage")
     if current is not None and int(current) == LEVERAGE:
@@ -539,13 +539,13 @@ def main() -> int:
         parser = argparse.ArgumentParser(
             description=(
                 "Simula una entrada BTCUSDT en mainnet; con --confirm "
-                "configura 50x y envía MARKET con stop protector del 1%."
+                "configura 10x y envía MARKET con stop protector del 1%."
             )
         )
         parser.add_argument(
             "--confirm",
             action="store_true",
-            help="configura el leverage a 50x y envía la entrada real con stop",
+            help="configura el leverage a 10x y envía la entrada real con stop",
         )
         args = parser.parse_args()
 
@@ -560,7 +560,7 @@ def main() -> int:
         require_one_way_and_flat(client)
         if args.confirm:
             require_isolated(client)
-            set_leverage_50(client)
+            set_target_leverage(client)
         plan = simulate_entry(client, will_send=args.confirm)
         if args.confirm:
             require_one_way_and_flat(client)
