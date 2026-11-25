@@ -42,6 +42,7 @@ from .test_mode_policy import (
     calculate_test_entry_quantity,
     validate_test_order_notional,
 )
+from strategy.config import Config
 
 LOG = logging.getLogger("bot1.executor")
 
@@ -229,6 +230,7 @@ class ExecutionWorker:
         self._heartbeat_path = self.settings.heartbeat_path
         self.health = ExecutionHealth(self.settings)
         self.health.set_worker_id(self.worker_id)
+        self._log_startup_configuration()
 
         if self.settings.environment not in {"testnet", "production"}:
             raise ValueError("BOT_BINANCE_ENVIRONMENT debe ser testnet o production")
@@ -258,6 +260,47 @@ class ExecutionWorker:
                     self.settings.api_secret,
                     self.settings.environment,
                 )
+
+    def _log_startup_configuration(self) -> None:
+        """Registra parámetros operativos y de sizing, nunca credenciales."""
+        strategy = Config()
+        reference_risk = strategy.initial_capital * strategy.risk_pct
+        reference_notional = (
+            reference_risk / strategy.stop_loss_pct
+            if strategy.stop_loss_pct > 0
+            else None
+        )
+        reference_margin = (
+            reference_notional / self.settings.leverage
+            if reference_notional is not None and self.settings.leverage > 0
+            else None
+        )
+        LOG.info(
+            "Configuración executor: enabled=%s test_mode=%s environment=%s "
+            "symbol=%s leverage=%sx | sizing: capital_config=%.2f USDT "
+            "risk=%.2f%% stop=%.2f%% riesgo_ref=%.2f USDT "
+            "nominal_ref=%s margen_ref=%s. La referencia usa capital_config; "
+            "el sizing real usa el balance disponible de Binance.",
+            self.settings.enabled,
+            self.settings.test_mode,
+            self.settings.environment,
+            self.settings.symbol,
+            self.settings.leverage,
+            strategy.initial_capital,
+            strategy.risk_pct * 100,
+            strategy.stop_loss_pct * 100,
+            reference_risk,
+            (
+                f"{reference_notional:.2f} USDT"
+                if reference_notional is not None
+                else "n/d"
+            ),
+            (
+                f"{reference_margin:.2f} USDT"
+                if reference_margin is not None
+                else "n/d"
+            ),
+        )
 
     def _mark_heartbeat(self) -> None:
         path = self._heartbeat_path

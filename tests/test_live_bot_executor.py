@@ -1,4 +1,5 @@
 import json
+import logging
 from decimal import Decimal
 
 import pandas as pd
@@ -463,6 +464,25 @@ def test_executor_leverage_defaults_to_10(monkeypatch):
     monkeypatch.setenv("BOT_EXECUTOR_TEST_MODE", "false")
 
     assert ExecutorSettings.from_env().leverage == 10
+
+
+def test_executor_logs_effective_startup_sizing_without_secrets(
+    tmp_path, caplog
+):
+    with caplog.at_level(logging.INFO, logger="bot1.executor"):
+        ExecutionWorker(
+            _settings(tmp_path, leverage=10),
+            store=None,
+        )
+
+    message = caplog.text
+    assert "environment=testnet" in message
+    assert "symbol=BTCUSDT leverage=10x" in message
+    assert "capital_config=100.00 USDT" in message
+    assert "risk=1.00% stop=1.00%" in message
+    assert "riesgo_ref=1.00 USDT" in message
+    assert "nominal_ref=100.00 USDT margen_ref=10.00 USDT" in message
+    assert "api_secret" not in message
 
 
 def test_executor_database_and_heartbeat_default_to_live_data(monkeypatch):
